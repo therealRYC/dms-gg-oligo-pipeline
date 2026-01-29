@@ -1,0 +1,31 @@
+# Data files
+data/
+*.csv
+*.tsv
+*.fasta
+*.fastq
+*.gz
+
+# Results (regenerable)
+results/
+figures/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*.key
+
