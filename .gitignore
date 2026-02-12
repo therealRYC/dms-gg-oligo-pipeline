@@ -1,31 +1,25 @@
-# Data files
-data/
-*.csv
-*.tsv
-*.fasta
-*.fastq
-*.gz
+# R
+.Rproj.user
+.Rhistory
+.RData
+.Rproj
+*.Rcheck/
+*.tar.gz
 
-# Results (regenerable)
+# Pipeline outputs (regenerable)
+output/
 results/
 figures/
-
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-*.egg-info/
-
-# IDE
-.vscode/
-.idea/
+*.html
 
 # OS
 .DS_Store
 Thumbs.db
 
+# IDE
+.vscode/
+.idea/
+
 # Secrets
 .env
 *.key
-
