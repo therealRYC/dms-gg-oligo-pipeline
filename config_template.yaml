@@ -1,0 +1,55 @@
+# DMS Golden Gate Oligo Pipeline — Configuration Template
+# Copy this file to your project directory and edit as needed.
+
+# --- Required ---
+gene_fasta: "path/to/gene.fasta"          # Path to FASTA file with coding sequence
+
+# --- PolIII Promoter ---
+# Sequence of the PolIII promoter (e.g., U6 with internal T7) placed between
+# the gene and barcode. This drives barcode transcription.
+polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGATAATTAGAATTAATTTGACTGTAAACACAAAGATATTAGTACAAAATACGTGACGTAGAAAGTAATAATTTCTTGGGTAGTTTGCAGTTTTAAAATTATGTTTTAAAATGGACTATCATATGCTTACCGTAACTTGAAAGTATTTCGATTTCTTGGCTTTATATATCTTGTGGAAAGGACGAAACACCG"
+
+# --- Oligo Synthesis ---
+max_oligo_length: 300                      # Twist oligo pool max (nt)
+max_geneblock_length: 1800                 # Gene fragment synthesis max (nt)
+
+# --- Barcode Design ---
+barcode_length: 12                         # Barcode length (nt). Default 12, compatible with OPS.
+                                           # For OPS: shorter barcodes = fewer sequencing cycles needed.
+                                           # Range: 6-30. Longer = more unique barcodes but higher cost.
+min_hamming_distance: 3                    # Minimum Hamming distance between any two barcodes.
+                                           # Higher = better error correction but fewer possible barcodes.
+                                           # For sequencing: 3 allows single-error correction + detection.
+barcode_prefix_length: 8                   # Prefix length for OPS optimization. First k nucleotides
+                                           # are optimized for maximum Hamming distance, critical for
+                                           # optical pooled screening where accuracy degrades with cycles.
+                                           # Must be >= min_hamming_distance. Default 8 for OPS compatibility.
+barcode_gc_range: [0.25, 0.75]             # Acceptable GC content range for barcodes.
+barcode_max_homopolymer: 4                 # Max homopolymer run in barcodes.
+barcodes_per_variant: 1                    # Number of unique barcodes per variant. Default 1.
+                                           # Increase for experimental replication (e.g., 10 for
+                                           # higher-confidence fitness estimates).
+
+# --- Overhang Selection ---
+overhang_fidelity_threshold: 0.95          # Min fidelity score for auto-selected overhangs.
+                                           # Source: NEB Ligase Fidelity Viewer (Potapov 2018, 37C, 18h).
+                                           # Fidelity = M[X][RC(X)] / row_sum (correct Watson-Crick pairing).
+                                           # 0.95 gives ~117 high-fidelity overhangs (more than sufficient).
+                                           # Lower to 0.90 (~186 overhangs) or 0.85 (~224) if needed.
+
+# --- Fixed Overhangs for 3-Enzyme Assembly ---
+# oh3: 4-nt BsmBI overhang at PolIII-barcode junction (same for all tiles)
+# oh4: 4-nt BsaI overhang at barcode-helper plasmid junction (same for all tiles)
+# If not provided, will be auto-selected from high-fidelity NEB data.
+# oh3: "NNNN"
+# oh4: "NNNN"
+
+# --- PaqCI Overhangs (determined by destination vector) ---
+paqci_star2: "NNNN"                        # PaqCI** overhang (5' end of insert)
+paqci_star1: "NNNN"                        # PaqCI* overhang (3' end of insert)
+
+# --- Enzyme Site Domestication ---
+auto_domesticate: true                     # Automatically apply silent mutations to remove sites
+
+# --- Output ---
+output_dir: "output"                       # Directory for output files
