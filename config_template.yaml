@@ -14,16 +14,35 @@ max_oligo_length: 300                      # Twist oligo pool max (nt)
 max_geneblock_length: 1800                 # Gene fragment synthesis max (nt)
 
 # --- Barcode Design ---
-barcode_length: 12                         # Barcode length (nt). Default 12, compatible with OPS.
-                                           # For OPS: shorter barcodes = fewer sequencing cycles needed.
-                                           # Range: 6-30. Longer = more unique barcodes but higher cost.
+ops_mode: false                            # Optical Pooled Screening mode toggle.
+                                           # When true: prefix-optimized short barcodes for OPS.
+                                           #   barcode_length auto-calculated to minimum needed.
+                                           #   Prefix Hamming distance is hard-guaranteed; full-barcode
+                                           #   distance uses a soft tolerance (see below).
+                                           # When false: global Hamming distance guarantee without
+                                           #   prefix/suffix splitting. Longer barcodes for capacity.
+
+barcode_length: 12                         # Barcode length (nt). Range: 6-30.
+                                           # When ops_mode=true: set to "auto" (default) to auto-calculate
+                                           #   minimum length, or specify an explicit integer.
+                                           # When ops_mode=false: default 20 for higher capacity.
+
 min_hamming_distance: 3                    # Minimum Hamming distance between any two barcodes.
-                                           # Higher = better error correction but fewer possible barcodes.
                                            # For sequencing: 3 allows single-error correction + detection.
-barcode_prefix_length: 8                   # Prefix length for OPS optimization. First k nucleotides
-                                           # are optimized for maximum Hamming distance, critical for
-                                           # optical pooled screening where accuracy degrades with cycles.
-                                           # Must be >= min_hamming_distance. Default 8 for OPS compatibility.
+
+barcode_prefix_length: 8                   # Prefix length for OPS optimization (only used when
+                                           # ops_mode=true). First k nucleotides are optimized for
+                                           # maximum Hamming distance, critical for optical pooled
+                                           # screening where accuracy degrades with cycles.
+                                           # Must be >= min_hamming_distance.
+
+barcode_capacity_tolerance: 0.99           # OPS mode soft Hamming constraint: fraction of all barcode
+                                           # pairs that must have Hamming distance >= min_hamming_distance.
+                                           # 0.99 = up to 1% of pairs may have lower distance.
+                                           # Prefix distances are always hard-guaranteed; only within-
+                                           # prefix-group pairs (sharing the same prefix) can violate.
+                                           # Ignored in non-OPS mode (hard constraint always).
+
 barcode_gc_range: [0.25, 0.75]             # Acceptable GC content range for barcodes.
 barcode_max_homopolymer: 4                 # Max homopolymer run in barcodes.
 barcodes_per_variant: 1                    # Number of unique barcodes per variant. Default 1.
