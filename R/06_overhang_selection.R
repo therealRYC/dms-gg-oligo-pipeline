@@ -524,13 +524,19 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
 #' @param hf_set High-fidelity overhang set
 #' @param oh_fidelity Fidelity data frame
 #' @param search_window Search window in codons (default 50)
+#' @param extra_content_length Additional content appended to the last sub-block
+#'   (e.g., PolIII promoter length for 3'WT blocks) that isn't part of the gene
+#'   region but must be counted for sizing. Default 0.
 #' @return Data frame with split positions and junction overhangs
 optimize_split_points <- function(cds, block_start_nt, block_end_nt,
                                    max_sub_length, existing_ohs,
                                    hf_set, oh_fidelity,
-                                   search_window = 50L) {
-  block_length <- block_end_nt - block_start_nt + 1L
-  if (block_length <= max_sub_length) {
+                                   search_window = 50L,
+                                   extra_content_length = 0L) {
+  gene_block_length <- block_end_nt - block_start_nt + 1L
+  total_block_length <- gene_block_length + extra_content_length
+
+  if (total_block_length <= max_sub_length) {
     return(data.frame(
       split_nt = integer(0), junction_oh = character(0),
       junction_in_hf = logical(0), junction_fidelity = numeric(0),
@@ -545,49 +551,74 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
   junction_overhead <- 22L  # 2 x 11-nt enzyme sites
   effective_max <- max_sub_length - junction_overhead
 
-  n_splits <- ceiling(block_length / effective_max) - 1L
+  n_splits <- ceiling(total_block_length / effective_max) - 1L
   if (n_splits < 1L) n_splits <- 1L
-  target_sub_size <- block_length / (n_splits + 1L)
 
   existing_set <- unique(c(existing_ohs, vapply(existing_ohs, reverse_complement, character(1))))
-  splits <- list()
 
-  for (s in seq_len(n_splits)) {
-    center_nt <- block_start_nt + as.integer(s * target_sub_size)
-    # Convert to codon boundary
-    center_codon <- center_nt %/% 3L
+  # Search for split points, validating sub-block sizes; retry with more splits
+  # if the search window drift causes any sub-block to exceed the limit
+  max_retry <- 3L
+  for (retry in seq_len(max_retry)) {
+    target_sub_size <- gene_block_length / (n_splits + 1L)
+    local_existing <- existing_set
+    splits <- list()
 
-    lo_codon <- max((block_start_nt %/% 3L) + 5L, center_codon - search_window)
-    hi_codon <- min((block_end_nt %/% 3L) - 5L, center_codon + search_window)
+    for (s in seq_len(n_splits)) {
+      center_nt <- block_start_nt + as.integer(s * target_sub_size)
+      center_codon <- center_nt %/% 3L
 
-    best <- list(pos = center_codon * 3L, oh = "NNNN", in_hf = FALSE, fid = 0, score = -1)
+      lo_codon <- max((block_start_nt %/% 3L) + 5L, center_codon - search_window)
+      hi_codon <- min((block_end_nt %/% 3L) - 5L, center_codon + search_window)
 
-    for (C in lo_codon:hi_codon) {
-      split_nt <- C * 3L
-      junction_oh <- substring(cds, split_nt - 3L, split_nt)
+      best <- list(pos = center_codon * 3L, oh = "NNNN", in_hf = FALSE, fid = 0, score = -1)
 
-      if (junction_oh %in% existing_set) next  # collision
+      for (C in lo_codon:hi_codon) {
+        split_nt <- C * 3L
+        junction_oh <- substring(cds, split_nt - 3L, split_nt)
 
-      in_hf <- junction_oh %in% hf_set
-      fid <- if (junction_oh %in% names(fid_lookup)) unname(fid_lookup[junction_oh]) else 0.5
-      score <- 10 * in_hf + fid
+        if (junction_oh %in% local_existing) next  # collision
 
-      if (score > best$score) {
-        best <- list(pos = split_nt, oh = junction_oh, in_hf = in_hf, fid = fid, score = score)
+        in_hf <- junction_oh %in% hf_set
+        fid <- if (junction_oh %in% names(fid_lookup)) unname(fid_lookup[junction_oh]) else 0.5
+        score <- 10 * in_hf + fid
+
+        if (score > best$score) {
+          best <- list(pos = split_nt, oh = junction_oh, in_hf = in_hf, fid = fid, score = score)
+        }
+      }
+
+      local_existing <- c(local_existing, best$oh, reverse_complement(best$oh))
+
+      splits[[s]] <- data.frame(
+        split_nt = best$pos, junction_oh = best$oh,
+        junction_in_hf = best$in_hf, junction_fidelity = best$fid,
+        stringsAsFactors = FALSE
+      )
+    }
+
+    result <- do.call(rbind, splits)
+
+    # Validate that all sub-blocks are within the size limit
+    split_positions <- sort(result$split_nt)
+    boundaries <- c(block_start_nt, split_positions, block_end_nt)
+    all_ok <- TRUE
+    for (j in seq_len(length(boundaries) - 1L)) {
+      sub_content <- boundaries[j + 1L] - boundaries[j]
+      # Last sub-block carries the extra content (e.g., PolIII promoter)
+      if (j == length(boundaries) - 1L) {
+        sub_content <- sub_content + extra_content_length
+      }
+      if (sub_content > max_sub_length) {
+        all_ok <- FALSE
+        break
       }
     }
 
-    # Add to exclusion set
-    existing_set <- c(existing_set, best$oh, reverse_complement(best$oh))
-
-    splits[[s]] <- data.frame(
-      split_nt = best$pos, junction_oh = best$oh,
-      junction_in_hf = best$in_hf, junction_fidelity = best$fid,
-      stringsAsFactors = FALSE
-    )
+    if (all_ok) break
+    n_splits <- n_splits + 1L  # Need more splits; retry
   }
 
-  result <- do.call(rbind, splits)
   rownames(result) <- NULL
   result
 }
@@ -747,7 +778,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       splits <- optimize_split_points(
         cds, wt3_start, gene_len,
         max_block_length - block_overhead, existing_ohs,
-        hf_set, oh_fidelity
+        hf_set, oh_fidelity,
+        extra_content_length = polIII_len
       )
       if (nrow(splits) > 0) {
         splits$block_type <- "bsmbi_3wt"

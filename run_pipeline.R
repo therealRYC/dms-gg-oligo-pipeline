@@ -26,8 +26,9 @@ if (length(args) < 1) {
 config_path <- args[1]
 
 # --- Source all modules ---
-pipeline_dir <- dirname(sys.frame(1)$ofile %||% ".")
-if (pipeline_dir == ".") pipeline_dir <- getwd()
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+script_path <- tryCatch(sys.frame(1)$ofile, error = function(e) NULL)
+pipeline_dir <- if (!is.null(script_path)) dirname(script_path) else getwd()
 
 source(file.path(pipeline_dir, "R", "constants.R"))
 source(file.path(pipeline_dir, "R", "utils.R"))
