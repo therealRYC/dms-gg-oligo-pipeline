@@ -1,158 +1,285 @@
-# Overhang Strategy Refactoring Plan
+# Overhang Strategy Refactoring Plan (v2)
 
 > **Branch**: `claude/refine-overhang-strategy-Hd3Q9`
-> **Scope**: Refactor overhang selection to use pre-validated high-fidelity sets,
-> full 256x256 pairwise ligation matrices, reaction-scoped planning, and
-> integrated superblock split-point optimization.
+> **Scope**: Refactor tiling + overhang selection into an integrated system that
+> dynamically searches tile boundaries for high-fidelity overhangs, uses
+> Potapov Set 2 pre-validated overhangs, and validates with 256x256 pairwise
+> ligation matrices.
 > **Relates to**: T3 (Fix Overhang Selection), T7 (Superblock Reuse), T9 (Fidelity Threshold)
 
 ---
 
 ## 1. Problem Statement
 
-The current overhang selection has three fundamental issues:
+### 1.1 Tiling is overhang-blind
+The current pipeline fixes tile boundaries by pure geometry (even spacing at
+`max_mutable_codons`), then extracts whatever 4-nt overhangs happen to fall at
+those positions. This is backwards. The gene sequence at each candidate boundary
+position yields a specific 4-nt overhang, and shifting the boundary by even one
+codon produces a completely different overhang. We should **search** candidate
+boundary positions for ones where the gene-derived overhang is already in a
+pre-validated high-fidelity set.
 
-### 1.1 Individual fidelity instead of set-level validation
-The current code selects overhangs based on **individual** fidelity scores (the diagonal
-of the ligation matrix: `fidelity = M[X][RC(X)] / sum(M[X][*])`). This tells you how
-faithfully an overhang ligates with its correct complement, but says nothing about
-**cross-reactivity** between overhangs in the same reaction. Two overhangs can each have
-0.98 individual fidelity but still cross-ligate at 5% because they happen to be similar.
+### 1.2 Individual fidelity instead of set-level validation
+The current code uses individual fidelity scores (diagonal of the ligation matrix).
+This doesn't capture cross-reactivity between overhangs in the same reaction.
+We need the full 256x256 pairwise ligation matrix for set-level validation.
 
-What's needed: the full 256x256 pairwise ligation frequency matrix, where `M[X][Y]`
-gives the ligation frequency of overhang X with the reverse complement of overhang Y.
-Set-level fidelity is then computed as the product of correct-pairing probabilities
-across all overhangs in one reaction.
+### 1.3 Module separation creates blind spots
+Overhang planning is split across `05_tiling.R`, `06_overhang_selection.R`, and
+`09_wt_geneblock_design.R`. These modules make decisions without seeing each
+other's constraints.
 
-### 1.2 Module separation creates blind spots
-The current pipeline separates overhang planning across three modules:
-- `05_tiling.R`: computes superblock boundaries → gene-derived junction overhangs
-- `06_overhang_selection.R`: selects oh3, oh4 → freely chosen overhangs
-- `09_wt_geneblock_design.R`: `apply_superblock_splitting()` → selects MORE junction
-  overhangs independently
-
-This means oh3/oh4 are selected without knowing how many superblock junction overhangs
-will end up in the same reaction, and the superblock splitting in module 09 selects
-overhangs without considering the choices already made in module 06.
-
-### 1.3 Superblock junction overhangs are incorrectly free-selected
+### 1.4 Superblock junction overhangs are incorrectly free-selected
 In `apply_superblock_splitting()` (`09_wt_geneblock_design.R:336-421`), junction
-overhangs are selected from the high-fidelity pool as if they're freely choosable.
-But in Golden Gate assembly, the junction overhang at a split point **must be the 4 nt
-of gene sequence at that position**. Both sub-blocks include this 4-nt sequence at their
-boundary; after enzyme digestion and ligation, the junction is seamless. Freely-selected
-overhangs would insert 4 non-gene nucleotides at each junction, corrupting the reading
-frame.
+overhangs are freely selected from the high-fidelity pool. But Golden Gate junction
+overhangs at a split point **must be the 4 nt of gene sequence at that position**.
+Both sub-blocks include this 4-nt sequence at their boundary; after enzyme digestion
+and ligation, the junction is seamless. Freely-selected overhangs would insert
+4 non-gene nucleotides at each junction, corrupting the reading frame.
 
 ---
 
-## 2. Design Principles
+## 2. Key Design Decisions
 
-### 2.1 Overhangs are reaction-scoped
+### 2.1 Use Potapov 2018 Set 2 (non-MoClo-constrained)
+
+**Decision**: Use Potapov et al. 2018 Table 1, Set 2 (non-MoClo) as the default
+pre-validated high-fidelity overhang set. NOT MoClo overhangs.
+
+**Rationale**:
+- MoClo overhangs are standardized for modular plant/yeast assembly — they include
+  biologically-conventional positions (e.g., AATG at start codons) that have mediocre
+  fidelity. We don't need MoClo compatibility.
+- Potapov Set 2 is computationally optimized purely for mutual fidelity:
+  - 20 overhangs at ~98.1% set-level fidelity
+  - 10-member subset at >99% fidelity
+- For pairwise validation matrices, use **enzyme-specific** data from Pryor et al. 2020:
+  BsaI-specific matrix for BsaI reactions, BsmBI-specific for BsmBI reactions.
+
+### 2.2 Overhangs are reaction-scoped
+
 Overhangs only need to be mutually orthogonal **within a single enzyme reaction**.
-Different reactions can reuse overhangs safely because each enzyme only cuts its own
-recognition sites.
 
 Per-tile reactions and their overhangs:
 
-**BsaI reaction (Level 1)** for tile i:
-| Overhang | Source | Selectable? |
-|----------|--------|-------------|
-| oh_L     | First 4 nt of gene (or superblock boundary) | Gene-derived |
-| 5'WT superblock junction(s) | 4 nt at split point(s) in 5'WT | Gene-derived (split point choosable) |
-| oh1_i    | 4 nt at tile i's 5' boundary | Gene-derived |
-| oh4      | Barcode-helper junction | Freely selectable |
+| Reaction | Overhangs | Notes |
+|----------|-----------|-------|
+| **BsaI** (tile i) | oh_L, [5'WT superblock junctions], oh1_i, oh4 | oh_L = first 4 nt of gene (fixed). oh4 = freely selectable. |
+| **BsmBI** (tile i) | oh2_i, [3'WT superblock junctions], oh3 | oh3 = freely selectable. |
 
-**BsmBI reaction (Level 1b)** for tile i:
-| Overhang | Source | Selectable? |
-|----------|--------|-------------|
-| oh2_i    | 4 nt at tile i's 3' boundary | Gene-derived |
-| 3'WT superblock junction(s) | 4 nt at split point(s) in 3'WT | Gene-derived (split point choosable) |
-| oh3      | PolIII-barcode junction | Freely selectable |
+**Implication**: oh3 (BsmBI) and oh4 (BsaI) are in different reactions, so they
+CAN be the same sequence. oh1 values across tiles are in different reactions, so
+they CAN repeat. The only cross-tile constraint is that oh4 must be orthogonal to
+ALL oh1 values (since oh4 appears in every tile's BsaI reaction), and oh3 must be
+orthogonal to ALL oh2 values.
 
-**Implication**: oh3 and oh4 are in different reactions, so they **could** be the same
-sequence. The current code unnecessarily requires them to be different. (We may still
-want them different for clarity/robustness, but it's not a hard constraint.)
+### 2.3 Dynamic tile boundary search — not "tile then score"
 
-### 2.2 Gene-derived overhangs constrain the design
-oh1, oh2, and oh_L are determined by tile boundaries — fixed once tiling is done.
-Superblock junction overhangs are gene-derived at the split point, but you CAN choose
-WHERE to split (within the block region that needs splitting), giving some optimization
-freedom.
+The fundamental shift: **tile boundaries are flexible within a search window**.
+Instead of fixing boundaries geometrically and hoping the overhangs are good,
+we search candidate boundary positions for ones where the gene-derived overhangs
+(oh1 and oh2) are members of the pre-validated high-fidelity set.
 
-Only oh3 and oh4 are truly freely selectable.
+**Why this works**: At each candidate boundary codon B, the overhangs are:
+- oh2 (upstream tile's 3' end) = `gene[(B*3)-3 .. B*3]`
+- oh1 (downstream tile's 5' start) = `gene[(B*3)+1 .. (B*3)+4]`
 
-### 2.3 Two-tier selection with mandatory pairwise validation
+Shifting B by 1 codon shifts both overhangs by 3 nt, producing completely different
+4-nt sequences. In a search window of ±15 codons (30 candidates), with a 20-member
+set, the probability that at least one candidate produces an overhang in the set is:
+`1 - (1 - 20/256)^30 ≈ 1 - 0.922^30 ≈ 91%` per overhang.
 
-**Tier 1 (Default): Pre-validated high-fidelity sets**
-- Potapov et al. 2018 Table 1 provides experimentally validated overhang sets:
-  - 10-fragment set: >99% predicted fidelity
-  - 20-fragment set: ~98.1% predicted fidelity
-  - 25-fragment set: ~97% predicted fidelity
-- For the 2 freely-selectable overhangs (oh3, oh4): pick from the pre-validated set
-- For typical genes, max overhangs per reaction = 3-6 (well within 10-member set)
+For both oh1 AND oh2 to be in the set at the same position: lower probability, but
+the algorithm prioritizes "at least one in set" over "neither in set."
 
-**Tier 2 (Fallback): Full pairwise matrix selection**
-- Used when: pre-validated set exhausted, or gene-derived overhangs have poor
-  compatibility scores in the matrix
-- Greedy selection maximizing set-level fidelity using the 256x256 matrix
+### 2.4 Two-tier approach with mandatory pairwise validation
 
-**Always: Per-reaction pairwise validation**
-- After ALL overhangs are determined (gene-derived + selected), validate every
-  reaction's overhang set using the full pairwise matrix
-- Report predicted set-level fidelity per reaction
-- Warn if any pairwise cross-reactivity exceeds threshold
-
-### 2.4 Superblock split-point optimization uses pairwise matrix
-Instead of the current broken approach (split at arbitrary positions, select free
-overhangs), the new approach:
-1. Identify candidate split points on codon boundaries within the oversized block
-2. At each candidate, extract the 4-nt gene-derived junction overhang
-3. Score each candidate using the pairwise matrix (compatibility with all other
-   overhangs in that reaction)
-4. Choose split point(s) that maximize reaction-level fidelity
+**Tier 1 (Default)**: Search boundaries for HF set membership → select oh3/oh4 from set
+**Tier 2 (Fallback)**: If HF set can't satisfy constraints, score all candidates
+using the 256x256 pairwise matrix and pick the best available
+**Always**: Validate every reaction's complete overhang set using the pairwise matrix
 
 ---
 
-## 3. Data Requirements
+## 3. The Algorithm
 
-### 3.1 Pre-validated overhang sets (NEW)
-Bundle the specific overhang sets from Potapov et al. 2018 Table 1.
+### 3.1 Overview
 
-Source: Table 1 of Potapov et al. 2018 (ACS Synth Bio, DOI: 10.1021/acssynbio.8b00333)
+```
+Phase 1: Compute search space (ideal layout + windows)
+Phase 2: Score every candidate boundary position
+Phase 3: Greedy forward assignment of boundaries
+Phase 4: Select oh3, oh4 from HF set (excluding committed oh1/oh2 values)
+Phase 5: Superblock split-point optimization (same search strategy)
+Phase 6: Per-reaction pairwise validation
+```
 
-These are stored as character vectors of 4-nt overhangs. Each set has been validated
-for minimal mutual cross-reactivity.
+### 3.2 Phase 1: Compute search space
 
-**Sets to bundle:**
-- Set 2 (non-MoClo, 20 overhangs): General-purpose, ~98.1% fidelity
-- 10-overhang subset: >99% fidelity (for most pipeline use cases)
-- Optionally: Set 1 (MoClo-constrained, 20 overhangs) for users with MoClo compatibility needs
+```
+INPUT:
+  cds              — domesticated gene sequence
+  max_mutable_nt   — from compute_max_tile_size() (e.g., 243 nt = 81 codons)
+  min_mutable_nt   — minimum tile size (e.g., max/3 = 81 nt = 27 codons)
+  search_window_K  — ±K codons around ideal boundary (default 15)
 
-### 3.2 Full 256x256 pairwise ligation matrices (NEW)
-Replace the current 256x1 fidelity vectors with full 256x256 matrices.
+COMPUTE:
+  n_codons = nchar(cds) / 3
+  max_codons = max_mutable_nt / 3
+  min_codons = min_mutable_nt / 3
+  n_tiles = ceiling(n_codons / max_codons)
+  ideal_size = ceiling(n_codons / n_tiles)   # even distribution
+  ideal_boundaries = [ideal_size, 2*ideal_size, ..., (n_tiles-1)*ideal_size]
+```
 
-Source: Supplementary data from Potapov 2018, repackaged via the `tatapov` Python
-package (Edinburgh Genome Foundry). Also Pryor et al. 2020 for enzyme-specific data.
+### 3.3 Phase 2: Score candidate boundary positions
 
-**Matrices to bundle:**
-- `potapov_18h_pairwise.rds`: T4 DNA Ligase, 37C, 18h (256x256 named matrix)
-- `bsai_pairwise.rds`: BsaI-specific, 37C, 1h (256x256)
-- `bsmbi_pairwise.rds`: BsmBI-specific, 37C, 1h (256x256)
+For each boundary i (i = 1..n_tiles-1):
 
-Matrix format: `M[i,j]` = ligation frequency of overhang i with RC(overhang j).
-Diagonal `M[i,i]` should dominate (correct pairing). Off-diagonal = cross-reactivity.
+```
+  center = ideal_boundaries[i]
 
-**Deriving individual fidelity from the matrix:**
-`fidelity(X) = M[X][X] / sum(M[X][*])` (probability of correct Watson-Crick pairing)
+  # Window limits: ensure adjacent tiles stay within [min, max] size
+  prev_end = boundaries[i-1].pos  (or 0 for first boundary)
+  lo = max(prev_end + min_codons, center - K)
+  hi = min(n_codons - min_codons, center + K)    # leave room for last tile
 
-This means the existing individual fidelity data can be derived from the matrix,
-so the matrix is a strict superset. We can keep the individual fidelity vectors for
-backward compatibility / fast filtering.
+  For B in lo..hi:
+    oh2_B = substring(cds, B*3 - 3, B*3)          # last 4 nt if upstream tile ends at codon B
+    oh1_next_B = substring(cds, B*3 + 1, B*3 + 4) # first 4 nt if downstream tile starts at codon B+1
 
-### 3.3 Backward compatibility
-Keep the existing 256x1 fidelity data files (`potapov_18h_overhangs.rds`, etc.) for
-any code that still uses individual fidelity scores (e.g., initial candidate filtering).
+    oh2_in_hf = oh2_B %in% hf_set
+    oh1_in_hf = oh1_next_B %in% hf_set
+    oh2_fid = individual_fidelity(oh2_B)     # from 256-overhang fidelity table
+    oh1_fid = individual_fidelity(oh1_next_B)
+
+    # Composite score:
+    #   Priority 1: both in HF set (20 points)
+    #   Priority 2: one in HF set (10 points)
+    #   Priority 3: sum of individual fidelities (0-2 points, tiebreaker)
+    score = 10 * (oh2_in_hf + oh1_in_hf) + oh2_fid + oh1_fid
+
+    candidates[i].append({pos=B, oh2=oh2_B, oh1_next=oh1_next_B,
+                          oh2_in_hf, oh1_in_hf, score})
+
+  Sort candidates[i] by score descending
+```
+
+### 3.4 Phase 3: Greedy forward assignment
+
+```
+  oh_L = substring(cds, 1, 4)    # fixed: first 4 nt of gene
+  assigned_boundaries = []
+
+  For i in 1..(n_tiles-1):
+    For cand in candidates[i]:   # iterate in score order (best first)
+      # HARD CONSTRAINT: oh1_next must not collide with oh_L
+      # (oh_L is in every BsaI reaction; oh1_next will also be in its tile's BsaI reaction)
+      oh1_ok = (cand.oh1_next != oh_L) &&
+               (cand.oh1_next != RC(oh_L))
+
+      # HARD CONSTRAINT: tile sizes must stay within [min, max]
+      prev_boundary = if (i == 1) 0 else assigned_boundaries[i-1].pos
+      tile_before_size = (cand.pos - prev_boundary) * 3
+      size_ok = (tile_before_size >= min_mutable_nt) &&
+                (tile_before_size <= max_mutable_nt)
+
+      # Also check last tile won't be too small
+      if (i == n_tiles - 1):
+        last_tile_size = (n_codons - cand.pos) * 3
+        size_ok = size_ok && (last_tile_size >= min_mutable_nt)
+
+      If (oh1_ok && size_ok):
+        assigned_boundaries[i] = cand
+        break
+
+    If boundary i not assigned:
+      # Relax: take best-scoring candidate that satisfies size constraints
+      assigned_boundaries[i] = first candidate satisfying size_ok only
+```
+
+### 3.5 Phase 4: Select oh3 and oh4 from HF set
+
+```
+  # Collect all committed gene-derived overhangs
+  all_oh1 = {oh_L} ∪ {boundary.oh1_next for each boundary}
+  # Also include oh1 of first tile = oh_L (already in set)
+  # Also include oh2 of last tile = last 4 nt of gene (fixed)
+  oh2_last = substring(cds, nchar(cds)-3, nchar(cds))
+  all_oh2 = {boundary.oh2 for each boundary} ∪ {oh2_last}
+  # oh2 of first tile boundary:
+  oh2_first = oh2 extracted from first tile's end position (assigned_boundaries[1].oh2
+              or the full gene end if single tile)
+
+  # Select oh4: must be orthogonal to ALL oh1 values in BsaI reactions
+  oh4_exclude = all_oh1 ∪ RC(all_oh1)
+  oh4_candidates = hf_set \ oh4_exclude
+  oh4 = highest-fidelity member of oh4_candidates
+
+  # Select oh3: must be orthogonal to ALL oh2 values in BsmBI reactions
+  oh3_exclude = all_oh2 ∪ RC(all_oh2)
+  oh3_candidates = hf_set \ oh3_exclude
+  oh3 = highest-fidelity member of oh3_candidates
+
+  # oh3 and oh4 CAN be the same sequence (different reactions)
+
+  # VERIFY: for each tile, oh1 ≠ oh4 and oh2 ≠ oh3 (and their RCs)
+  # If violation found: try next-best oh3/oh4 candidate
+```
+
+### 3.6 Phase 5: Superblock split-point optimization
+
+Same search strategy as tile boundaries. For any WT gene block that exceeds the
+synthesis limit (1800 nt), search candidate split positions within the block for
+positions where the gene-derived junction overhang is in the HF set.
+
+```
+  For each oversized block:
+    n_splits = ceiling(block_length / max_block_length) - 1
+    target_sub_size = block_length / (n_splits + 1)
+
+    For each needed split s:
+      center = block_start + s * target_sub_size
+      # Search window: ±50 codons (wider than tile boundaries since block is long)
+      For each candidate position C in window:
+        junction_oh = gene[C*3-3 .. C*3]     # gene-derived 4-nt at split
+
+        # Check: junction_oh must be orthogonal to other overhangs in same reaction
+        # (BsaI for 5'WT blocks, BsmBI for 3'WT blocks)
+        in_hf = junction_oh %in% hf_set
+        fidelity = individual_fidelity(junction_oh)
+        score = 10 * in_hf + fidelity
+
+      Pick best candidate; add its junction_oh to the reaction's overhang set
+```
+
+### 3.7 Phase 6: Per-reaction pairwise validation
+
+```
+  For each tile i:
+    bsai_ohs = [oh_L, 5'WT_junction_ohs..., oh1_i, oh4]
+    bsmbi_ohs = [oh2_i, 3'WT_junction_ohs..., oh3]
+
+    bsai_fidelity = compute_set_fidelity(bsai_ohs, bsai_pairwise_matrix)
+    bsmbi_fidelity = compute_set_fidelity(bsmbi_ohs, bsmbi_pairwise_matrix)
+
+    If fidelity < threshold:
+      WARN: "Tile {i} {reaction} has low predicted fidelity ({fidelity})"
+```
+
+### 3.8 Fallback: Tier 2 (pairwise matrix selection)
+
+If Phase 4 fails (can't find oh3/oh4 in HF set orthogonal to all gene-derived
+overhangs), fall back to:
+
+1. Start with all 256 overhangs
+2. Exclude those matching any gene-derived overhang (identity or RC)
+3. Filter to individual fidelity >= 0.90
+4. For oh4: score each candidate by worst pairwise cross-reactivity with all
+   oh1 values, using the BsaI pairwise matrix
+5. For oh3: same, using BsmBI pairwise matrix with all oh2 values
+6. Pick the candidate with the best (lowest) worst-case cross-reactivity
 
 ---
 
@@ -162,223 +289,306 @@ any code that still uses individual fidelity scores (e.g., initial candidate fil
 
 ```
 BEFORE:
-  05_tiling.R           → tile partitioning + superblock boundary computation
-  06_overhang_selection.R → oh3/oh4 selection + tile overhang extraction
-  09_wt_geneblock_design.R → block sequence generation + independent superblock splitting
+  05_tiling.R             → compute_max_tile_size() + partition_tiles() +
+                             compute_superblock_boundaries() + assign_variants_to_tiles()
+  06_overhang_selection.R → extract_tile_overhangs() + select_fixed_overhangs() +
+                             select_superblock_overhangs()
+  09_wt_geneblock_design.R → design_wt_geneblocks() + apply_superblock_splitting()
 
 AFTER:
-  05_tiling.R           → tile partitioning ONLY (pure geometry)
+  05_tiling.R             → compute_max_tile_size() + assign_variants_to_tiles()
+                             (pure math only — no boundary decisions)
+
   06_overhang_selection.R → INTEGRATED assembly planning:
-                             - tile overhang extraction
-                             - WT block size computation
-                             - superblock need determination
-                             - split point optimization (gene-derived junction overhangs)
-                             - oh3/oh4 selection (from pre-validated sets)
-                             - per-reaction pairwise validation
-                             - complete assembly plan output
-  09_wt_geneblock_design.R → block sequence generation ONLY
-                             (receives assembly plan from 06, no independent
-                              overhang selection or splitting decisions)
+                             search_tile_boundaries()  — dynamic boundary search (Phase 2-3)
+                             plan_assembly()            — master function (all phases)
+                             compute_set_fidelity()     — pairwise matrix math
+                             optimize_split_points()    — superblock split search (Phase 5)
+                             validate_reaction_overhangs() — pairwise validation (Phase 6)
+                             load_pairwise_matrix()     — data loading
+                             load_high_fidelity_set()   — Potapov Set 2 loading
+
+  09_wt_geneblock_design.R → design_wt_geneblocks() ONLY
+                             (receives assembly_plan, no independent splitting/selection)
 ```
 
 ### 4.2 Data flow
 
 ```
-tiles (from 05)
-    │
-    ▼
-plan_assembly_overhangs(tiles, cds, polIII, max_block_length, config)
-    │
-    ├── extract tile boundary overhangs (oh1, oh2, oh_L) ← gene-derived
-    ├── compute WT block sizes per tile
-    ├── determine which blocks need superblock splitting
-    ├── for each oversized block:
-    │     └── optimize_split_points() → gene-derived junction overhangs
-    ├── count overhangs per reaction
-    ├── choose_strategy(count) → Tier 1 or Tier 2
-    ├── select oh3, oh4 (freely selectable)
-    ├── validate all reactions via pairwise matrix
-    │     └── compute_set_fidelity(reaction_overhangs, pairwise_matrix)
-    └── output: assembly_plan
-            │
-            ▼
-    design_wt_geneblocks(cds, polIII, tiles, assembly_plan)
-            │
-            └── generate block sequences using pre-computed split points
-                and gene-derived junction overhangs from assembly_plan
+compute_max_tile_size()  [05_tiling.R — pure oligo budget math]
+         │
+         ▼ max_mutable_nt
+plan_assembly(cds, polIII, max_mutable_nt, max_block_length, config)
+  [06_overhang_selection.R — master function]
+         │
+         ├─ search_tile_boundaries(cds, max_mutable_nt, hf_set)
+         │     → tiles data.frame with optimized oh1/oh2
+         │
+         ├─ select oh3, oh4 from hf_set (excluding committed oh1/oh2)
+         │
+         ├─ optimize_split_points() for oversized blocks
+         │     → superblock_splits with gene-derived junction overhangs
+         │
+         ├─ validate_reaction_overhangs() per tile via pairwise matrix
+         │     → per-reaction fidelity scores
+         │
+         └─ assembly_plan (tiles, oh3, oh4, splits, fidelity report)
+                │
+                ▼
+assign_variants_to_tiles(variants, tiles)  [05_tiling.R]
+                │
+                ▼
+design_wt_geneblocks(cds, polIII, tiles, assembly_plan, ...)
+  [09_wt_geneblock_design.R — sequence generation only]
 ```
 
 ### 4.3 Pipeline step changes in run_pipeline.R
 
 ```
-BEFORE (steps 7-9):
-  Step 7: Extract tile boundary overhangs        → 06_overhang_selection.R
-  Step 8: Select fixed overhangs (oh3, oh4)      → 06_overhang_selection.R
-  Step 9: Compute superblock boundaries           → 05_tiling.R
+BEFORE (steps 6-9):
+  Step 6: compute_max_tile_size() + partition_tiles() + assign_variants_to_tiles()
+  Step 7: extract_tile_overhangs()
+  Step 8: select_fixed_overhangs(oh3, oh4)
+  Step 9: compute_superblock_boundaries()
 
-AFTER (single integrated step):
-  Step 7: Plan assembly (overhangs + superblocks) → 06_overhang_selection.R
-          Returns: assembly_plan with oh3, oh4, superblock_boundaries,
-                   per-reaction overhang sets, per-reaction fidelity scores
+AFTER (steps 6-7):
+  Step 6: compute_max_tile_size()                              [05_tiling.R]
+  Step 7: plan_assembly() → returns tiles + oh3/oh4 + splits   [06_overhang_selection.R]
+          Then: assign_variants_to_tiles()                      [05_tiling.R]
 ```
 
 ---
 
 ## 5. Function Specifications
 
-### 5.1 New/refactored functions in `06_overhang_selection.R`
+### 5.1 `search_tile_boundaries(cds, max_mutable_nt, min_mutable_nt, hf_set, oh_fidelity, search_window_K)`
 
-#### `load_pairwise_matrix(enzyme_name)`
-Load the full 256x256 pairwise ligation frequency matrix for a given enzyme.
-Falls back to Potapov 18h generic data if enzyme-specific unavailable.
-Returns: named 256x256 numeric matrix.
+The core boundary search algorithm (Phases 1-3 from Section 3).
 
-#### `load_high_fidelity_sets()`
-Load pre-validated overhang sets from bundled data.
-Returns: list of character vectors (e.g., `$set_10`, `$set_20`).
+**Parameters:**
+- `cds`: domesticated gene sequence
+- `max_mutable_nt`: maximum tile mutable region (from `compute_max_tile_size()`)
+- `min_mutable_nt`: minimum tile size (default: `max_mutable_nt %/% 3`, floor 81 nt)
+- `hf_set`: character vector of pre-validated high-fidelity overhangs (Potapov Set 2)
+- `oh_fidelity`: data.frame with overhang + fidelity columns (256 rows)
+- `search_window_K`: ±K codons around ideal boundary (default 15)
 
-#### `compute_set_fidelity(overhangs, pairwise_matrix)`
-Compute the predicted set-level fidelity for a group of overhangs that will be
-in the same reaction.
+**Returns:** data.frame with columns:
+- `tile_id`, `start_codon`, `end_codon`, `start_nt`, `end_nt`
+- `oh1_seq`, `oh2_seq` (4-nt overhangs at boundaries)
+- `oh1_in_hf`, `oh2_in_hf` (logical: is this overhang in the HF set?)
+- `oh1_fidelity`, `oh2_fidelity` (individual fidelity scores)
+- `tile_seq` (WT gene sequence for this tile region)
+- `boundary_shift` (how far from ideal position, in codons)
 
-**Algorithm** (from Potapov 2018):
-For each overhang X in the set, the correct-pairing fraction is:
-  `f(X) = M[X][X] / sum(M[X][Y] for all Y in set)`
-Set-level fidelity = product of f(X) for all X in set (or geometric mean).
+### 5.2 `plan_assembly(cds, polIII, max_mutable_nt, max_block_length, config)`
 
-Alternatively, use the "fraction correct assemblies" metric from the paper:
-For N overhangs, the probability that ALL junctions ligate correctly =
-  `prod(f(X_i))` for i = 1..N
+Master function that orchestrates all phases.
 
-Returns: numeric fidelity score (0-1) and per-overhang breakdown.
-
-#### `plan_assembly_overhangs(tiles, cds, polIII, max_block_length, config)`
-Master function that integrates all overhang planning.
-
-**Steps:**
-1. Extract tile boundary overhangs (oh1, oh2) and oh_L (gene start)
-2. For each tile, compute 5'WT and 3'WT block sizes
-3. For blocks exceeding `max_block_length`:
-   a. Call `optimize_split_points()` to choose split positions
-   b. Extract gene-derived junction overhangs at split positions
-4. Enumerate all overhangs per reaction (BsaI and BsmBI for each tile)
-5. Count total freely-selectable overhangs needed (oh3, oh4)
-6. Select oh3, oh4:
-   - Try Tier 1: pick from pre-validated high-fidelity set
-   - If that fails validation: fall back to Tier 2 (pairwise matrix search)
-7. Validate ALL reactions using pairwise matrix
-8. Report per-reaction predicted fidelity
+**Parameters:**
+- `cds`: domesticated gene sequence
+- `polIII`: PolIII promoter sequence
+- `max_mutable_nt`: from `compute_max_tile_size()`
+- `max_block_length`: synthesis limit (default 1800)
+- `config`: list with `fidelity_threshold`, `manual_oh3`, `manual_oh4`,
+  `search_window_K`, `min_mutable_codons`
 
 **Returns:** `assembly_plan` list:
 ```r
 list(
-  tile_overhangs   = data.frame(tile_id, oh1_seq, oh2_seq, oh1_fidelity, oh2_fidelity),
-  oh3              = "XXXX",
-  oh4              = "YYYY",
-  oh_L             = "ZZZZ",
+  tiles = data.frame(
+    tile_id, start_codon, end_codon, start_nt, end_nt,
+    oh1_seq, oh2_seq, oh1_in_hf, oh2_in_hf,
+    oh1_fidelity, oh2_fidelity, tile_seq, boundary_shift
+  ),
+  oh3 = "XXXX",                     # selected fixed BsmBI overhang
+  oh4 = "YYYY",                     # selected fixed BsaI overhang
+  oh_L = "ZZZZ",                    # first 4 nt of gene (fixed)
+  oh3_in_hf = TRUE/FALSE,           # is oh3 from the HF set?
+  oh4_in_hf = TRUE/FALSE,
   superblock_splits = data.frame(
-    block_type,    # "bsai" or "bsmbi"
-    tile_id,       # which tile's WT block this is
-    split_nt,      # gene position of split
-    junction_oh,   # 4-nt gene-derived overhang at split
-    junction_fidelity
+    block_type, tile_id, split_nt, junction_oh,
+    junction_in_hf, junction_fidelity
   ),
-  reaction_overhangs = data.frame(
-    tile_id,
-    reaction_type,      # "BsaI" or "BsmBI"
-    overhangs,          # semicolon-separated list
-    n_overhangs,
-    set_fidelity,       # predicted set-level fidelity
-    min_pairwise_score  # worst pairwise score in the reaction
+  reaction_fidelity = data.frame(
+    tile_id, reaction_type,         # "BsaI" or "BsmBI"
+    overhangs,                      # semicolon-separated list
+    n_overhangs, n_in_hf,           # count and HF membership count
+    set_fidelity,                   # predicted set-level fidelity
+    min_pairwise_score              # worst pairwise score in reaction
   ),
-  strategy_used    = "pre_validated" or "pairwise_matrix",
-  overall_min_fidelity = numeric
+  strategy_used = "hf_set" | "pairwise_matrix",
+  hf_set_used = character(),        # which HF set was used
+  summary = list(
+    n_tiles = integer,
+    n_boundaries = integer,
+    n_boundaries_both_in_hf = integer,
+    n_boundaries_one_in_hf = integer,
+    n_boundaries_neither_in_hf = integer,
+    n_superblock_splits = integer,
+    overall_min_fidelity = numeric
+  )
 )
 ```
 
-#### `optimize_split_points(cds, block_start, block_end, max_sub_length, existing_ohs, pairwise_matrix)`
-Choose superblock split positions within a gene block region to maximize
-junction overhang fidelity.
+### 5.3 `compute_set_fidelity(overhangs, pairwise_matrix)`
 
-**Algorithm:**
-1. Generate candidate split positions on codon boundaries within the block
-2. For each candidate, extract the 4-nt gene-derived overhang
-3. Filter: remove candidates whose overhang is identical to or RC of any
-   existing overhang in the same reaction
-4. Score each candidate using pairwise matrix (worst-case cross-reactivity
-   with all other overhangs in the reaction)
-5. If multiple splits needed: use greedy selection, adding the split with
-   the best score at each step and updating the "existing" set
+Compute predicted set-level fidelity for overhangs in one reaction.
 
-Returns: integer vector of split positions + character vector of junction overhangs.
-
-#### `select_from_prevalidated_set(n_needed, exclude_overhangs, prevalidated_set, pairwise_matrix)`
-Select n overhangs from a pre-validated set, excluding any that collide with
-gene-derived overhangs in the same reaction.
-
-**Algorithm:**
-1. Filter pre-validated set: remove overhangs that match any in `exclude_overhangs`
-   (identity or RC)
-2. From remaining, pick `n_needed` overhangs by highest individual fidelity
-3. Validate the complete set (selected + gene-derived) using pairwise matrix
-4. If validation fails (set fidelity < threshold): return NULL to signal fallback
-
-#### `select_from_pairwise_matrix(n_needed, exclude_overhangs, pairwise_matrix, fidelity_threshold)`
-Fallback selection using the full pairwise matrix when pre-validated sets
-don't work.
-
-**Algorithm:**
-1. Start with all 256 overhangs, exclude those matching `exclude_overhangs`
-2. Filter to individual fidelity >= threshold
-3. Greedy selection: iteratively add the overhang that maximizes the
-   minimum pairwise fidelity in the growing set
-4. After each addition, recompute set fidelity
-5. Stop when n_needed selected or no candidates improve fidelity
-
-#### `validate_reaction_overhangs(reaction_overhangs, pairwise_matrix, threshold)`
-**Refactored** from current identity/RC-only check to use pairwise matrix.
-
-Checks:
-1. No identity or RC collisions (hard constraint — assembly fails)
-2. No overhang contains enzyme recognition sites
-3. Pairwise cross-reactivity below threshold for all pairs
-4. Set-level fidelity above threshold
-
-Returns: list with `pass` (logical), `set_fidelity`, `worst_pair`, `details`.
-
-### 5.2 Changes to `05_tiling.R`
-
-**Remove**: `compute_superblock_boundaries()` — logic moves to `06_overhang_selection.R`
-
-**Keep**: `partition_tiles()`, `compute_max_tile_size()`, `assign_variants_to_tiles()`
-
-### 5.3 Changes to `09_wt_geneblock_design.R`
-
-**Remove**: `apply_superblock_splitting()`, `select_superblock_overhangs()` calls
-
-**Refactor** `design_wt_geneblocks()` to accept `assembly_plan` instead of doing
-its own superblock logic. The function receives pre-computed split points and
-junction overhangs, and just generates the block sequences.
-
-### 5.4 Changes to `run_pipeline.R`
-
-Replace steps 7-9 with a single call:
+**Algorithm** (Potapov 2018 method):
 ```r
-# Step 7: Plan assembly (overhangs + superblocks)
-assembly_plan <- plan_assembly_overhangs(
-  tiles = tiles,
+# For each overhang X in the set:
+#   f(X) = M[X, X] / sum(M[X, Y] for all Y in set)
+# where M[X, Y] = ligation frequency of X with RC(Y)
+#
+# Set-level fidelity = product of f(X) for all X
+#   (= probability that ALL junctions ligate correctly)
+
+compute_set_fidelity <- function(overhangs, pairwise_matrix) {
+  n <- length(overhangs)
+  per_oh_fidelity <- numeric(n)
+
+  for (i in seq_len(n)) {
+    oh_i <- overhangs[i]
+    # Sum of ligation with all overhangs in the set (including correct partner)
+    total <- sum(pairwise_matrix[oh_i, overhangs])
+    correct <- pairwise_matrix[oh_i, oh_i]  # correct Watson-Crick pairing
+    per_oh_fidelity[i] <- correct / total
+  }
+
+  list(
+    set_fidelity = prod(per_oh_fidelity),
+    per_overhang = data.frame(
+      overhang = overhangs,
+      correct_fraction = per_oh_fidelity
+    )
+  )
+}
+```
+
+### 5.4 `optimize_split_points(cds, block_start_nt, block_end_nt, max_sub_length, existing_ohs, hf_set, oh_fidelity, search_window)`
+
+Search for superblock split positions where gene-derived junction overhang is in
+the HF set. Same philosophy as tile boundary search.
+
+### 5.5 `validate_reaction_overhangs(reaction_overhangs, pairwise_matrix, threshold)`
+
+Refactored from current identity/RC check to use pairwise matrix.
+
+**Checks:**
+1. No identity or RC collisions (hard fail — assembly won't work)
+2. Pairwise cross-reactivity below threshold for all pairs
+3. Set-level fidelity above threshold
+
+### 5.6 `load_pairwise_matrix(enzyme_name)`
+
+Load 256x256 pairwise ligation matrix. Try enzyme-specific (Pryor 2020) first,
+fall back to generic (Potapov 18h).
+
+### 5.7 `load_high_fidelity_set(set_name)`
+
+Load pre-validated overhang set. Default: Potapov 2018 Table 1, Set 2 (non-MoClo).
+
+---
+
+## 6. Data Requirements
+
+### 6.1 Pre-validated high-fidelity set (NEW)
+
+**`data/neb_overhang_fidelity/high_fidelity_sets.rds`**
+- Named list of character vectors
+- `$potapov_set2_20`: 20-overhang set from Potapov 2018 Table 1, Set 2 (non-MoClo)
+- `$potapov_set2_10`: 10-overhang high-fidelity subset
+- Source: Potapov et al. 2018, ACS Synth Bio, DOI: 10.1021/acssynbio.8b00333, Table 1
+
+### 6.2 Full 256x256 pairwise ligation matrices (NEW)
+
+**`data/neb_overhang_fidelity/potapov_18h_pairwise.rds`**
+- 256x256 named numeric matrix (row/col names = 4-nt overhang sequences)
+- `M[i,j]` = ligation frequency of overhang i with RC(overhang j)
+- Source: Potapov 2018 supplementary data / tatapov Python package
+
+**`data/neb_overhang_fidelity/bsai_pairwise.rds`**
+- Same format, BsaI-specific (Pryor et al. 2020, PLOS ONE)
+
+**`data/neb_overhang_fidelity/bsmbi_pairwise.rds`**
+- Same format, BsmBI-specific (Pryor 2020)
+
+Individual fidelity can be derived from the matrix:
+`fidelity(X) = M[X,X] / sum(M[X,*])`. Keep existing 256x1 files for backward compat.
+
+### 6.3 Data generation
+
+Update `data/generate_data.R` to hardcode the pairwise matrices and HF sets.
+Matrices are 65,536 values each (~500 KB compressed RDS). Static published data,
+so embedding is appropriate.
+
+---
+
+## 7. Changes to Existing Modules
+
+### 7.1 `05_tiling.R`
+
+**Keep:**
+- `compute_max_tile_size()` — pure oligo budget math, unchanged
+- `assign_variants_to_tiles()` — pure lookup, unchanged
+
+**Remove:**
+- `partition_tiles()` — replaced by `search_tile_boundaries()` in 06
+- `compute_superblock_boundaries()` — replaced by `optimize_split_points()` in 06
+
+### 7.2 `06_overhang_selection.R`
+
+**Complete rewrite.** Old functions (`extract_tile_overhangs`, `select_fixed_overhangs`,
+`select_orthogonal_set`, `select_superblock_overhangs`) are replaced by the new
+integrated planning system described in Section 5.
+
+**Keep as internal helpers:**
+- `builtin_overhang_fidelity()` — 256-overhang individual fidelity data
+- `validate_fixed_overhangs()` — manual oh3/oh4 validation
+
+### 7.3 `09_wt_geneblock_design.R`
+
+**Refactor `design_wt_geneblocks()`** to accept `assembly_plan` parameter
+instead of `tile_overhangs` + `superblock_boundaries`.
+
+**Remove:**
+- `apply_superblock_splitting()` — replaced by assembly_plan's pre-computed splits
+- All calls to `select_superblock_overhangs()`
+
+The function becomes a pure sequence generator: given the assembly plan (which
+specifies exactly where to split and which overhangs to use), it builds the block
+sequences.
+
+### 7.4 `run_pipeline.R`
+
+Replace steps 6-9 with:
+```r
+# Step 6: Compute oligo budget
+tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
+
+# Step 7: Plan assembly (dynamic tile boundaries + overhang selection)
+assembly_plan <- plan_assembly(
   cds = gene$cds,
   polIII = cfg$polIII_promoter,
+  max_mutable_nt = tile_size,
   max_block_length = cfg$max_geneblock_length,
-  fidelity_threshold = cfg$overhang_fidelity_threshold,
-  manual_oh3 = cfg$oh3,
-  manual_oh4 = cfg$oh4
+  config = list(
+    fidelity_threshold = cfg$overhang_fidelity_threshold,
+    manual_oh3 = cfg$oh3,
+    manual_oh4 = cfg$oh4,
+    search_window_K = cfg$search_window_K  # new config option, default 15
+  )
 )
+tiles <- assembly_plan$tiles
 oh3 <- assembly_plan$oh3
 oh4 <- assembly_plan$oh4
+
+# Step 8: Assign variants to tiles
+variants <- assign_variants_to_tiles(variants, tiles)
 ```
 
-And update step 12 to pass the assembly plan:
+And update step 12:
 ```r
 geneblock_result <- design_wt_geneblocks(
   cds = gene$cds,
@@ -391,164 +601,126 @@ geneblock_result <- design_wt_geneblocks(
 )
 ```
 
----
+### 7.5 `10_qc_checks.R`
 
-## 6. Data File Changes
+Add new QC check: **per-reaction predicted fidelity**
+- Report set-level fidelity for each tile's BsaI and BsmBI reactions
+- WARN if any reaction < 0.90
+- FAIL if any reaction < 0.80
+- Report how many tile boundaries have overhangs in the HF set
 
-### 6.1 New data files needed
+### 7.6 `00_config.R` + `config_template.yaml`
 
-**`data/neb_overhang_fidelity/potapov_18h_pairwise.rds`**
-- 256x256 named numeric matrix
-- `M[i,j]` = ligation frequency of overhang i with RC(overhang j)
-- Source: tatapov Python package or Potapov 2018 supplementary data
-- Row/column names = 4-nt overhang sequences (alphabetical)
-
-**`data/neb_overhang_fidelity/bsai_pairwise.rds`**
-- Same format, BsaI-specific (Pryor 2020)
-
-**`data/neb_overhang_fidelity/bsmbi_pairwise.rds`**
-- Same format, BsmBI-specific (Pryor 2020)
-
-**`data/neb_overhang_fidelity/high_fidelity_sets.rds`**
-- List of pre-validated overhang sets
-- `$set_10`: character vector of 10 overhangs (>99% set fidelity)
-- `$set_20`: character vector of 20 overhangs (~98% set fidelity)
-- Source: Potapov 2018 Table 1 (Set 2, non-MoClo-constrained)
-
-### 6.2 Update `data/generate_data.R`
-Add generation of pairwise matrices and high-fidelity sets.
-
-For the pairwise matrices: since we can't run the tatapov Python package directly,
-we have two options:
-1. **Hardcode**: Embed the 256x256 matrices as R data (large but self-contained)
-2. **Download**: Fetch from a cached source at generation time
-
-Recommendation: Hardcode the matrices. At 256x256 = 65,536 values per matrix, this
-is ~500 KB per matrix as compressed RDS. The matrices are static (published data),
-so embedding is appropriate.
-
-For the high-fidelity sets: hardcode from Potapov 2018 Table 1.
-
----
-
-## 7. Config Changes
-
-### 7.1 New config options
-
+New config options:
 ```yaml
-# Overhang selection strategy
-overhang_strategy: "auto"  # "auto", "prevalidated", "pairwise_matrix"
-  # auto (default): try pre-validated sets first, fall back to pairwise matrix
-  # prevalidated: only use pre-validated sets (fail if insufficient)
-  # pairwise_matrix: always use full matrix (most thorough, slightly slower)
+# Tile boundary search
+search_window_K: 15           # ±K codons around ideal boundary (default 15)
+min_tile_codons: 27            # minimum tile mutable region in codons
 
-# Set-level fidelity threshold (replaces individual fidelity threshold)
-overhang_set_fidelity_threshold: 0.95  # Minimum predicted set-level fidelity per reaction
-
-# Minimum pairwise score (lowest acceptable pairwise compatibility)
-overhang_min_pairwise: 0.90  # Warn if any overhang pair scores below this
+# Overhang selection
+overhang_set_fidelity_threshold: 0.95  # minimum set-level fidelity per reaction
 ```
-
-### 7.2 Backward compatibility
-The existing `overhang_fidelity_threshold: 0.95` remains supported for initial
-candidate filtering (individual fidelity). The new `overhang_set_fidelity_threshold`
-is the primary constraint.
 
 ---
 
 ## 8. Test Plan
 
-### 8.1 Unit tests for new functions
+### 8.1 Unit tests for boundary search
 
-**`test-overhang-selection.R`** (refactored):
+```
+test: search_tile_boundaries finds boundaries in HF set
+  - Synthetic gene where a known boundary has an HF set member
+  - Verify the algorithm finds it
 
-1. `compute_set_fidelity()`:
-   - Known 3-overhang set → verify against manually computed value
-   - Set of 2 identical overhangs → fidelity = 0 (or error)
-   - Pre-validated 10-member set → fidelity > 0.99
+test: search_tile_boundaries respects min/max tile size
+  - Verify no tile is smaller than min or larger than max
 
-2. `optimize_split_points()`:
-   - Short gene (no splits needed) → empty result
-   - Long gene with known best split point → selects it
-   - Multiple splits → all junction overhangs are orthogonal and gene-derived
+test: search_tile_boundaries handles single-tile gene
+  - Short gene: no boundaries to search, single tile returned
 
-3. `plan_assembly_overhangs()`:
-   - Short gene (no superblocks): returns oh3, oh4, no splits, high fidelity
-   - Long gene (with superblocks): returns oh3, oh4, split points, junction overhangs
-   - Gene where oh1/oh2 happen to collide with pre-validated set → falls back gracefully
-   - Manual oh3/oh4 override → validates and uses them
+test: search_tile_boundaries shifts from ideal when HF overhang available nearby
+  - Gene where ideal boundary gives low-fidelity overhang but ±3 codons gives HF set member
+  - Verify boundary_shift is nonzero and overhang is in HF set
+```
 
-4. `validate_reaction_overhangs()`:
-   - Known-good set → passes
-   - Set with RC collision → fails
-   - Set with high cross-reactivity → warns
+### 8.2 Unit tests for set fidelity
 
-5. `select_from_prevalidated_set()`:
-   - Basic selection → picks highest-fidelity from set
-   - Exclusion list removes candidates → still finds orthogonal overhangs
-   - Too many exclusions → returns NULL (triggers fallback)
+```
+test: compute_set_fidelity returns >0.99 for Potapov Set 2 (10-member)
+test: compute_set_fidelity returns 0 for set with duplicate overhangs
+test: compute_set_fidelity matches manually computed value for 3-overhang set
+```
 
-### 8.2 Integration test updates
+### 8.3 Unit tests for assembly planning
+
+```
+test: plan_assembly on short gene returns no superblocks, oh3/oh4 from HF set
+test: plan_assembly on long gene returns superblock splits with gene-derived junctions
+test: plan_assembly reports per-reaction fidelity
+test: plan_assembly accepts manual oh3/oh4 override
+test: plan_assembly falls back to pairwise matrix when HF set exhausted
+```
+
+### 8.4 Integration test updates
 
 Update `test-integration.R`:
-- Short test gene: verify assembly plan has no superblocks, oh3/oh4 selected,
-  per-reaction fidelity reported
-- Add long test gene (>3600 nt): verify superblock splitting, junction overhangs
-  are gene-derived, all reactions pass pairwise validation
+- Short gene: verify tiles have optimized boundaries, assembly_plan has fidelity report
+- Long gene: verify superblock splits use gene-derived overhangs (not freely selected)
+- TRIO gene: verify all reactions pass pairwise validation
 
-### 8.3 Regression tests
-- Verify that for the existing short test gene, the pipeline still produces valid
-  output (oligos, gene blocks, barcodes)
-- Verify QC still passes
+### 8.5 Regression
+
+- All existing pipeline outputs remain valid
+- QC still passes for all test genes
 
 ---
 
 ## 9. Implementation Order
 
-1. **Data preparation**: Generate/embed pairwise matrices and high-fidelity sets
-   in `data/generate_data.R` and corresponding RDS files
+1. **Data preparation** — Generate pairwise matrices + Potapov Set 2 in
+   `data/generate_data.R` and RDS files
 
-2. **Core math**: Implement `compute_set_fidelity()` and `load_pairwise_matrix()`
-   — these are pure functions with no dependencies on the rest of the refactor
+2. **Core math** — Implement `compute_set_fidelity()`, `load_pairwise_matrix()`,
+   `load_high_fidelity_set()` (pure functions, no side effects)
 
-3. **Split-point optimizer**: Implement `optimize_split_points()` — depends on
-   pairwise matrix but not on the rest of the module
+3. **Boundary search** — Implement `search_tile_boundaries()` (the core new algorithm)
 
-4. **Assembly planner**: Implement `plan_assembly_overhangs()` — the master
-   function that ties everything together
+4. **Assembly planner** — Implement `plan_assembly()` (master function tying
+   everything together: boundary search + oh3/oh4 selection + superblock splits +
+   validation)
 
-5. **Refactor `09_wt_geneblock_design.R`**: Update to accept assembly_plan
-   instead of doing independent superblock logic
+5. **Refactor 09** — Update `design_wt_geneblocks()` to accept assembly_plan
 
-6. **Refactor `05_tiling.R`**: Remove `compute_superblock_boundaries()`
-   (moved to 06)
+6. **Refactor 05** — Remove `partition_tiles()` and `compute_superblock_boundaries()`
+   (now in 06)
 
-7. **Update `run_pipeline.R`**: Merge steps 7-9 into single assembly planning step
+7. **Update run_pipeline.R** — New step ordering
 
-8. **Update tests**: Refactor existing tests, add new tests for pairwise validation
+8. **Update config** — Add new config options
 
-9. **Update QC (`10_qc_checks.R`)**: Add per-reaction fidelity reporting
+9. **Update tests** — Refactor existing, add boundary search and fidelity tests
+
+10. **Update QC** — Add per-reaction fidelity reporting
 
 ---
 
 ## 10. Risk Assessment
 
 ### Low risk
-- Adding pairwise matrix data: purely additive, no behavior change
+- Adding pairwise matrix data: purely additive
 - `compute_set_fidelity()`: new function, no side effects
-- Pre-validated set selection: new selection path, existing path preserved as fallback
+- Boundary search: new function, doesn't touch existing code until wired in
 
 ### Medium risk
-- Moving superblock boundary computation from 05 to 06: changes module boundaries,
-  must update all callers
-- Changing `design_wt_geneblocks()` interface: requires coordinated updates to
-  run_pipeline.R and tests
-- Fixing the superblock junction overhang bug: changes assembly output for long genes
-  (but current output is incorrect, so this is a bug fix)
+- Replacing `partition_tiles()`: changes the core tiling output format (adds
+  HF membership columns). All downstream code that reads tiles must be checked.
+- Removing `apply_superblock_splitting()`: must verify gene block design still works
+  with pre-computed splits from assembly_plan
+- Pipeline step reordering: integration test is the safety net
 
 ### Mitigation
-- Keep existing individual fidelity data and functions as internal helpers
-  (backward compatibility)
-- Run full integration test after each step
-- The refactor is additive (new functions) before subtractive (removing old ones) —
-  old and new can coexist during development
+- Build new functions first (additive phase)
+- Wire them into the pipeline only after unit tests pass
+- Run full integration test on all 3 test genes (300 nt, 2100 nt, 9294 nt TRIO)
+  after each integration step
+- Keep old functions available during development (remove only at the end)
