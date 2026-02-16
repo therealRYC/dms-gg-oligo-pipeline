@@ -198,10 +198,11 @@ report_fixed_overhangs <- function(assembly_plan, helper, cfg) {
              "Barcode-helper junction (BsaI, all tiles)",
              "PaqCI 5' end of insert (Level 2)",
              "PaqCI 3' end of insert (Level 2)"),
-    `In HF Set` = c("--",
-                     if (isTRUE(assembly_plan$oh3_in_hf)) "Yes" else "No",
-                     if (isTRUE(assembly_plan$oh4_in_hf)) "Yes" else "No",
-                     "--", "--"),
+    `In HF Set` = c(
+      if (!is.null(assembly_plan$hf_set_used) && (oh_L %in% assembly_plan$hf_set_used)) "Yes" else "No",
+      if (isTRUE(assembly_plan$oh3_in_hf)) "Yes" else "No",
+      if (isTRUE(assembly_plan$oh4_in_hf)) "Yes" else "No",
+      "--", "--"),
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
@@ -479,7 +480,7 @@ report_domestication <- function(scan_result) {
   # The exact columns depend on scan_enzyme_sites output
   cols_available <- intersect(
     names(dom),
-    c("enzyme", "position", "strand", "original_codon", "new_codon", "codon_pos", "aa")
+    c("enzyme", "site_start", "strand", "codon_pos", "original_codon", "new_codon", "aa")
   )
   if (length(cols_available) > 0) {
     df <- dom[, cols_available, drop = FALSE]
@@ -532,7 +533,8 @@ format_bsai_overhang_map <- function(oh_L, bsai_part_names, oh1, oh4,
                                       assembly_plan, tile_id) {
   # Collect overhangs and segment labels in order
   ohs <- c(oh_L)
-  hf_flags <- c(TRUE)  # oh_L is first 4nt of gene, always present
+  oh_L_in_hf <- !is.null(assembly_plan$hf_set_used) && (oh_L %in% assembly_plan$hf_set_used)
+  hf_flags <- c(oh_L_in_hf)
   labels <- character(0)
 
   # Get superblock junction overhangs for this tile's 5'WT blocks
@@ -678,41 +680,33 @@ format_overhang_map <- function(ohs, labels, hf_flags) {
   n_oh <- length(ohs)
   n_seg <- length(labels)
 
-  # Build the diagram line: [oh1]----label1----[oh2]----label2----[oh3]
-  oh_strs <- vapply(ohs, function(o) paste0("[", o, "]"), character(1))
-  dash_segs <- vapply(labels, function(lbl) {
-    dashes <- paste(rep("-", 4), collapse = "")
-    paste0(dashes, lbl, dashes)
-  }, character(1))
-
-  # Interleave overhangs and dashes
-  diagram <- oh_strs[1]
-  for (i in seq_len(n_seg)) {
-    diagram <- paste0(diagram, dash_segs[i], oh_strs[i + 1])
-  }
-
-  # Build sequence line aligned under each overhang
-  # Calculate positions of each overhang in the diagram string
-  seq_line <- ""
-  hf_line <- ""
-  pos <- 1  # current position in diagram
+  # Build diagram and track overhang start positions (0-based)
+  diagram <- ""
+  oh_positions <- integer(n_oh)
 
   for (i in seq_len(n_oh)) {
-    oh_str <- oh_strs[i]
-    # Find position of this overhang in diagram
-    oh_pos <- regexpr(fixed_pattern(oh_str), substring(diagram, pos))
-    if (oh_pos > 0) {
-      oh_abs_pos <- pos + oh_pos - 1
-      # Pad with spaces to align
-      while (nchar(seq_line) < oh_abs_pos) {
-        seq_line <- paste0(seq_line, " ")
-        hf_line <- paste0(hf_line, " ")
-      }
-      # Center the overhang sequence under the bracket notation
-      seq_line <- paste0(seq_line, " ", ohs[i], " ")
-      hf_line <- paste0(hf_line, if (isTRUE(hf_flags[i])) " (HF)" else " (--)")
-      pos <- oh_abs_pos + nchar(oh_str)
+    oh_positions[i] <- nchar(diagram)
+    diagram <- paste0(diagram, "[", ohs[i], "]")
+    if (i <= n_seg) {
+      diagram <- paste0(diagram, "----", labels[i], "----")
     }
+  }
+
+  # Build aligned annotation lines using tracked positions
+  seq_line <- ""
+  hf_line <- ""
+
+  for (i in seq_len(n_oh)) {
+    target_pos <- oh_positions[i]
+    oh_text <- paste0(" ", ohs[i], " ")       # e.g. " ATGG " (6 chars)
+    hf_text <- if (isTRUE(hf_flags[i])) " (HF) " else " (--) "  # 6 chars
+
+    # Pad each line independently to target position
+    while (nchar(seq_line) < target_pos) seq_line <- paste0(seq_line, " ")
+    while (nchar(hf_line) < target_pos) hf_line <- paste0(hf_line, " ")
+
+    seq_line <- paste0(seq_line, oh_text)
+    hf_line <- paste0(hf_line, hf_text)
   }
 
   c("```",
@@ -720,11 +714,6 @@ format_overhang_map <- function(ohs, labels, hf_flags) {
     paste0("  ", seq_line),
     paste0("  ", hf_line),
     "```")
-}
-
-#' Escape special regex characters for fixed matching
-fixed_pattern <- function(s) {
-  gsub("([\\[\\]\\(\\)\\{\\}\\+\\*\\?\\.\\^\\$\\|\\\\])", "\\\\\\1", s)
 }
 
 #' Format a fidelity value
