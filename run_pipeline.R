@@ -11,15 +11,12 @@
 #   3. Load codon usage
 #   4. Scan and domesticate enzyme sites (BsaI + BsmBI + PaqCI)
 #   5. Design mutations
-#   6. Tile gene (3-enzyme overhead)
-#   7. Extract tile overhangs
-#   8. Select fixed overhangs (oh3, oh4)
-#   9. Compute superblock boundaries
-#  10. Design barcodes
-#  11. Assemble oligos (universal structure)
-#  12. Design gene blocks (BsaI + BsmBI adapted)
-#  13. QC checks
-#  14. Write outputs
+#   6. Plan assembly (dynamic tile boundary search + overhang selection + superblocks)
+#   7. Design barcodes
+#   8. Assemble oligos (universal structure)
+#   9. Design gene blocks (BsaI + BsmBI adapted)
+#  10. QC checks
+#  11. Write outputs
 
 # --- Parse command line args ---
 args <- commandArgs(trailingOnly = TRUE)
@@ -29,8 +26,9 @@ if (length(args) < 1) {
 config_path <- args[1]
 
 # --- Source all modules ---
-pipeline_dir <- dirname(sys.frame(1)$ofile %||% ".")
-if (pipeline_dir == ".") pipeline_dir <- getwd()
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+script_path <- tryCatch(sys.frame(1)$ofile, error = function(e) NULL)
+pipeline_dir <- if (!is.null(script_path)) dirname(script_path) else getwd()
 
 source(file.path(pipeline_dir, "R", "constants.R"))
 source(file.path(pipeline_dir, "R", "utils.R"))
@@ -90,38 +88,37 @@ cli::cli_h2("Step 5: Designing mutations")
 variants <- design_mutations(gene$cds, codon_usage)
 variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
 
-# Step 6: Tile the gene (3-enzyme overhead calculation)
-cli::cli_h2("Step 6: Tiling gene (3-enzyme architecture)")
+# Step 6: Plan assembly (dynamic tile boundary search + overhangs + superblocks)
+cli::cli_h2("Step 6: Planning assembly (dynamic tile boundary search)")
 tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
-tiles <- partition_tiles(gene$cds, tile_size)
+assembly_plan <- plan_assembly(
+  cds = gene$cds,
+  polIII = cfg$polIII_promoter,
+  max_mutable_nt = tile_size,
+  max_block_length = cfg$max_geneblock_length,
+  config = list(
+    fidelity_threshold = cfg$overhang_fidelity_threshold,
+    manual_oh3 = cfg$oh3,
+    manual_oh4 = cfg$oh4,
+    search_window_K = cfg$search_window_K,
+    boundary_method = cfg$boundary_method,
+    multi_k = cfg$multi_k_search
+  )
+)
+tiles <- assembly_plan$tiles
+oh3 <- assembly_plan$oh3
+oh4 <- assembly_plan$oh4
+tile_overhangs <- extract_tile_overhangs(tiles)
 variants <- assign_variants_to_tiles(variants, tiles)
 
-# Step 7: Extract tile boundary overhangs
-cli::cli_h2("Step 7: Extracting tile boundary overhangs")
-tile_overhangs <- extract_tile_overhangs(tiles)
+cli::cli_alert_success(paste0(
+  "Assembly planned: ", assembly_plan$summary$n_tiles, " tiles, ",
+  assembly_plan$summary$n_boundaries_both_in_hf, "/",
+  assembly_plan$summary$n_boundaries, " boundaries both in HF set"
+))
 
-# Step 8: Select fixed overhangs (oh3, oh4)
-cli::cli_h2("Step 8: Selecting fixed overhangs (oh3, oh4)")
-fixed_ohs <- select_fixed_overhangs(
-  gene$cds, cfg$polIII_promoter, tile_overhangs,
-  fidelity_threshold = cfg$overhang_fidelity_threshold,
-  manual_oh3 = cfg$oh3,
-  manual_oh4 = cfg$oh4
-)
-oh3 <- fixed_ohs$oh3
-oh4 <- fixed_ohs$oh4
-
-# Step 9: Compute superblock boundaries (for long genes)
-cli::cli_h2("Step 9: Computing superblock boundaries")
-superblock_boundaries <- compute_superblock_boundaries(
-  gene$cds, tiles,
-  polIII_len = nchar(cfg$polIII_promoter),
-  max_block_length = cfg$max_geneblock_length,
-  fidelity_threshold = cfg$overhang_fidelity_threshold
-)
-
-# Step 10: Design barcodes
-cli::cli_h2("Step 10: Designing barcodes")
+# Step 7: Design barcodes
+cli::cli_h2("Step 7: Designing barcodes")
 barcode_result <- design_barcodes(
   n_variants          = nrow(variants),
   barcode_length      = cfg$barcode_length,
@@ -143,8 +140,8 @@ if (cfg$barcodes_per_variant > 1L) {
   variants_expanded$barcode_idx <- 1L
 }
 
-# Step 11: Assemble oligos (universal structure)
-cli::cli_h2("Step 11: Assembling oligos (universal 3-enzyme structure)")
+# Step 8: Assemble oligos (universal structure)
+cli::cli_h2("Step 8: Assembling oligos (universal 3-enzyme structure)")
 oligos <- assemble_oligos(
   variants    = variants_expanded,
   cds         = gene$cds,
@@ -155,24 +152,23 @@ oligos <- assemble_oligos(
   max_oligo_length = cfg$max_oligo_length
 )
 
-# Step 12: Design WT gene blocks + helper plasmid
-cli::cli_h2("Step 12: Designing gene blocks and helper plasmid")
+# Step 9: Design WT gene blocks + helper plasmid
+cli::cli_h2("Step 9: Designing gene blocks and helper plasmid")
 geneblock_result <- design_wt_geneblocks(
   cds         = gene$cds,
   polIII      = cfg$polIII_promoter,
   tiles       = tiles,
-  tile_overhangs = tile_overhangs,
   oh3         = oh3,
   oh4         = oh4,
   paqci_star2 = cfg$paqci_star2,
   paqci_star1 = cfg$paqci_star1,
-  superblock_boundaries = superblock_boundaries,
   max_block_length    = cfg$max_geneblock_length,
-  fidelity_threshold  = cfg$overhang_fidelity_threshold
+  fidelity_threshold  = cfg$overhang_fidelity_threshold,
+  assembly_plan       = assembly_plan
 )
 
-# Step 13: QC checks
-cli::cli_h2("Step 13: Running QC checks")
+# Step 10: QC checks
+cli::cli_h2("Step 10: Running QC checks")
 qc_result <- run_qc_checks(
   oligos          = oligos,
   geneblock_result = geneblock_result,
@@ -185,11 +181,12 @@ qc_result <- run_qc_checks(
   oh4             = oh4,
   max_oligo_length = cfg$max_oligo_length,
   max_block_length = cfg$max_geneblock_length,
-  min_hamming      = cfg$min_hamming_distance
+  min_hamming      = cfg$min_hamming_distance,
+  assembly_plan    = assembly_plan
 )
 
-# Step 14: Write outputs
-cli::cli_h2("Step 14: Writing outputs")
+# Step 11: Write outputs
+cli::cli_h2("Step 11: Writing outputs")
 output_paths <- write_outputs(
   oligos          = oligos,
   geneblock_result = geneblock_result,

@@ -1,4 +1,8 @@
 # Test setup — source all pipeline modules
+
+# Define %||% operator (null-coalescing, not in base R)
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
 # Resolve pipeline root: test_path() returns the test directory path;
 # going up two levels from there gives the project root.
 pipeline_dir <- normalizePath(file.path(

@@ -19,67 +19,100 @@
 #'
 #' @param cds Character string of domesticated CDS
 #' @param polIII Character string of PolIII promoter sequence
-#' @param tiles Data frame from partition_tiles()
-#' @param tile_overhangs Data frame from extract_tile_overhangs()
+#' @param tiles Data frame from partition_tiles() or search_tile_boundaries()
+#' @param tile_overhangs Data frame from extract_tile_overhangs() (optional if assembly_plan given)
 #' @param oh3 Fixed BsmBI overhang (PolIII-barcode junction)
 #' @param oh4 Fixed BsaI overhang (barcode-helper junction)
 #' @param paqci_star2 PaqCI** overhang (5' end of insert in helper plasmid)
 #' @param paqci_star1 PaqCI* overhang (3' end of insert)
-#' @param superblock_boundaries Data frame from compute_superblock_boundaries()
+#' @param superblock_boundaries Data frame from compute_superblock_boundaries() (legacy)
 #' @param max_block_length Maximum gene block synthesis length (default 1800)
 #' @param fidelity_threshold Overhang fidelity threshold for superblock splitting
+#' @param assembly_plan Optional assembly_plan from plan_assembly(); when provided,
+#'   uses pre-computed superblock splits (gene-derived, HF-optimized) instead of
+#'   legacy apply_superblock_splitting
 #' @return List with:
 #'   - blocks: data frame of gene blocks to order (deduplicated)
 #'   - tile_manifests: data frame describing per-tile reaction contents
 #'   - helper_plasmid: data frame describing helper plasmid insert
-design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs,
+design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                                   oh3, oh4, paqci_star2, paqci_star1,
                                   superblock_boundaries = NULL,
                                   max_block_length = MAX_GENEBLOCK_LENGTH,
-                                  fidelity_threshold = DEFAULT_FIDELITY_THRESHOLD) {
+                                  fidelity_threshold = DEFAULT_FIDELITY_THRESHOLD,
+                                  assembly_plan = NULL) {
 
   n_tiles <- nrow(tiles)
   gene_len <- nchar(cds)
   blocks <- list()
   manifests <- list()
 
-  if (is.null(superblock_boundaries)) {
-    superblock_boundaries <- data.frame(
-      boundary_id = integer(0), after_tile_id = integer(0),
-      junction_nt = integer(0), junction_oh = character(0),
-      fidelity_score = numeric(0), stringsAsFactors = FALSE
-    )
+  # If assembly_plan is provided, extract superblock splits in old format
+  use_precomputed_splits <- !is.null(assembly_plan)
+
+  if (use_precomputed_splits) {
+    ap_splits <- assembly_plan$superblock_splits
+    # Convert assembly_plan splits to old-format superblock_boundaries
+    # for 5'WT blocks: filter by block_type == "bsai_5wt"
+    # for 3'WT blocks: filter by block_type == "bsmbi_3wt"
+    sb_5wt <- if (nrow(ap_splits) > 0) {
+      ap_splits[ap_splits$block_type == "bsai_5wt", , drop = FALSE]
+    } else {
+      data.frame(split_nt = integer(0), junction_oh = character(0),
+                 tile_id = integer(0), stringsAsFactors = FALSE)
+    }
+    sb_3wt <- if (nrow(ap_splits) > 0) {
+      ap_splits[ap_splits$block_type == "bsmbi_3wt", , drop = FALSE]
+    } else {
+      data.frame(split_nt = integer(0), junction_oh = character(0),
+                 tile_id = integer(0), stringsAsFactors = FALSE)
+    }
+  } else {
+    if (is.null(superblock_boundaries)) {
+      superblock_boundaries <- data.frame(
+        boundary_id = integer(0), after_tile_id = integer(0),
+        junction_nt = integer(0), junction_oh = character(0),
+        fidelity_score = numeric(0), stringsAsFactors = FALSE
+      )
+    }
   }
 
   for (i in seq_len(n_tiles)) {
     tile <- tiles[i, ]
-    tile_oh <- tile_overhangs[tile_overhangs$tile_id == tile$tile_id, ]
 
     # --- BsaI blocks: 5'WT gene segments ---
-    # The 5'WT region runs from gene start (or last superblock boundary) to this tile's oh1
-    # For the first tile, the 5'WT is empty (oligo carries PaqCI** directly via oh_L)
     bsai_parts <- character(0)
 
     if (tile$start_nt > 1L) {
-      # There is 5'WT sequence before this tile
       wt_5prime_start <- 1L
       wt_5prime_end <- tile$start_nt - 1L
 
-      # Find superblock boundaries within this 5'WT region
-      sb_in_region <- superblock_boundaries[
-        superblock_boundaries$junction_nt >= wt_5prime_start &
-        superblock_boundaries$junction_nt <= wt_5prime_end, , drop = FALSE
-      ]
+      # Find superblock splits for this region
+      if (use_precomputed_splits) {
+        sb_in_region <- sb_5wt[sb_5wt$tile_id == tile$tile_id, , drop = FALSE]
+        # Use split_nt as junction_nt
+        if (nrow(sb_in_region) > 0) {
+          sb_junction_nt <- sb_in_region$split_nt
+          sb_junction_oh <- sb_in_region$junction_oh
+        } else {
+          sb_junction_nt <- integer(0)
+          sb_junction_oh <- character(0)
+        }
+      } else {
+        sb_in_region <- superblock_boundaries[
+          superblock_boundaries$junction_nt >= wt_5prime_start &
+          superblock_boundaries$junction_nt <= wt_5prime_end, , drop = FALSE
+        ]
+        sb_junction_nt <- sb_in_region$junction_nt
+        sb_junction_oh <- sb_in_region$junction_oh
+      }
 
-      if (nrow(sb_in_region) == 0) {
+      if (length(sb_junction_nt) == 0) {
         # Single 5'WT block
         wt_5prime_seq <- substring(cds, wt_5prime_start, wt_5prime_end)
         block_name <- paste0("bsai_5wt_tile", tile$tile_id)
 
-        # 5' end: oh_L overhang (first 4nt of gene for first superblock,
-        #         or superblock junction oh for subsequent)
         oh_5 <- substring(cds, wt_5prime_start, wt_5prime_start + 3L)
-        # 3' end: oh1 of this tile
         oh_3 <- tile$oh1_seq
 
         block_seq <- create_bsai_block(wt_5prime_seq, oh_5, oh_3)
@@ -93,7 +126,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs,
         bsai_parts <- block_name
       } else {
         # Split into superblocks at boundaries
-        split_points <- c(wt_5prime_start - 1L, sb_in_region$junction_nt, wt_5prime_end)
+        split_points <- c(wt_5prime_start - 1L, sb_junction_nt, wt_5prime_end)
         for (s in seq_len(length(split_points) - 1L)) {
           sub_start <- split_points[s] + 1L
           sub_end <- split_points[s + 1L]
@@ -102,7 +135,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs,
 
           oh_5 <- substring(cds, sub_start, sub_start + 3L)
           oh_3 <- if (s < length(split_points) - 1L) {
-            sb_in_region$junction_oh[s]
+            sb_junction_oh[s]
           } else {
             tile$oh1_seq
           }
@@ -121,39 +154,67 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs,
     }
 
     # --- BsmBI blocks: 3'WT + PolIII segments ---
-    # The 3'WT region runs from this tile's oh2 to gene end (or next superblock boundary)
-    # PolIII is appended to the last 3'WT block
     bsmbi_parts <- character(0)
 
     wt_3prime_start <- tile$end_nt + 1L
     wt_3prime_end <- gene_len
 
     if (wt_3prime_start <= gene_len) {
-      # There is 3'WT sequence after this tile
       wt_3prime_seq <- substring(cds, wt_3prime_start, wt_3prime_end)
 
-      # The last block in the BsmBI reaction carries PolIII appended
-      block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
+      # Check for pre-computed 3'WT splits
+      if (use_precomputed_splits) {
+        sb_3wt_region <- sb_3wt[sb_3wt$tile_id == tile$tile_id, , drop = FALSE]
+      } else {
+        sb_3wt_region <- data.frame(split_nt = integer(0), junction_oh = character(0),
+                                     stringsAsFactors = FALSE)
+      }
 
-      oh_5 <- tile$oh2_seq  # BsmBI overhang at tile-3'WT junction
-      oh_3 <- oh3           # Fixed BsmBI overhang at PolIII-barcode junction
+      if (nrow(sb_3wt_region) == 0) {
+        # Single 3'WT + PolIII block
+        block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
+        oh_5 <- tile$oh2_seq
+        oh_3 <- oh3
+        block_seq <- create_bsmbi_block(paste0(wt_3prime_seq, polIII), oh_5, oh_3)
 
-      block_seq <- create_bsmbi_block(paste0(wt_3prime_seq, polIII), oh_5, oh_3)
+        blocks[[length(blocks) + 1]] <- data.frame(
+          block_name = block_name, sequence = block_seq,
+          length = nchar(block_seq), enzyme_type = "BsmBI",
+          gene_region = paste0("3wt_polIII_tile", tile$tile_id),
+          stringsAsFactors = FALSE
+        )
+        bsmbi_parts <- block_name
+      } else {
+        # Split 3'WT region at pre-computed split points
+        split_points <- c(wt_3prime_start - 1L, sb_3wt_region$split_nt, wt_3prime_end)
+        n_sub <- length(split_points) - 1L
+        for (s in seq_len(n_sub)) {
+          sub_start <- split_points[s] + 1L
+          sub_end <- split_points[s + 1L]
+          sub_seq <- substring(cds, sub_start, sub_end)
+          # Last sub-block gets PolIII appended
+          if (s == n_sub) sub_seq <- paste0(sub_seq, polIII)
 
-      blocks[[length(blocks) + 1]] <- data.frame(
-        block_name = block_name, sequence = block_seq,
-        length = nchar(block_seq), enzyme_type = "BsmBI",
-        gene_region = paste0("3wt_polIII_tile", tile$tile_id),
-        stringsAsFactors = FALSE
-      )
-      bsmbi_parts <- block_name
+          block_name <- paste0("bsmbi_3wt_tile", tile$tile_id, "_sub", s)
+          oh_5 <- if (s == 1L) tile$oh2_seq else sb_3wt_region$junction_oh[s - 1L]
+          oh_3 <- if (s < n_sub) sb_3wt_region$junction_oh[s] else oh3
+
+          block_seq <- create_bsmbi_block(sub_seq, oh_5, oh_3)
+
+          blocks[[length(blocks) + 1]] <- data.frame(
+            block_name = block_name, sequence = block_seq,
+            length = nchar(block_seq), enzyme_type = "BsmBI",
+            gene_region = paste0("3wt_polIII_tile", tile$tile_id, "_sub", s),
+            stringsAsFactors = FALSE
+          )
+          bsmbi_parts <- c(bsmbi_parts, block_name)
+        }
+      }
     } else {
       # This is the last tile — only PolIII fragment
       block_name <- paste0("bsmbi_polIII_tile", tile$tile_id)
-
       oh_5 <- tile$oh2_seq
       oh_3 <- oh3
-
       block_seq <- create_bsmbi_block(polIII, oh_5, oh_3)
 
       blocks[[length(blocks) + 1]] <- data.frame(
@@ -189,9 +250,9 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs,
   oh_L <- substring(cds, 1, 4)  # First 4 nt of gene
   helper <- design_helper_plasmid(oh_L, oh4, paqci_star2, paqci_star1)
 
-  # Check block lengths
+  # Check block lengths — only apply legacy splitting if NOT using assembly_plan
   over_limit <- all_blocks$length > max_block_length
-  if (any(over_limit)) {
+  if (any(over_limit) && !use_precomputed_splits) {
     cli::cli_alert_warning(paste0(
       sum(over_limit), " block(s) exceed ", max_block_length,
       " nt synthesis limit. Applying superblock splitting..."
@@ -199,6 +260,11 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs,
     all_blocks <- apply_superblock_splitting(
       all_blocks, cds, polIII, oh3, max_block_length, fidelity_threshold
     )
+  } else if (any(over_limit) && use_precomputed_splits) {
+    cli::cli_alert_warning(paste0(
+      sum(over_limit), " block(s) still exceed ", max_block_length,
+      " nt after pre-computed splits. May need additional splitting."
+    ))
   } else {
     cli::cli_alert_success(paste0(
       "All ", nrow(all_blocks), " gene blocks within synthesis limit. ",

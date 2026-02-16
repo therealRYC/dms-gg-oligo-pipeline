@@ -184,4 +184,94 @@ saveRDS(bsmbi_overhangs, "data/neb_overhang_fidelity/bsmbi_overhangs.rds")
 cat("Saved data/neb_overhang_fidelity/bsmbi_overhangs.rds\n")
 cat(sprintf("  %d overhangs >= 0.95 fidelity (BsmBI 1h)\n", sum(bsmbi_overhangs$fidelity >= 0.95)))
 
+# --- Dataset 4: High-Fidelity Overhang Sets ---
+# Pre-validated sets of mutually orthogonal overhangs selected for maximal
+# set-level fidelity. Based on Potapov 2018 individual fidelity data.
+# Selected via greedy algorithm: pick highest-fidelity overhangs that don't
+# collide (identity or reverse-complement) with already-selected members.
+
+# Helper: reverse complement (base R, no Biostrings needed)
+rc_base <- function(seq) {
+  comp <- chartr("ACGT", "TGCA", seq)
+  paste0(rev(strsplit(comp, "")[[1]]), collapse = "")
+}
+
+generate_hf_set_standalone <- function(oh_data, n_members) {
+  sorted <- oh_data[order(oh_data$fidelity, decreasing = TRUE), ]
+  selected <- character(0)
+  used <- character(0)
+  for (i in seq_len(nrow(sorted))) {
+    oh <- sorted$overhang[i]
+    oh_rc <- rc_base(oh)
+    if (!(oh %in% used) && !(oh_rc %in% used)) {
+      selected <- c(selected, oh)
+      used <- c(used, oh, oh_rc)
+      if (length(selected) == n_members) break
+    }
+  }
+  selected
+}
+
+hf_20 <- generate_hf_set_standalone(potapov_18h, 20)
+hf_10 <- generate_hf_set_standalone(potapov_18h, 10)
+
+hf_sets <- list(
+  potapov_set2_20 = hf_20,
+  potapov_set2_10 = hf_10
+)
+saveRDS(hf_sets, "data/neb_overhang_fidelity/high_fidelity_sets.rds")
+cat("Saved data/neb_overhang_fidelity/high_fidelity_sets.rds\n")
+cat(sprintf("  20-member set: %s\n", paste(hf_20, collapse = ", ")))
+cat(sprintf("  10-member set: %s\n", paste(hf_10, collapse = ", ")))
+
+# --- Dataset 5: Pairwise Ligation Matrices (synthetic) ---
+# 256x256 matrices where M[X,Y] = ligation frequency of overhang X with RC(Y).
+# Generated from individual fidelity data using a Hamming-distance model for
+# cross-reactivity. When real Potapov/Pryor pairwise matrices are available,
+# regenerate these from the tatapov Python package.
+
+generate_pairwise_standalone <- function(oh_data) {
+  overhangs <- oh_data$overhang
+  fidelities <- oh_data$fidelity
+  names(fidelities) <- overhangs
+  n <- length(overhangs)
+
+  rcs <- vapply(overhangs, rc_base, character(1), USE.NAMES = FALSE)
+  oh_chars <- lapply(overhangs, function(x) strsplit(x, "")[[1]])
+  rc_chars <- lapply(rcs, function(x) strsplit(x, "")[[1]])
+
+  mat <- matrix(0, nrow = n, ncol = n, dimnames = list(overhangs, overhangs))
+  for (i in seq_len(n)) {
+    f_i <- fidelities[i]
+    chars_i <- oh_chars[[i]]
+    raw_weights <- numeric(n)
+    for (j in seq_len(n)) {
+      if (i == j) next
+      h <- sum(chars_i != rc_chars[[j]])
+      raw_weights[j] <- exp(-2 * h)
+    }
+    correct_val <- 1000
+    target_off_total <- correct_val * (1 / f_i - 1)
+    raw_sum <- sum(raw_weights)
+    if (raw_sum > 0) {
+      mat[i, ] <- raw_weights / raw_sum * target_off_total
+    }
+    mat[i, i] <- correct_val
+  }
+  mat
+}
+
+cat("Generating pairwise matrices (this may take a minute)...\n")
+potapov_18h_pw <- generate_pairwise_standalone(potapov_18h)
+saveRDS(potapov_18h_pw, "data/neb_overhang_fidelity/potapov_18h_pairwise.rds")
+cat("Saved data/neb_overhang_fidelity/potapov_18h_pairwise.rds\n")
+
+bsai_pw <- generate_pairwise_standalone(bsai_overhangs)
+saveRDS(bsai_pw, "data/neb_overhang_fidelity/bsai_pairwise.rds")
+cat("Saved data/neb_overhang_fidelity/bsai_pairwise.rds\n")
+
+bsmbi_pw <- generate_pairwise_standalone(bsmbi_overhangs)
+saveRDS(bsmbi_pw, "data/neb_overhang_fidelity/bsmbi_pairwise.rds")
+cat("Saved data/neb_overhang_fidelity/bsmbi_pairwise.rds\n")
+
 cat("\nAll data files generated.\n")

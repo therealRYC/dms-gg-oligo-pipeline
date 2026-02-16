@@ -1,6 +1,11 @@
 # utils.R — Shared helper functions
 # DMS Golden Gate Oligo Pipeline
 
+# Null-coalescing operator (not in base R; available in rlang)
+if (!exists("%||%", mode = "function")) {
+  `%||%` <- function(a, b) if (!is.null(a)) a else b
+}
+
 #' Reverse complement of a DNA string
 #' @param seq Character string of DNA sequence (uppercase)
 #' @return Character string of reverse complement
