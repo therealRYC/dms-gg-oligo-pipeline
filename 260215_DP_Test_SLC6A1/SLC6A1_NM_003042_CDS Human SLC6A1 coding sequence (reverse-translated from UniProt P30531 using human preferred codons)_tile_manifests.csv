@@ -1,0 +1,11 @@
+tile_id,bsai_parts,bsmbi_parts
+1,,bsmbi_3wt_tile1_sub1;bsmbi_3wt_tile1_sub2
+2,bsai_5wt_tile2,bsmbi_3wt_tile2
+3,bsai_5wt_tile3,bsmbi_3wt_tile3
+4,bsai_5wt_tile4,bsmbi_3wt_tile4
+5,bsai_5wt_tile5,bsmbi_3wt_tile5
+6,bsai_5wt_tile6,bsmbi_3wt_tile6
+7,bsai_5wt_tile7,bsmbi_3wt_tile7
+8,bsai_5wt_tile8,bsmbi_3wt_tile8
+9,bsai_5wt_tile9,bsmbi_3wt_tile9
+10,bsai_5wt_tile10,bsmbi_polIII_tile10
