@@ -9,9 +9,9 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 
 The pipeline generates all 19 amino acid substitutions + 1 stop codon at every position in a gene, each encoded as a single fully-specified oligo with a programmed barcode. Assembly uses a three-enzyme architecture:
 
-- **BsaI** (Level 1): Stitches the mutant tile into flanking WT gene blocks
-- **BsmBI** (Level 1b): Joins the PolIII promoter and barcode cassette
-- **PaqCI** (Level 2): Clones the full-length insert into the destination backbone
+- **BsaI** (Level 1): Inserts the oligo (mutant tile + barcode) and 5' WT gene block(s) into the helper plasmid
+- **BsmBI** (Level 1b): Inserts the 3' WT gene block(s) and PolIII promoter between the tile and barcode
+- **PaqCI** (Level 2): Clones the full-length insert from the helper plasmid into the destination backbone
 
 The final construct in the plasmid:
 ```
