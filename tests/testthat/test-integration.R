@@ -1,4 +1,5 @@
 # test-integration.R — Full pipeline integration test (3-enzyme architecture)
+# Updated to use plan_assembly() for dynamic tile boundary search + overhang selection
 
 test_that("full pipeline runs on short test gene (3-enzyme)", {
   # Write test FASTA
@@ -20,6 +21,7 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
     "barcode_gc_range: [0.25, 0.75]",
     "barcode_max_homopolymer: 4",
     "overhang_fidelity_threshold: 0.95",
+    "search_window_K: 15",
     "auto_domesticate: true",
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",
@@ -58,39 +60,43 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
   expect_equal(nrow(variants), 100 * 20)  # 100 codons * 20 mutations
 
-  # Step 6: Tile (3-enzyme overhead)
+  # Step 6: Plan assembly (dynamic tile boundary search + overhang selection)
   tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
-  tiles <- partition_tiles(gene$cds, tile_size)
+  assembly_plan <- plan_assembly(
+    cds = gene$cds,
+    polIII = cfg$polIII_promoter,
+    max_mutable_nt = tile_size,
+    max_block_length = cfg$max_geneblock_length,
+    config = list(
+      fidelity_threshold = cfg$overhang_fidelity_threshold,
+      search_window_K = cfg$search_window_K
+    )
+  )
+  tiles <- assembly_plan$tiles
+  oh3 <- assembly_plan$oh3
+  oh4 <- assembly_plan$oh4
+  tile_overhangs <- extract_tile_overhangs(tiles)
   variants <- assign_variants_to_tiles(variants, tiles)
+
+  # Verify assembly plan
+  expect_true(is.list(assembly_plan))
+  expect_true(!is.null(assembly_plan$tiles))
+  expect_equal(nchar(oh3), 4)
+  expect_equal(nchar(oh4), 4)
+  expect_true(!is.null(assembly_plan$reaction_fidelity))
+  expect_true(nrow(assembly_plan$reaction_fidelity) > 0)
   expect_true(all(!is.na(variants$tile_id)))
 
-  # Check tiles have oh1/oh2
+  # Tiles should have HF membership info
+  expect_true("oh1_in_hf" %in% names(tiles))
+  expect_true("oh2_in_hf" %in% names(tiles))
   expect_true(all(nchar(tiles$oh1_seq) == 4))
   expect_true(all(nchar(tiles$oh2_seq) == 4))
 
-  # Step 7: Extract tile overhangs
-  tile_overhangs <- extract_tile_overhangs(tiles)
-  expect_equal(nrow(tile_overhangs), nrow(tiles))
+  # Short gene shouldn't need superblock splits
+  expect_equal(nrow(assembly_plan$superblock_splits), 0)
 
-  # Step 8: Select fixed overhangs
-  fixed_ohs <- select_fixed_overhangs(
-    gene$cds, cfg$polIII_promoter, tile_overhangs,
-    fidelity_threshold = cfg$overhang_fidelity_threshold
-  )
-  oh3 <- fixed_ohs$oh3
-  oh4 <- fixed_ohs$oh4
-  expect_equal(nchar(oh3), 4)
-  expect_equal(nchar(oh4), 4)
-
-  # Step 9: Superblock boundaries (short gene — should be empty)
-  superblock_boundaries <- compute_superblock_boundaries(
-    gene$cds, tiles,
-    polIII_len = nchar(cfg$polIII_promoter),
-    max_block_length = cfg$max_geneblock_length
-  )
-  expect_equal(nrow(superblock_boundaries), 0)
-
-  # Step 10: Design barcodes
+  # Step 7: Design barcodes
   barcode_result <- design_barcodes(
     n_variants = nrow(variants),
     barcode_length = cfg$barcode_length,
@@ -100,7 +106,7 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   barcodes <- barcode_result$barcodes
   expect_equal(length(barcodes), nrow(variants))
 
-  # Step 11: Assemble oligos (universal structure)
+  # Step 8: Assemble oligos (universal structure)
   oligos <- assemble_oligos(
     variants = variants, cds = gene$cds, barcodes = barcodes,
     tiles = tiles, oh3 = oh3, oh4 = oh4,
@@ -112,29 +118,32 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   # Verify all oligos start with BsaI
   expect_true(all(startsWith(oligos$sequence, "GGTCTCA")))
 
-  # Step 12: Design gene blocks + helper plasmid
+  # Step 9: Design gene blocks + helper plasmid (with assembly_plan)
   geneblock_result <- design_wt_geneblocks(
     cds = gene$cds, polIII = cfg$polIII_promoter,
-    tiles = tiles, tile_overhangs = tile_overhangs,
-    oh3 = oh3, oh4 = oh4,
+    tiles = tiles, oh3 = oh3, oh4 = oh4,
     paqci_star2 = cfg$paqci_star2, paqci_star1 = cfg$paqci_star1,
-    superblock_boundaries = superblock_boundaries,
-    max_block_length = cfg$max_geneblock_length
+    max_block_length = cfg$max_geneblock_length,
+    assembly_plan = assembly_plan
   )
   expect_true(nrow(geneblock_result$blocks) > 0)
   expect_equal(nrow(geneblock_result$tile_manifests), nrow(tiles))
   expect_equal(nrow(geneblock_result$helper_plasmid), 1)
 
-  # Step 13: QC
+  # Step 10: QC (with assembly_plan for per-reaction fidelity)
   qc_result <- run_qc_checks(
     oligos = oligos, geneblock_result = geneblock_result,
     variants = variants, barcodes = barcodes,
     tiles = tiles, tile_overhangs = tile_overhangs,
-    cds = gene$cds, oh3 = oh3, oh4 = oh4
+    cds = gene$cds, oh3 = oh3, oh4 = oh4,
+    assembly_plan = assembly_plan
   )
   expect_true(is.logical(qc_result$qc_pass))
 
-  # Step 14: Write outputs
+  # Per-reaction fidelity check should be in the QC report
+  expect_true("reaction_fidelity" %in% qc_result$qc_report$check_name)
+
+  # Step 11: Write outputs
   variants$barcode_idx <- 1L
   output_paths <- write_outputs(
     oligos = oligos, geneblock_result = geneblock_result,
@@ -182,6 +191,7 @@ test_that("full pipeline runs on long test gene with superblocking", {
     "barcode_gc_range: [0.25, 0.75]",
     "barcode_max_homopolymer: 4",
     "overhang_fidelity_threshold: 0.95",
+    "search_window_K: 15",
     "auto_domesticate: true",
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",
@@ -218,34 +228,43 @@ test_that("full pipeline runs on long test gene with superblocking", {
   variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
   expect_equal(nrow(variants), 700 * 20)  # 700 codons * 20 mutations
 
-  # Step 6: Tile
+  # Step 6: Plan assembly (dynamic tile boundary search + superblocks)
   tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
-  tiles <- partition_tiles(gene$cds, tile_size)
+  assembly_plan <- plan_assembly(
+    cds = gene$cds,
+    polIII = cfg$polIII_promoter,
+    max_mutable_nt = tile_size,
+    max_block_length = cfg$max_geneblock_length,
+    config = list(
+      fidelity_threshold = cfg$overhang_fidelity_threshold,
+      search_window_K = cfg$search_window_K
+    )
+  )
+  tiles <- assembly_plan$tiles
+  oh3 <- assembly_plan$oh3
+  oh4 <- assembly_plan$oh4
+  tile_overhangs <- extract_tile_overhangs(tiles)
   variants <- assign_variants_to_tiles(variants, tiles)
+
+  # Verify assembly plan for long gene
   expect_true(nrow(tiles) >= 8)  # 2100/243 ~ 8.6 → at least 9 tiles
   expect_true(all(!is.na(variants$tile_id)))
+  expect_equal(nchar(oh3), 4)
+  expect_equal(nchar(oh4), 4)
 
-  # Step 7: Extract tile overhangs
-  tile_overhangs <- extract_tile_overhangs(tiles)
+  # Long gene should trigger superblock splits
+  expect_true(nrow(assembly_plan$superblock_splits) > 0,
+              info = "2100 nt gene should trigger superblock splitting")
 
-  # Step 8: Select fixed overhangs
-  fixed_ohs <- select_fixed_overhangs(
-    gene$cds, cfg$polIII_promoter, tile_overhangs,
-    fidelity_threshold = cfg$overhang_fidelity_threshold
-  )
-  oh3 <- fixed_ohs$oh3
-  oh4 <- fixed_ohs$oh4
+  # All junction overhangs should be 4-nt gene-derived
+  if (nrow(assembly_plan$superblock_splits) > 0) {
+    expect_true(all(nchar(assembly_plan$superblock_splits$junction_oh) == 4))
+  }
 
-  # Step 9: Superblock boundaries — long gene SHOULD have boundaries
-  superblock_boundaries <- compute_superblock_boundaries(
-    gene$cds, tiles,
-    polIII_len = nchar(cfg$polIII_promoter),
-    max_block_length = cfg$max_geneblock_length
-  )
-  expect_true(nrow(superblock_boundaries) > 0,
-              info = "Long gene should trigger superblock boundaries")
+  # Per-reaction fidelity should be computed
+  expect_true(nrow(assembly_plan$reaction_fidelity) > 0)
 
-  # Step 10: Design barcodes
+  # Step 7: Design barcodes
   barcode_result <- design_barcodes(
     n_variants = nrow(variants),
     barcode_length = cfg$barcode_length,
@@ -255,7 +274,7 @@ test_that("full pipeline runs on long test gene with superblocking", {
   barcodes <- barcode_result$barcodes
   expect_equal(length(barcodes), nrow(variants))
 
-  # Step 11: Assemble oligos
+  # Step 8: Assemble oligos
   oligos <- assemble_oligos(
     variants = variants, cds = gene$cds, barcodes = barcodes,
     tiles = tiles, oh3 = oh3, oh4 = oh4,
@@ -265,14 +284,13 @@ test_that("full pipeline runs on long test gene with superblocking", {
   expect_true(all(oligos$length <= cfg$max_oligo_length))
   expect_true(all(startsWith(oligos$sequence, "GGTCTCA")))
 
-  # Step 12: Design gene blocks + helper plasmid
+  # Step 9: Design gene blocks + helper plasmid (with assembly_plan)
   geneblock_result <- design_wt_geneblocks(
     cds = gene$cds, polIII = cfg$polIII_promoter,
-    tiles = tiles, tile_overhangs = tile_overhangs,
-    oh3 = oh3, oh4 = oh4,
+    tiles = tiles, oh3 = oh3, oh4 = oh4,
     paqci_star2 = cfg$paqci_star2, paqci_star1 = cfg$paqci_star1,
-    superblock_boundaries = superblock_boundaries,
-    max_block_length = cfg$max_geneblock_length
+    max_block_length = cfg$max_geneblock_length,
+    assembly_plan = assembly_plan
   )
   expect_true(nrow(geneblock_result$blocks) > 0)
   expect_equal(nrow(geneblock_result$tile_manifests), nrow(tiles))
@@ -281,16 +299,17 @@ test_that("full pipeline runs on long test gene with superblocking", {
   # Gene blocks should all fit within synthesis limits
   expect_true(all(geneblock_result$blocks$length <= cfg$max_geneblock_length))
 
-  # Step 13: QC
+  # Step 10: QC (with assembly_plan)
   qc_result <- run_qc_checks(
     oligos = oligos, geneblock_result = geneblock_result,
     variants = variants, barcodes = barcodes,
     tiles = tiles, tile_overhangs = tile_overhangs,
-    cds = gene$cds, oh3 = oh3, oh4 = oh4
+    cds = gene$cds, oh3 = oh3, oh4 = oh4,
+    assembly_plan = assembly_plan
   )
   expect_true(is.logical(qc_result$qc_pass))
 
-  # Step 14: Write outputs
+  # Step 11: Write outputs
   variants$barcode_idx <- 1L
   output_paths <- write_outputs(
     oligos = oligos, geneblock_result = geneblock_result,
@@ -338,6 +357,7 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
     "barcode_gc_range: [0.25, 0.75]",
     "barcode_max_homopolymer: 4",
     "overhang_fidelity_threshold: 0.95",
+    "search_window_K: 15",
     "auto_domesticate: true",
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",
@@ -377,37 +397,38 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
   expect_equal(nrow(variants), 3098 * 20)
 
-  # Step 6: Tile
+  # Step 6: Plan assembly (dynamic tile boundary search + superblocks)
   tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
-  tiles <- partition_tiles(gene$cds, tile_size)
+  assembly_plan <- plan_assembly(
+    cds = gene$cds,
+    polIII = cfg$polIII_promoter,
+    max_mutable_nt = tile_size,
+    max_block_length = cfg$max_geneblock_length,
+    config = list(
+      fidelity_threshold = cfg$overhang_fidelity_threshold,
+      search_window_K = cfg$search_window_K
+    )
+  )
+  tiles <- assembly_plan$tiles
+  oh3 <- assembly_plan$oh3
+  oh4 <- assembly_plan$oh4
+  tile_overhangs <- extract_tile_overhangs(tiles)
   variants <- assign_variants_to_tiles(variants, tiles)
+
   expect_true(nrow(tiles) >= 38,
               info = "9294 nt / 243 nt per tile ~ 39 tiles")
   expect_true(all(!is.na(variants$tile_id)))
-
-  # Step 7: Extract tile overhangs
-  tile_overhangs <- extract_tile_overhangs(tiles)
-
-  # Step 8: Select fixed overhangs
-  fixed_ohs <- select_fixed_overhangs(
-    gene$cds, cfg$polIII_promoter, tile_overhangs,
-    fidelity_threshold = cfg$overhang_fidelity_threshold
-  )
-  oh3 <- fixed_ohs$oh3
-  oh4 <- fixed_ohs$oh4
   expect_equal(nchar(oh3), 4)
   expect_equal(nchar(oh4), 4)
 
-  # Step 9: Superblock boundaries — TRIO MUST trigger superblocking
-  superblock_boundaries <- compute_superblock_boundaries(
-    gene$cds, tiles,
-    polIII_len = nchar(cfg$polIII_promoter),
-    max_block_length = cfg$max_geneblock_length
-  )
-  expect_true(nrow(superblock_boundaries) >= 5,
-              info = "TRIO (9294 nt) should have >= 5 superblock boundaries")
+  # TRIO MUST trigger superblock splitting
+  expect_true(nrow(assembly_plan$superblock_splits) >= 5,
+              info = "TRIO (9294 nt) should have >= 5 superblock split points")
 
-  # Step 10: Design barcodes
+  # Per-reaction fidelity should be computed
+  expect_true(nrow(assembly_plan$reaction_fidelity) > 0)
+
+  # Step 7: Design barcodes
   barcode_result <- design_barcodes(
     n_variants = nrow(variants),
     barcode_length = cfg$barcode_length,
@@ -417,7 +438,7 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   barcodes <- barcode_result$barcodes
   expect_equal(length(barcodes), nrow(variants))
 
-  # Step 11: Assemble oligos
+  # Step 8: Assemble oligos
   oligos <- assemble_oligos(
     variants = variants, cds = gene$cds, barcodes = barcodes,
     tiles = tiles, oh3 = oh3, oh4 = oh4,
@@ -427,14 +448,13 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   expect_true(all(oligos$length <= cfg$max_oligo_length))
   expect_true(all(startsWith(oligos$sequence, "GGTCTCA")))
 
-  # Step 12: Design gene blocks + helper plasmid
+  # Step 9: Design gene blocks + helper plasmid (with assembly_plan)
   geneblock_result <- design_wt_geneblocks(
     cds = gene$cds, polIII = cfg$polIII_promoter,
-    tiles = tiles, tile_overhangs = tile_overhangs,
-    oh3 = oh3, oh4 = oh4,
+    tiles = tiles, oh3 = oh3, oh4 = oh4,
     paqci_star2 = cfg$paqci_star2, paqci_star1 = cfg$paqci_star1,
-    superblock_boundaries = superblock_boundaries,
-    max_block_length = cfg$max_geneblock_length
+    max_block_length = cfg$max_geneblock_length,
+    assembly_plan = assembly_plan
   )
   expect_true(nrow(geneblock_result$blocks) > 0)
   expect_equal(nrow(geneblock_result$tile_manifests), nrow(tiles))
@@ -444,16 +464,17 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   expect_true(all(geneblock_result$blocks$length <= cfg$max_geneblock_length),
               info = "All blocks must be <= 1800 nt after superblock splitting")
 
-  # Step 13: QC
+  # Step 10: QC (with assembly_plan)
   qc_result <- run_qc_checks(
     oligos = oligos, geneblock_result = geneblock_result,
     variants = variants, barcodes = barcodes,
     tiles = tiles, tile_overhangs = tile_overhangs,
-    cds = gene$cds, oh3 = oh3, oh4 = oh4
+    cds = gene$cds, oh3 = oh3, oh4 = oh4,
+    assembly_plan = assembly_plan
   )
   expect_true(is.logical(qc_result$qc_pass))
 
-  # Step 14: Write outputs
+  # Step 11: Write outputs
   variants$barcode_idx <- 1L
   output_paths <- write_outputs(
     oligos = oligos, geneblock_result = geneblock_result,

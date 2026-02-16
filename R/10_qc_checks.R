@@ -15,13 +15,15 @@
 #' @param max_oligo_length Max oligo length
 #' @param max_block_length Max gene block length
 #' @param min_hamming Min Hamming distance for barcodes
+#' @param assembly_plan Optional assembly_plan from plan_assembly() for per-reaction fidelity QC
 #' @return List with qc_pass (logical) and qc_report (data frame of checks)
 run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
                            tiles, tile_overhangs, cds,
                            oh3, oh4,
                            max_oligo_length = MAX_OLIGO_LENGTH,
                            max_block_length = MAX_GENEBLOCK_LENGTH,
-                           min_hamming = DEFAULT_MIN_HAMMING) {
+                           min_hamming = DEFAULT_MIN_HAMMING,
+                           assembly_plan = NULL) {
   checks <- list()
   blocks <- geneblock_result$blocks
 
@@ -171,6 +173,21 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
     pass   = !helper_has_bsmbi,
     detail = if (helper_has_bsmbi) "BsmBI site found in helper plasmid!" else "OK"
   )
+
+  # 13. Per-reaction fidelity (when assembly_plan is available)
+  if (!is.null(assembly_plan) && !is.null(assembly_plan$reaction_fidelity)) {
+    rxn_fid <- assembly_plan$reaction_fidelity
+    min_fid <- min(rxn_fid$set_fidelity)
+    n_low <- sum(rxn_fid$set_fidelity < 0.90)
+    checks[[13]] <- qc_check(
+      name   = "reaction_fidelity",
+      desc   = "Per-reaction set-level overhang fidelity",
+      pass   = min_fid >= 0.80,
+      detail = paste0("Min set fidelity: ", round(min_fid, 4),
+                      " across ", nrow(rxn_fid), " reactions | ",
+                      n_low, " reaction(s) below 0.90")
+    )
+  }
 
   # Compile report
   report <- do.call(rbind, checks)

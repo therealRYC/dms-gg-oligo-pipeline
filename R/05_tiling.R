@@ -53,7 +53,12 @@ compute_max_tile_size <- function(max_oligo_length = 300L,
   mutable_size
 }
 
-#' Partition gene into tiles with oh1/oh2 invariant flanks
+#' Partition gene into tiles with oh1/oh2 invariant flanks (geometric, no HF search)
+#'
+#' NOTE: For production use, prefer plan_assembly() in 06_overhang_selection.R
+#' which uses dynamic boundary search to place tile boundaries at positions where
+#' the gene-derived overhangs fall within the high-fidelity set. This function
+#' uses simple geometric partitioning (equal-sized tiles).
 #'
 #' Each tile consists of:
 #'   oh1 (4nt WT flank) + mutable_codons + oh2 (4nt WT flank)
@@ -167,7 +172,12 @@ assign_variants_to_tiles <- function(variants, tiles) {
   variants
 }
 
-#' Compute superblock boundaries for long genes
+#' Compute superblock boundaries for long genes (geometric, no HF search)
+#'
+#' NOTE: For production use, prefer plan_assembly() in 06_overhang_selection.R
+#' which uses optimize_split_points() to search for split positions where the
+#' gene-derived junction overhang falls within the high-fidelity set. This
+#' function places boundaries at tile boundaries without HF optimization.
 #'
 #' Walks tile boundaries left to right, placing superblock boundaries
 #' when the accumulated gene length approaches the synthesis limit.
