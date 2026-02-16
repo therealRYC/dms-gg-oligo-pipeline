@@ -37,6 +37,13 @@ overhang_fidelity_threshold: 0.95          # Min fidelity score for auto-selecte
                                            # 0.95 gives ~117 high-fidelity overhangs (more than sufficient).
                                            # Lower to 0.90 (~186 overhangs) or 0.85 (~224) if needed.
 
+# --- Tile Boundary Optimization ---
+boundary_method: "dp"                        # "dp" (default) or "greedy". DP uses dynamic programming
+                                             # to find globally optimal tile boundaries; greedy uses a
+                                             # local forward search within +/- search_window_K codons.
+multi_k_search: true                         # Try multiple tile counts (K-2 to K+2) to find the
+                                             # tiling with best average overhang quality. Default true.
+
 # --- Fixed Overhangs for 3-Enzyme Assembly ---
 # oh3: 4-nt BsmBI overhang at PolIII-barcode junction (same for all tiles)
 # oh4: 4-nt BsaI overhang at barcode-helper plasmid junction (same for all tiles)

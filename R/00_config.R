@@ -22,6 +22,8 @@ load_config <- function(config_path) {
     barcode_max_homopolymer  = 4L,
     overhang_fidelity_threshold = 0.95,
     search_window_K          = 15L,
+    boundary_method          = "dp",
+    multi_k_search           = TRUE,
     barcodes_per_variant     = 1L,
     auto_domesticate         = TRUE,
     output_dir               = "output"
@@ -43,6 +45,8 @@ load_config <- function(config_path) {
   cfg$barcode_gc_range      <- as.numeric(cfg$barcode_gc_range)
   cfg$overhang_fidelity_threshold <- as.numeric(cfg$overhang_fidelity_threshold)
   cfg$search_window_K       <- as.integer(cfg$search_window_K)
+  cfg$boundary_method       <- as.character(cfg$boundary_method)
+  cfg$multi_k_search        <- as.logical(cfg$multi_k_search)
   cfg$barcodes_per_variant <- as.integer(cfg$barcodes_per_variant)
 
   # --- Validate oh3 and oh4 ---

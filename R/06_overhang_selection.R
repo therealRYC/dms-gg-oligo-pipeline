@@ -508,6 +508,392 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
 }
 
 # =============================================================================
+# DYNAMIC PROGRAMMING TILE BOUNDARY OPTIMIZER
+# =============================================================================
+
+#' Precompute boundary scores for all valid codon positions
+#'
+#' For each codon position b in the gene, extract the gene-derived overhangs
+#' (oh1, oh2) and compute a composite score incorporating HF set membership,
+#' pairwise fidelity with oh_L (BsaI reaction), and individual fidelity (BsmBI).
+#'
+#' @param cds Domesticated gene sequence
+#' @param hf_set Character vector of high-fidelity overhangs
+#' @param oh_fidelity Data frame with overhang + fidelity columns
+#' @param bsai_matrix 256x256 BsaI pairwise ligation matrix (or NULL)
+#' @return List with vectors: oh1_seq, oh2_seq, score, valid (all length n_codons)
+precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
+                                        bsai_matrix = NULL) {
+  gene_len <- nchar(cds)
+  n_codons <- gene_len %/% 3L
+  oh_L <- substring(cds, 1, 4)
+  oh_L_rc <- reverse_complement(oh_L)
+
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+
+  oh1_seq <- character(n_codons)
+  oh2_seq <- character(n_codons)
+  scores  <- rep(-Inf, n_codons)
+  valid   <- logical(n_codons)
+  oh1_hf  <- logical(n_codons)
+  oh2_hf  <- logical(n_codons)
+
+  for (b in seq_len(n_codons - 1L)) {
+    oh2_pos <- b * 3L
+    oh1_pos <- oh2_pos + 1L
+    oh2 <- substring(cds, oh2_pos - 3L, oh2_pos)
+    oh1 <- substring(cds, oh1_pos, oh1_pos + 3L)
+
+    oh1_seq[b] <- oh1
+    oh2_seq[b] <- oh2
+
+    # Hard constraint: oh1 must not collide with oh_L in BsaI reaction
+    if (oh1 == oh_L || oh1 == oh_L_rc) {
+      valid[b] <- FALSE
+      next
+    }
+    valid[b] <- TRUE
+
+    # HF membership (10 pts each)
+    oh1_in <- oh1 %in% hf_set
+    oh2_in <- oh2 %in% hf_set
+    oh1_hf[b] <- oh1_in
+    oh2_hf[b] <- oh2_in
+    hf_bonus <- 10.0 * (oh1_in + oh2_in)
+
+    # oh1 pairwise fidelity with oh_L (BsaI reaction context)
+    if (!is.null(bsai_matrix) && oh1 %in% rownames(bsai_matrix) &&
+        oh_L %in% rownames(bsai_matrix)) {
+      sf <- compute_set_fidelity(c(oh_L, oh1), bsai_matrix)
+      oh1_pw <- sf$set_fidelity
+    } else {
+      oh1_pw <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else 0.5
+    }
+
+    # oh2 individual fidelity (BsmBI reaction partner oh3 not yet chosen)
+    oh2_fid <- if (oh2 %in% names(fid_lookup)) unname(fid_lookup[oh2]) else 0.5
+
+    # Penalize boundaries where either overhang has very low individual fidelity
+    fid_penalty <- 0.0
+    oh1_ind_fid <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else 0.5
+    if (oh1_ind_fid < 0.80 || oh2_fid < 0.80) fid_penalty <- -5.0
+
+    scores[b] <- hf_bonus + 2.0 * oh1_pw + 1.0 * oh2_fid + fid_penalty
+  }
+
+  list(
+    oh1_seq = oh1_seq, oh2_seq = oh2_seq,
+    score = scores, valid = valid,
+    oh1_hf = oh1_hf, oh2_hf = oh2_hf
+  )
+}
+
+#' Solve the boundary placement DP for a fixed number of boundaries K
+#'
+#' Finds the K boundary positions that maximize total boundary score,
+#' subject to tile size constraints [min_codons, max_codons].
+#'
+#' @param K Number of internal boundaries (tiles = K + 1)
+#' @param n_codons Total codons in gene
+#' @param min_codons Minimum tile size in codons
+#' @param max_codons Maximum tile size in codons
+#' @param boundary_scores Numeric vector of scores per codon position
+#' @param boundary_valid Logical vector of valid positions
+#' @return List with boundaries (integer vector) and total_score, or NULL
+dp_solve_k <- function(K, n_codons, min_codons, max_codons,
+                        boundary_scores, boundary_valid) {
+  if (K == 0L) return(NULL)
+
+  # Early feasibility check: need at least (K+1)*min_codons codons
+  if ((K + 1L) * min_codons > n_codons) return(NULL)
+
+  # dp_prev[b] = best total score with previous boundary layer ending at codon b
+  dp_prev <- rep(-Inf, n_codons)
+  # Parent pointers: parent[k, b] = optimal predecessor position for boundary k at b
+  parent <- matrix(NA_integer_, nrow = K, ncol = n_codons)
+
+  # Layer k=1: first boundary, first tile spans [1..b]
+  lo_b <- min_codons
+  hi_b <- min(max_codons, n_codons - 1L)
+  if (lo_b <= hi_b) {
+    for (b in lo_b:hi_b) {
+      if (!boundary_valid[b]) next
+      dp_prev[b] <- boundary_scores[b]
+    }
+  }
+
+  # Layers k=2..K
+  if (K >= 2L) {
+    for (k in 2L:K) {
+      dp_curr <- rep(-Inf, n_codons)
+
+      lo_b <- k * min_codons
+      hi_b <- min(n_codons - 1L, n_codons - min_codons)
+      if (lo_b > hi_b) {
+        dp_prev <- dp_curr
+        next
+      }
+
+      for (b in lo_b:hi_b) {
+        if (!boundary_valid[b]) next
+
+        # Predecessor range: b' must give tile size [min_codons, max_codons]
+        lo <- max(1L, b - max_codons)
+        hi <- b - min_codons
+        if (hi < lo) next
+
+        # Scan for best predecessor in [lo, hi]
+        best_score <- -Inf
+        best_pos <- NA_integer_
+        for (bp in lo:hi) {
+          if (dp_prev[bp] > best_score) {
+            best_score <- dp_prev[bp]
+            best_pos <- bp
+          }
+        }
+
+        if (is.finite(best_score)) {
+          dp_curr[b] <- best_score + boundary_scores[b]
+          parent[k, b] <- best_pos
+        }
+      }
+
+      dp_prev <- dp_curr
+    }
+  }
+
+  # Find optimal last boundary: last tile must be [min_codons, max_codons]
+  best_total <- -Inf
+  best_b <- NA_integer_
+  for (b in seq_len(n_codons - 1L)) {
+    last_tile <- n_codons - b
+    if (last_tile < min_codons || last_tile > max_codons) next
+    if (dp_prev[b] > best_total) {
+      best_total <- dp_prev[b]
+      best_b <- b
+    }
+  }
+
+  if (!is.finite(best_total)) return(NULL)
+
+  # Backtrack to recover boundary positions
+  boundaries <- integer(K)
+  boundaries[K] <- best_b
+  if (K >= 2L) {
+    for (k in K:2L) {
+      boundaries[k - 1L] <- parent[k, boundaries[k]]
+    }
+  }
+
+  list(boundaries = boundaries, total_score = best_total)
+}
+
+#' Search tile boundaries using dynamic programming (globally optimal)
+#'
+#' Replaces the greedy forward search with a DP that finds the globally optimal
+#' set of tile boundary positions maximizing total overhang quality. Inspired by
+#' OOGGA (Pryor et al.) and NEB SplitSet approaches.
+#'
+#' The DP explores ALL valid boundary positions (not just a local window),
+#' and optionally searches across different tile counts (multi-K) to find
+#' the best tiling of the gene.
+#'
+#' @param cds Domesticated gene sequence
+#' @param max_mutable_nt Max mutable region size in nt (from compute_max_tile_size)
+#' @param min_mutable_nt Min mutable region size in nt (default: max/3, floor 81)
+#' @param hf_set Character vector of high-fidelity overhangs
+#' @param oh_fidelity Data frame with overhang + fidelity columns
+#' @param bsai_matrix BsaI 256x256 pairwise ligation matrix (for oh1 scoring)
+#' @param multi_k Logical: try multiple tile counts? (default TRUE)
+#' @param k_range Integer vector of K values to try (NULL = auto)
+#' @param search_window_K Unused (kept for interface compatibility)
+#' @return Data frame with tile info (same format as search_tile_boundaries)
+search_tile_boundaries_dp <- function(cds, max_mutable_nt,
+                                       min_mutable_nt = NULL,
+                                       hf_set = NULL,
+                                       oh_fidelity = NULL,
+                                       bsai_matrix = NULL,
+                                       multi_k = TRUE,
+                                       k_range = NULL,
+                                       search_window_K = NULL) {
+  gene_len <- nchar(cds)
+  n_codons <- gene_len %/% 3L
+
+  if (is.null(min_mutable_nt)) {
+    min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
+    min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
+  }
+  if (is.null(hf_set)) hf_set <- load_high_fidelity_set()
+  if (is.null(oh_fidelity)) oh_fidelity <- builtin_overhang_fidelity()
+  if (is.null(bsai_matrix)) {
+    bsai_matrix <- tryCatch(load_pairwise_matrix("BsaI"), error = function(e) NULL)
+  }
+
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+
+  max_codons <- max_mutable_nt %/% 3L
+  min_codons <- min_mutable_nt %/% 3L
+
+  # Single-tile gene: no boundaries to search
+  if (n_codons <= max_codons) {
+    oh1 <- substring(cds, 1, 4)
+    oh2 <- substring(cds, gene_len - 3, gene_len)
+    oh1_fid <- if (oh1 %in% names(fid_lookup)) fid_lookup[oh1] else NA_real_
+    oh2_fid <- if (oh2 %in% names(fid_lookup)) fid_lookup[oh2] else NA_real_
+
+    return(data.frame(
+      tile_id       = 1L,
+      start_codon   = 1L,
+      end_codon     = n_codons,
+      start_nt      = 1L,
+      end_nt        = gene_len,
+      oh1_seq       = oh1,
+      oh2_seq       = oh2,
+      oh1_in_hf     = oh1 %in% hf_set,
+      oh2_in_hf     = oh2 %in% hf_set,
+      oh1_fidelity  = unname(oh1_fid),
+      oh2_fidelity  = unname(oh2_fid),
+      tile_seq      = cds,
+      boundary_shift = 0L,
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  # Precompute scores for all boundary positions
+  precomp <- precompute_boundary_scores(cds, hf_set, oh_fidelity, bsai_matrix)
+
+  # Determine K range to search
+  K_ideal <- ceiling(n_codons / max_codons) - 1L
+  if (is.null(k_range)) {
+    if (multi_k) {
+      K_min <- max(1L, ceiling(n_codons / max_codons) - 1L)
+      K_max <- floor(n_codons / min_codons) - 1L
+      k_range <- seq(max(K_min, K_ideal - 2L), min(K_max, K_ideal + 2L))
+      k_range <- k_range[k_range >= 1L]
+    } else {
+      k_range <- K_ideal
+    }
+  }
+
+  cli::cli_alert_info(paste0(
+    "DP boundary search: ", n_codons, " codons, ",
+    sum(precomp$valid), " valid candidate positions, K range [",
+    min(k_range), ", ", max(k_range), "]"
+  ))
+
+  # Run DP for each K, track best
+  best_result <- NULL
+  best_avg_score <- -Inf
+  k_results <- list()
+
+  for (K in k_range) {
+    result <- dp_solve_k(K, n_codons, min_codons, max_codons,
+                          precomp$score, precomp$valid)
+    if (!is.null(result)) {
+      avg <- result$total_score / K
+      k_results[[as.character(K)]] <- list(K = K, score = result$total_score, avg = avg)
+      if (avg > best_avg_score) {
+        best_avg_score <- avg
+        best_result <- result
+        best_result$K <- K
+      }
+    }
+  }
+
+  if (is.null(best_result)) {
+    cli::cli_alert_warning("DP found no valid solution; falling back to greedy search.")
+    return(search_tile_boundaries(
+      cds, max_mutable_nt, min_mutable_nt, hf_set, oh_fidelity
+    ))
+  }
+
+  # Log multi-K comparison
+  if (length(k_results) > 1) {
+    k_summary <- vapply(k_results, function(r) {
+      sprintf("K=%d score=%.1f", r$K, r$score)
+    }, character(1))
+    cli::cli_alert_info(paste0(
+      "Multi-K: ", paste(k_summary, collapse = ", "),
+      " | best K=", best_result$K
+    ))
+  }
+
+  K <- best_result$K
+  n_tiles <- K + 1L
+  boundary_positions <- c(0L, best_result$boundaries, n_codons)
+
+  # Build tiles data frame (same format as greedy)
+  tiles <- data.frame(
+    tile_id       = integer(n_tiles),
+    start_codon   = integer(n_tiles),
+    end_codon     = integer(n_tiles),
+    start_nt      = integer(n_tiles),
+    end_nt        = integer(n_tiles),
+    oh1_seq       = character(n_tiles),
+    oh2_seq       = character(n_tiles),
+    oh1_in_hf     = logical(n_tiles),
+    oh2_in_hf     = logical(n_tiles),
+    oh1_fidelity  = numeric(n_tiles),
+    oh2_fidelity  = numeric(n_tiles),
+    tile_seq      = character(n_tiles),
+    boundary_shift = integer(n_tiles),
+    stringsAsFactors = FALSE
+  )
+
+  for (i in seq_len(n_tiles)) {
+    sc <- boundary_positions[i] + 1L
+    ec <- boundary_positions[i + 1L]
+    sn <- (sc - 1L) * 3L + 1L
+    en <- ec * 3L
+
+    oh1 <- substring(cds, sn, sn + 3L)
+    oh2 <- substring(cds, en - 3L, en)
+
+    oh1_fid <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else NA_real_
+    oh2_fid <- if (oh2 %in% names(fid_lookup)) unname(fid_lookup[oh2]) else NA_real_
+
+    tiles$tile_id[i]        <- i
+    tiles$start_codon[i]    <- sc
+    tiles$end_codon[i]      <- ec
+    tiles$start_nt[i]       <- sn
+    tiles$end_nt[i]         <- en
+    tiles$oh1_seq[i]        <- oh1
+    tiles$oh2_seq[i]        <- oh2
+    tiles$oh1_in_hf[i]      <- oh1 %in% hf_set
+    tiles$oh2_in_hf[i]      <- oh2 %in% hf_set
+    tiles$oh1_fidelity[i]   <- oh1_fid
+    tiles$oh2_fidelity[i]   <- oh2_fid
+    tiles$tile_seq[i]       <- substring(cds, sn, en)
+    tiles$boundary_shift[i] <- 0L  # DP doesn't use "shift from ideal"
+  }
+
+  # Compute summary stats
+  n_both <- 0L; n_one <- 0L; n_neither <- 0L
+  for (bi in seq_len(K)) {
+    bp <- best_result$boundaries[bi]
+    oh2_hf <- precomp$oh2_hf[bp]
+    oh1_hf <- precomp$oh1_hf[bp]
+    if (oh2_hf && oh1_hf) {
+      n_both <- n_both + 1L
+    } else if (oh2_hf || oh1_hf) {
+      n_one <- n_one + 1L
+    } else {
+      n_neither <- n_neither + 1L
+    }
+  }
+
+  cli::cli_alert_success(paste0(
+    "DP boundary search: ", n_tiles, " tiles, ", K,
+    " boundaries (both_HF=", n_both, ", one_HF=", n_one,
+    ", neither=", n_neither, ")"
+  ))
+
+  tiles
+}
+
+# =============================================================================
 # SUPERBLOCK SPLIT-POINT OPTIMIZATION
 # =============================================================================
 
@@ -653,26 +1039,43 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   manual_oh3 <- config$manual_oh3
   manual_oh4 <- config$manual_oh4
   search_window_K <- config$search_window_K %||% 15L
+  boundary_method <- config$boundary_method %||% "dp"
+  multi_k <- config$multi_k %||% TRUE
   min_mutable_nt <- config$min_mutable_nt
   if (is.null(min_mutable_nt)) {
     min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
     min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
   }
 
-  # Load data
+  # Load data (pairwise matrices loaded early for DP scoring)
   hf_set <- load_high_fidelity_set()
   oh_fidelity <- builtin_overhang_fidelity()
+  bsai_matrix <- load_pairwise_matrix("BsaI")
+  bsmbi_matrix <- load_pairwise_matrix("BsmBI")
 
   # Phase 1-3: Search tile boundaries
-  cli::cli_h3("Searching tile boundaries for HF overhangs")
-  tiles <- search_tile_boundaries(
-    cds = cds,
-    max_mutable_nt = max_mutable_nt,
-    min_mutable_nt = min_mutable_nt,
-    hf_set = hf_set,
-    oh_fidelity = oh_fidelity,
-    search_window_K = search_window_K
-  )
+  if (boundary_method == "dp") {
+    cli::cli_h3("Searching tile boundaries for HF overhangs (DP optimizer)")
+    tiles <- search_tile_boundaries_dp(
+      cds = cds,
+      max_mutable_nt = max_mutable_nt,
+      min_mutable_nt = min_mutable_nt,
+      hf_set = hf_set,
+      oh_fidelity = oh_fidelity,
+      bsai_matrix = bsai_matrix,
+      multi_k = multi_k
+    )
+  } else {
+    cli::cli_h3("Searching tile boundaries for HF overhangs (greedy)")
+    tiles <- search_tile_boundaries(
+      cds = cds,
+      max_mutable_nt = max_mutable_nt,
+      min_mutable_nt = min_mutable_nt,
+      hf_set = hf_set,
+      oh_fidelity = oh_fidelity,
+      search_window_K = search_window_K
+    )
+  }
 
   # Phase 4: Select oh3, oh4
   cli::cli_h3("Selecting fixed overhangs (oh3, oh4)")
@@ -808,8 +1211,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
 
   # Phase 6: Per-reaction pairwise validation
   cli::cli_h3("Validating per-reaction overhang fidelity")
-  bsai_matrix <- load_pairwise_matrix("BsaI")
-  bsmbi_matrix <- load_pairwise_matrix("BsmBI")
+  # bsai_matrix and bsmbi_matrix already loaded at top of plan_assembly()
 
   reaction_fidelity <- list()
   for (i in seq_len(n_tiles)) {

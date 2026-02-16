@@ -100,7 +100,9 @@ assembly_plan <- plan_assembly(
     fidelity_threshold = cfg$overhang_fidelity_threshold,
     manual_oh3 = cfg$oh3,
     manual_oh4 = cfg$oh4,
-    search_window_K = cfg$search_window_K
+    search_window_K = cfg$search_window_K,
+    boundary_method = cfg$boundary_method,
+    multi_k = cfg$multi_k_search
   )
 )
 tiles <- assembly_plan$tiles
