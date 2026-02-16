@@ -17,6 +17,7 @@
 #   9. Design gene blocks (BsaI + BsmBI adapted)
 #  10. QC checks
 #  11. Write outputs
+#  12. Generate wetlab assembly report
 
 # --- Parse command line args ---
 args <- commandArgs(trailingOnly = TRUE)
@@ -44,6 +45,7 @@ source(file.path(pipeline_dir, "R", "08_oligo_assembly.R"))
 source(file.path(pipeline_dir, "R", "09_wt_geneblock_design.R"))
 source(file.path(pipeline_dir, "R", "10_qc_checks.R"))
 source(file.path(pipeline_dir, "R", "11_output.R"))
+source(file.path(pipeline_dir, "R", "12_report.R"))
 
 # --- Run Pipeline ---
 cli::cli_h1("DMS Golden Gate Oligo Pipeline (3-Enzyme Architecture)")
@@ -197,6 +199,21 @@ output_paths <- write_outputs(
   gene_name       = gene$gene_name
 )
 
+# Step 12: Generate wetlab assembly report
+cli::cli_h2("Step 12: Generating wetlab assembly report")
+report_path <- generate_report(
+  gene             = gene,
+  cfg              = cfg,
+  assembly_plan    = assembly_plan,
+  geneblock_result = geneblock_result,
+  oligos           = oligos,
+  variants         = variants_expanded,
+  barcodes         = barcodes,
+  qc_result        = qc_result,
+  scan_result      = scan_result,
+  output_dir       = cfg$output_dir
+)
+
 # --- Summary ---
 cli::cli_h1("Pipeline Complete")
 cli::cli_alert_success(paste0("Gene: ", gene$gene_name))
@@ -207,4 +224,5 @@ cli::cli_alert_success(paste0("Gene blocks: ", nrow(geneblock_result$blocks)))
 cli::cli_alert_success(paste0("Tiles: ", nrow(tiles)))
 cli::cli_alert_success(paste0("Fixed overhangs: oh3=", oh3, ", oh4=", oh4))
 cli::cli_alert_success(paste0("QC: ", if (qc_result$qc_pass) "ALL PASSED" else "ISSUES FOUND"))
+cli::cli_alert_success(paste0("Wetlab report: ", report_path))
 cli::cli_alert_success(paste0("Output directory: ", cfg$output_dir))
