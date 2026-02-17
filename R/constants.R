@@ -92,6 +92,11 @@ DEFAULT_PREFIX_LENGTH    <- 8L
 DEFAULT_GC_RANGE         <- c(0.25, 0.75)
 DEFAULT_MAX_HOMOPOLYMER  <- 4L
 
+# --- OPS Mode Defaults ---
+DEFAULT_OPS_MODE                    <- FALSE
+DEFAULT_BARCODE_CAPACITY_TOLERANCE  <- 0.99
+DEFAULT_NON_OPS_BARCODE_LENGTH      <- 20L
+
 # --- Overhang Fidelity Threshold ---
 # Based on NEB Ligase Fidelity data (Potapov et al. 2018, 37C, 18h)
 # Fidelity = M[X][RC(X)] / sum(M[X][*]) (correct Watson-Crick pairing)
