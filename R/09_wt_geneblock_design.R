@@ -240,11 +240,33 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
   rownames(all_blocks) <- NULL
 
   # Deduplicate (same sequence used by multiple tiles)
-  all_blocks <- deduplicate_blocks(all_blocks)
+  dedup_result <- deduplicate_blocks(all_blocks)
+  all_blocks <- dedup_result$blocks
+  name_map <- dedup_result$name_map
 
   # Combine manifests
   all_manifests <- do.call(rbind, manifests)
   rownames(all_manifests) <- NULL
+
+  # Remap manifest block names to surviving dedup names
+  if (length(name_map) > 0) {
+    for (i in seq_len(nrow(all_manifests))) {
+      if (nzchar(all_manifests$bsai_parts[i])) {
+        parts <- strsplit(all_manifests$bsai_parts[i], ";")[[1]]
+        parts <- vapply(parts, function(n) {
+          if (!is.null(name_map[[n]])) name_map[[n]] else n
+        }, character(1), USE.NAMES = FALSE)
+        all_manifests$bsai_parts[i] <- paste(parts, collapse = ";")
+      }
+      if (nzchar(all_manifests$bsmbi_parts[i])) {
+        parts <- strsplit(all_manifests$bsmbi_parts[i], ";")[[1]]
+        parts <- vapply(parts, function(n) {
+          if (!is.null(name_map[[n]])) name_map[[n]] else n
+        }, character(1), USE.NAMES = FALSE)
+        all_manifests$bsmbi_parts[i] <- paste(parts, collapse = ";")
+      }
+    }
+  }
 
   # Design helper plasmid insert
   oh_L <- substring(cds, 1, 4)  # First 4 nt of gene
@@ -356,20 +378,28 @@ design_helper_plasmid <- function(oh_L, oh_R, paqci_star2, paqci_star1) {
 #' Deduplicate gene blocks with identical sequences
 #'
 #' Blocks used by multiple tiles are synthesized once. Updates gene_region
-#' to list all associated tiles.
+#' to list all associated tiles. Returns a name mapping so callers can
+#' update references (e.g., tile manifests) to point to surviving names.
 #'
 #' @param blocks Data frame of gene blocks
-#' @return Deduplicated data frame
+#' @return List with `blocks` (deduplicated data frame) and `name_map`
+#'   (named list mapping every original block name to the surviving name)
 deduplicate_blocks <- function(blocks) {
-  if (nrow(blocks) == 0) return(blocks)
+  if (nrow(blocks) == 0) return(list(blocks = blocks, name_map = list()))
 
   # Group by sequence
   unique_seqs <- unique(blocks$sequence)
   deduped <- list()
+  name_map <- list()
 
   for (seq in unique_seqs) {
     matching <- blocks[blocks$sequence == seq, , drop = FALSE]
     first <- matching[1, ]
+    surviving_name <- first$block_name
+    # Map all original names (including the survivor) to the surviving name
+    for (orig_name in matching$block_name) {
+      name_map[[orig_name]] <- surviving_name
+    }
     if (nrow(matching) > 1) {
       first$gene_region <- paste(matching$gene_region, collapse = ";")
     }
@@ -387,7 +417,7 @@ deduplicate_blocks <- function(blocks) {
     ))
   }
 
-  result
+  list(blocks = result, name_map = name_map)
 }
 
 #' Split oversized gene blocks into superblocks

@@ -117,9 +117,14 @@ test_that("deduplicate_blocks removes exact duplicates", {
     stringsAsFactors = FALSE
   )
 
-  deduped <- deduplicate_blocks(blocks)
+  result <- deduplicate_blocks(blocks)
+  deduped <- result$blocks
+  name_map <- result$name_map
   expect_equal(nrow(deduped), 1)
   # gene_region should be merged
   expect_true(grepl("region1", deduped$gene_region))
   expect_true(grepl("region2", deduped$gene_region))
+  # name_map should map both names to the surviving name
+  expect_equal(name_map[["block_a"]], "block_a")
+  expect_equal(name_map[["block_b"]], "block_a")
 })
