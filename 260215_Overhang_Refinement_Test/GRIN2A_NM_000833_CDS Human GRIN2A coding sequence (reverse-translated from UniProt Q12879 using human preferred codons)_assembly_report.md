@@ -1,6 +1,6 @@
 # DMS-GG Assembly Report: GRIN2A_NM_000833_CDS Human GRIN2A coding sequence (reverse-translated from UniProt Q12879 using human preferred codons)
 
-Generated: 2026-02-16 19:03:21
+Generated: 2026-02-16 19:28:10
 Pipeline: dms-gg-oligo-pipeline (3-Enzyme Architecture: BsaI + BsmBI + PaqCI)
 
 ---
@@ -207,7 +207,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | 1   | BsaI product      | (in helper plasmid)      | --      |
 | 2   | 3'WT+PolIII block | bsmbi_3wt_tile2_sub1     | 1480 nt |
 | 3   | 3'WT+PolIII block | bsmbi_3wt_tile2_sub2     | 1270 nt |
-| 4   | 3'WT+PolIII block | bsmbi_3wt_tile2_sub3     | ?       |
+| 4   | 3'WT+PolIII block | bsmbi_3wt_tile1_sub3     | 1511 nt |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      |
 
 ```
@@ -258,8 +258,8 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------ | ------- |
 | 1   | BsaI product      | (in helper plasmid)      | --      |
 | 2   | 3'WT+PolIII block | bsmbi_3wt_tile3_sub1     | 1243 nt |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile3_sub2     | ?       |
-| 4   | 3'WT+PolIII block | bsmbi_3wt_tile3_sub3     | ?       |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile2_sub2     | 1270 nt |
+| 4   | 3'WT+PolIII block | bsmbi_3wt_tile1_sub3     | 1511 nt |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      |
 
 ```
@@ -311,7 +311,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | 1   | BsaI product      | (in helper plasmid)      | --      |
 | 2   | 3'WT+PolIII block | bsmbi_3wt_tile4_sub1     | 1129 nt |
 | 3   | 3'WT+PolIII block | bsmbi_3wt_tile4_sub2     | 1150 nt |
-| 4   | 3'WT+PolIII block | bsmbi_3wt_tile4_sub3     | ?       |
+| 4   | 3'WT+PolIII block | bsmbi_3wt_tile1_sub3     | 1511 nt |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      |
 
 ```
@@ -465,7 +465,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------ | ------- |
 | 1   | BsaI product      | (in helper plasmid)      | --      |
 | 2   | 3'WT+PolIII block | bsmbi_3wt_tile7_sub1     | 1525 nt |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile7_sub2     | ?       |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile6_sub2     | 1694 nt |
 | 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      |
 
 ```
@@ -516,7 +516,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------ | ------- |
 | 1   | BsaI product      | (in helper plasmid)      | --      |
 | 2   | 3'WT+PolIII block | bsmbi_3wt_tile8_sub1     | 1495 nt |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile8_sub2     | ?       |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile1_sub3     | 1511 nt |
 | 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      |
 
 ```
@@ -567,7 +567,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------ | ------- |
 | 1   | BsaI product      | (in helper plasmid)      | --      |
 | 2   | 3'WT+PolIII block | bsmbi_3wt_tile9_sub1     | 1348 nt |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile9_sub2     | ?       |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile5_sub3     | 1424 nt |
 | 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      |
 
 ```
@@ -619,7 +619,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------ | ------- |
 | 1   | BsaI product      | (in helper plasmid)      | --      |
 | 2   | 3'WT+PolIII block | bsmbi_3wt_tile10_sub1    | 1207 nt |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile10_sub2    | ?       |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile5_sub3     | 1424 nt |
 | 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      |
 
 ```
@@ -667,12 +667,12 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 
 **Components:**
 
-| #   | Component         | Part name                | Length |
-| --- | ----------------- | ------------------------ | ------ |
-| 1   | BsaI product      | (in helper plasmid)      | --     |
-| 2   | 3'WT+PolIII block | bsmbi_3wt_tile11_sub1    | 970 nt |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile11_sub2    | ?      |
-| 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --     |
+| #   | Component         | Part name                | Length  |
+| --- | ----------------- | ------------------------ | ------- |
+| 1   | BsaI product      | (in helper plasmid)      | --      |
+| 2   | 3'WT+PolIII block | bsmbi_3wt_tile11_sub1    | 970 nt  |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile5_sub3     | 1424 nt |
+| 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      |
 
 ```
   [CTTC]----3'WT+PolIII sub1----[GAGA]----3'WT+PolIII sub2----[AACA]
@@ -754,7 +754,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | #   | Component       | Part name             | Length     |
 | --- | --------------- | --------------------- | ---------- |
 | 1   | Oligo pool      | Tile 13 (1560 oligos) | 285-285 nt |
-| 2   | 5'WT gene block | bsai_5wt_tile13_sub1  | ?          |
+| 2   | 5'WT gene block | bsai_5wt_tile12_sub1  | 1237 nt    |
 | 3   | 5'WT gene block | bsai_5wt_tile13_sub2  | 1279 nt    |
 | 4   | Helper plasmid  | helper_plasmid_insert | --         |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart  | --         |
@@ -857,7 +857,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | #   | Component       | Part name             | Length     |
 | --- | --------------- | --------------------- | ---------- |
 | 1   | Oligo pool      | Tile 15 (1600 oligos) | 291-291 nt |
-| 2   | 5'WT gene block | bsai_5wt_tile15_sub1  | ?          |
+| 2   | 5'WT gene block | bsai_5wt_tile14_sub1  | 1441 nt    |
 | 3   | 5'WT gene block | bsai_5wt_tile15_sub2  | 1468 nt    |
 | 4   | Helper plasmid  | helper_plasmid_insert | --         |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart  | --         |
@@ -874,11 +874,11 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 
 **Components:**
 
-| #   | Component         | Part name                | Length |
-| --- | ----------------- | ------------------------ | ------ |
-| 1   | BsaI product      | (in helper plasmid)      | --     |
-| 2   | 3'WT+PolIII block | bsmbi_3wt_tile15         | ?      |
-| 3   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --     |
+| #   | Component         | Part name                | Length  |
+| --- | ----------------- | ------------------------ | ------- |
+| 1   | BsaI product      | (in helper plasmid)      | --      |
+| 2   | 3'WT+PolIII block | bsmbi_3wt_tile1_sub3     | 1511 nt |
+| 3   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      |
 
 ```
   [AAAC]----3'WT+PolIII----[AACA]
@@ -908,7 +908,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | #   | Component       | Part name             | Length     |
 | --- | --------------- | --------------------- | ---------- |
 | 1   | Oligo pool      | Tile 16 (1600 oligos) | 291-291 nt |
-| 2   | 5'WT gene block | bsai_5wt_tile16_sub1  | ?          |
+| 2   | 5'WT gene block | bsai_5wt_tile14_sub1  | 1441 nt    |
 | 3   | 5'WT gene block | bsai_5wt_tile16_sub2  | 1708 nt    |
 | 4   | Helper plasmid  | helper_plasmid_insert | --         |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart  | --         |
@@ -1010,7 +1010,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | #   | Component       | Part name             | Length     |
 | --- | --------------- | --------------------- | ---------- |
 | 1   | Oligo pool      | Tile 18 (1420 oligos) | 264-264 nt |
-| 2   | 5'WT gene block | bsai_5wt_tile18_sub1  | ?          |
+| 2   | 5'WT gene block | bsai_5wt_tile12_sub1  | 1237 nt    |
 | 3   | 5'WT gene block | bsai_5wt_tile18_sub2  | 1279 nt    |
 | 4   | 5'WT gene block | bsai_5wt_tile18_sub3  | 1105 nt    |
 | 5   | Helper plasmid  | helper_plasmid_insert | --         |
@@ -1062,8 +1062,8 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | #   | Component       | Part name             | Length     |
 | --- | --------------- | --------------------- | ---------- |
 | 1   | Oligo pool      | Tile 19 (1380 oligos) | 258-258 nt |
-| 2   | 5'WT gene block | bsai_5wt_tile19_sub1  | ?          |
-| 3   | 5'WT gene block | bsai_5wt_tile19_sub2  | ?          |
+| 2   | 5'WT gene block | bsai_5wt_tile12_sub1  | 1237 nt    |
+| 3   | 5'WT gene block | bsai_5wt_tile18_sub2  | 1279 nt    |
 | 4   | 5'WT gene block | bsai_5wt_tile19_sub3  | 1318 nt    |
 | 5   | Helper plasmid  | helper_plasmid_insert | --         |
 | 6   | Enzyme + buffer | BsaI-HFv2 + CutSmart  | --         |
@@ -1114,7 +1114,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | #   | Component       | Part name             | Length     |
 | --- | --------------- | --------------------- | ---------- |
 | 1   | Oligo pool      | Tile 20 (1040 oligos) | 207-207 nt |
-| 2   | 5'WT gene block | bsai_5wt_tile20_sub1  | ?          |
+| 2   | 5'WT gene block | bsai_5wt_tile14_sub1  | 1441 nt    |
 | 3   | 5'WT gene block | bsai_5wt_tile20_sub2  | 1159 nt    |
 | 4   | 5'WT gene block | bsai_5wt_tile20_sub3  | 1441 nt    |
 | 5   | Helper plasmid  | helper_plasmid_insert | --         |
@@ -1166,7 +1166,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 | #   | Component       | Part name             | Length     |
 | --- | --------------- | --------------------- | ---------- |
 | 1   | Oligo pool      | Tile 21 (1420 oligos) | 264-264 nt |
-| 2   | 5'WT gene block | bsai_5wt_tile21_sub1  | ?          |
+| 2   | 5'WT gene block | bsai_5wt_tile14_sub1  | 1441 nt    |
 | 3   | 5'WT gene block | bsai_5wt_tile21_sub2  | 1315 nt    |
 | 4   | 5'WT gene block | bsai_5wt_tile21_sub3  | 1441 nt    |
 | 5   | Helper plasmid  | helper_plasmid_insert | --         |
