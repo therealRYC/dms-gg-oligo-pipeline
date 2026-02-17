@@ -215,17 +215,28 @@ design_barcodes <- function(n_variants,
     ))
   }
 
+  # Compute per-barcode nearest-neighbor Hamming distance
+  cli::cli_alert("Computing per-barcode nearest-neighbor Hamming distances...")
+  min_hamming_dist <- compute_min_hamming_per_barcode(barcodes)
+  cli::cli_alert_success(paste0(
+    "Nearest-neighbor distances: min=", min(min_hamming_dist),
+    ", median=", median(min_hamming_dist),
+    ", max=", max(min_hamming_dist)
+  ))
+
   # Build assignment table
   barcode_assignments <- data.frame(
-    variant_idx = rep(seq_len(n_variants), each = barcodes_per_variant),
-    barcode_idx = rep(seq_len(barcodes_per_variant), times = n_variants),
-    barcode     = barcodes,
+    variant_idx      = rep(seq_len(n_variants), each = barcodes_per_variant),
+    barcode_idx      = rep(seq_len(barcodes_per_variant), times = n_variants),
+    barcode          = barcodes,
+    min_hamming_dist = min_hamming_dist,
     stringsAsFactors = FALSE
   )
 
   list(
     barcodes            = barcodes,
     barcode_assignments = barcode_assignments,
+    min_hamming_dist    = min_hamming_dist,
     barcode_length      = resolved_length,
     ops_mode            = ops_mode,
     prefix_length       = if (ops_mode) prefix_length else NULL,
@@ -789,6 +800,41 @@ hamming_distance_1_to_many <- function(query, targets) {
   n <- length(targets)
   t_int <- matrix(unlist(lapply(targets, utf8ToInt)), nrow = k, ncol = n)
   as.integer(colSums(t_int != q_int))
+}
+
+# ============================================================================
+# Per-barcode nearest-neighbor Hamming distance
+# ============================================================================
+
+#' Compute the minimum Hamming distance to the nearest neighbor for each barcode
+#'
+#' For each barcode, finds the closest other barcode and returns that distance.
+#' Uses vectorized integer-matrix comparisons for speed.
+#'
+#' @param barcodes Character vector of equal-length barcode sequences
+#' @return Integer vector of the same length as barcodes, where each element
+#'   is the minimum Hamming distance from that barcode to any other barcode
+compute_min_hamming_per_barcode <- function(barcodes) {
+  n <- length(barcodes)
+  if (n <= 1L) return(rep(NA_integer_, n))
+
+  k <- nchar(barcodes[1])
+  bc_mat <- matrix(unlist(lapply(barcodes, utf8ToInt)), nrow = k, ncol = n)
+  min_dists <- rep(as.integer(k), n)
+
+  for (i in seq_len(n - 1L)) {
+    dists <- as.integer(colSums(bc_mat[, (i + 1L):n, drop = FALSE] != bc_mat[, i]))
+    # Update barcode i
+    if (min(dists) < min_dists[i]) min_dists[i] <- min(dists)
+    # Update each j > i
+    j_idxs <- (i + 1L):n
+    improved <- dists < min_dists[j_idxs]
+    if (any(improved)) {
+      min_dists[j_idxs[improved]] <- dists[improved]
+    }
+  }
+
+  min_dists
 }
 
 # ============================================================================

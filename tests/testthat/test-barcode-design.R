@@ -400,3 +400,50 @@ test_that("validate_barcode_distances_soft errors when below tolerance", {
     "soft Hamming constraint not met"
   )
 })
+
+# ============================================================================
+# Per-barcode nearest-neighbor Hamming distance
+# ============================================================================
+
+test_that("compute_min_hamming_per_barcode returns correct distances", {
+  barcodes <- c("AAAA", "AAAT", "TTTT", "TTTG")
+  dists <- compute_min_hamming_per_barcode(barcodes)
+  expect_equal(length(dists), 4)
+  # AAAA <-> AAAT = 1, AAAA <-> TTTT = 4, AAAA <-> TTTG = 4 => min = 1
+  expect_equal(dists[1], 1L)
+  # AAAT <-> AAAA = 1 => min = 1
+  expect_equal(dists[2], 1L)
+  # TTTT <-> TTTG = 1 => min = 1
+  expect_equal(dists[3], 1L)
+  # TTTG <-> TTTT = 1 => min = 1
+  expect_equal(dists[4], 1L)
+})
+
+test_that("compute_min_hamming_per_barcode with well-separated barcodes", {
+  barcodes <- c("AAAA", "TTTT", "CCCC", "GGGG")
+  dists <- compute_min_hamming_per_barcode(barcodes)
+  # All pairs have distance 4, so every barcode's min = 4
+  expect_true(all(dists == 4L))
+})
+
+test_that("compute_min_hamming_per_barcode single barcode returns NA", {
+  dists <- compute_min_hamming_per_barcode("ACGT")
+  expect_equal(length(dists), 1)
+  expect_true(is.na(dists[1]))
+})
+
+test_that("design_barcodes includes min_hamming_dist in output", {
+  result <- design_barcodes(
+    n_variants = 10,
+    barcode_length = 12,
+    min_hamming = 3,
+    ops_mode = FALSE
+  )
+  expect_true("min_hamming_dist" %in% names(result))
+  expect_equal(length(result$min_hamming_dist), 10)
+  expect_true(all(result$min_hamming_dist >= 3))
+
+  # Also in barcode_assignments
+  expect_true("min_hamming_dist" %in% names(result$barcode_assignments))
+  expect_equal(result$barcode_assignments$min_hamming_dist, result$min_hamming_dist)
+})
