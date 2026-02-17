@@ -18,10 +18,11 @@
 #' @param qc_result List from run_qc_checks()
 #' @param scan_result List from scan_enzyme_sites()
 #' @param output_dir Output directory path
+#' @param barcode_result List from design_barcodes() (optional)
 #' @return Path to generated report file (invisible)
 generate_report <- function(gene, cfg, assembly_plan, geneblock_result,
                             oligos, variants, barcodes, qc_result,
-                            scan_result, output_dir) {
+                            scan_result, output_dir, barcode_result = NULL) {
   if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
   tiles <- assembly_plan$tiles
@@ -50,29 +51,32 @@ generate_report <- function(gene, cfg, assembly_plan, geneblock_result,
   # Section 3: Oligo Pool Summary
   add(report_oligo_summary(oligos, tiles))
 
-  # Section 4: QC Summary
+  # Section 4: Barcode Design
+  add(report_barcode_summary(barcode_result, barcodes, cfg))
+
+  # Section 5: QC Summary
   add(report_qc_summary(qc_result))
 
-  # Section 5: Fixed Overhangs & Helper Plasmid
+  # Section 6: Fixed Overhangs & Helper Plasmid
   add(report_fixed_overhangs(assembly_plan, helper, cfg))
 
-  # Section 6: Per-Tile Assembly Guide
-  add("## 6. Per-Tile Assembly Guide")
+  # Section 7: Per-Tile Assembly Guide
+  add("## 7. Per-Tile Assembly Guide")
   add("")
   for (i in seq_len(nrow(tiles))) {
     add(report_tile_guide(i, tiles, assembly_plan, geneblock_result, oligos, variants))
   }
 
-  # Section 7: PaqCI Level 2 Reaction
+  # Section 8: PaqCI Level 2 Reaction
   add(report_paqci_reaction(cfg))
 
-  # Section 8: Gene Block Order Sheet
+  # Section 9: Gene Block Order Sheet
   add(report_geneblock_sheet(blocks))
 
-  # Section 9: Domestication Log
+  # Section 10: Domestication Log
   add(report_domestication(scan_result))
 
-  # Section 10: Configuration Parameters
+  # Section 11: Configuration Parameters
   add(report_config(cfg))
 
   # Write file
@@ -164,7 +168,110 @@ report_oligo_summary <- function(oligos, tiles) {
   )
 }
 
-#' Section 4: QC Summary
+#' Section 4: Barcode Design
+report_barcode_summary <- function(barcode_result, barcodes, cfg) {
+  lines <- character(0)
+  add <- function(...) lines <<- c(lines, ...)
+
+  add("## 4. Barcode Design")
+  add("")
+
+  # Determine mode and parameters
+  is_ops <- isTRUE(barcode_result$ops_mode)
+  bc_length <- barcode_result$barcode_length %||% cfg$barcode_length %||% 12L
+  min_ham <- cfg$min_hamming_distance %||% 3L
+  barcodes_per <- cfg$barcodes_per_variant %||% 1L
+
+  # --- Design Parameters table ---
+  param_names <- c("Mode", "Barcode length", "Min Hamming distance",
+                   "Barcodes per variant")
+  param_vals <- c(
+    if (is_ops) "OPS (prefix-first)" else "Standard (global Hamming)",
+    paste0(bc_length, " nt"),
+    as.character(min_ham),
+    as.character(barcodes_per)
+  )
+
+  if (is_ops) {
+    prefix_len <- barcode_result$prefix_length %||% cfg$barcode_prefix_length %||% 8L
+    suffix_len <- bc_length - prefix_len
+    tolerance <- cfg$barcode_capacity_tolerance %||% 0.99
+    param_names <- c(param_names, "Prefix length", "Suffix length",
+                     "Capacity tolerance")
+    param_vals <- c(param_vals,
+                    paste0(prefix_len, " nt"),
+                    paste0(suffix_len, " nt"),
+                    paste0(round(tolerance * 100, 1), "%"))
+  }
+
+  param_df <- data.frame(Parameter = param_names, Value = param_vals,
+                          stringsAsFactors = FALSE)
+  add("### Design Parameters")
+  add("")
+  add(md_table(param_df))
+  add("")
+
+  # --- Pool Statistics table ---
+  n_total <- length(barcodes)
+  n_unique <- length(unique(barcodes))
+  gc_vals <- vapply(barcodes, gc_content, numeric(1))
+  gc_range_str <- paste0(round(min(gc_vals) * 100, 1), "% - ",
+                         round(max(gc_vals) * 100, 1), "%")
+  gc_mean_str <- paste0(round(mean(gc_vals) * 100, 1), "%")
+
+  compliance <- barcode_result$compliance_fraction %||% 1.0
+  if (is_ops) {
+    compliance_str <- paste0(round(compliance * 100, 2),
+                             "% of pairs >= ", min_ham)
+  } else {
+    compliance_str <- paste0("100% (hard guarantee, d >= ", min_ham, ")")
+  }
+
+  stat_df <- data.frame(
+    Statistic = c("Total barcodes", "Unique barcodes",
+                  "GC content range", "GC content mean",
+                  "Hamming compliance"),
+    Value = c(n_total, n_unique, gc_range_str, gc_mean_str,
+              compliance_str),
+    stringsAsFactors = FALSE
+  )
+  add("### Pool Statistics")
+  add("")
+  add(md_table(stat_df))
+  add("")
+
+  # --- Sub-threshold distribution (OPS mode only) ---
+  if (is_ops && !is.null(barcode_result$violation_distribution)) {
+    viol_dist <- barcode_result$violation_distribution
+    n_violations <- barcode_result$n_violations %||% sum(viol_dist)
+    total_pairs <- barcode_result$total_pairs %||% 0
+
+    if (n_violations > 0 && total_pairs > 0) {
+      add("### Sub-threshold Hamming Distance Distribution")
+      add("")
+      add(paste0("Of ", format(total_pairs, big.mark = ","),
+                 " total barcode pairs, ", format(n_violations, big.mark = ","),
+                 " fall below the minimum Hamming distance of ", min_ham, ":"))
+      add("")
+      dist_df <- data.frame(
+        Distance = names(viol_dist),
+        Pairs = as.integer(viol_dist),
+        Fraction = paste0(round(as.numeric(viol_dist) / total_pairs * 100, 4), "%"),
+        stringsAsFactors = FALSE
+      )
+      add(md_table(dist_df))
+      add("")
+    } else {
+      add(paste0("No sub-threshold violations detected among ",
+                 format(total_pairs, big.mark = ","), " barcode pairs."))
+      add("")
+    }
+  }
+
+  lines
+}
+
+#' Section 5: QC Summary
 report_qc_summary <- function(qc_result) {
   report <- qc_result$qc_report
   df <- data.frame(
@@ -176,13 +283,13 @@ report_qc_summary <- function(qc_result) {
   )
   overall <- if (qc_result$qc_pass) "ALL CHECKS PASSED" else "ISSUES FOUND"
   c(
-    "## 4. QC Summary", "",
+    "## 5. QC Summary", "",
     paste0("**Overall:** ", overall), "",
     md_table(df), ""
   )
 }
 
-#' Section 5: Fixed Overhangs & Helper Plasmid
+#' Section 6: Fixed Overhangs & Helper Plasmid
 report_fixed_overhangs <- function(assembly_plan, helper, cfg) {
   oh_L <- assembly_plan$oh_L
   oh3 <- assembly_plan$oh3
@@ -222,14 +329,14 @@ report_fixed_overhangs <- function(assembly_plan, helper, cfg) {
   }
 
   c(
-    "## 5. Fixed Overhangs & Helper Plasmid", "",
+    "## 6. Fixed Overhangs & Helper Plasmid", "",
     "These overhangs are the same across all tile reactions:", "",
     md_table(oh_df), "",
     helper_lines
   )
 }
 
-#' Section 6: Per-Tile Assembly Guide (single tile)
+#' Section 7: Per-Tile Assembly Guide (single tile)
 report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
                               oligos, variants) {
   tile <- tiles[tile_idx, ]
@@ -418,12 +525,12 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
   lines
 }
 
-#' Section 7: PaqCI Level 2 Reaction
+#' Section 8: PaqCI Level 2 Reaction
 report_paqci_reaction <- function(cfg) {
   paqci_star2 <- cfg$paqci_star2 %||% "NNNN"
   paqci_star1 <- cfg$paqci_star1 %||% "NNNN"
   c(
-    "## 7. PaqCI Level 2 Reaction (37C)", "",
+    "## 8. PaqCI Level 2 Reaction (37C)", "",
     "The final cloning step transfers the complete insert from the helper plasmid",
     "into the destination backbone.", "",
     "**Components per reaction:**", "",
@@ -441,7 +548,7 @@ report_paqci_reaction <- function(cfg) {
   )
 }
 
-#' Section 8: Gene Block Order Sheet
+#' Section 9: Gene Block Order Sheet
 report_geneblock_sheet <- function(blocks) {
   df <- data.frame(
     `Block name` = blocks$block_name,
@@ -456,7 +563,7 @@ report_geneblock_sheet <- function(blocks) {
   rownames(df) <- NULL
 
   c(
-    "## 8. Gene Block Order Sheet", "",
+    "## 9. Gene Block Order Sheet", "",
     "Order these gene blocks as synthesized gene fragments (e.g., Twist gene fragments, IDT gBlocks).",
     "Gene blocks are synthesized once and reused across experiments.", "",
     paste0("**Total blocks:** ", nrow(df)), "",
@@ -464,12 +571,12 @@ report_geneblock_sheet <- function(blocks) {
   )
 }
 
-#' Section 9: Domestication Log
+#' Section 10: Domestication Log
 report_domestication <- function(scan_result) {
   if (is.null(scan_result) || is.null(scan_result$domestication) ||
       nrow(scan_result$domestication) == 0) {
     return(c(
-      "## 9. Domestication Log", "",
+      "## 10. Domestication Log", "",
       "No endogenous BsaI, BsmBI, or PaqCI sites were found in the gene.",
       "No silent mutations were needed.", ""
     ))
@@ -489,13 +596,13 @@ report_domestication <- function(scan_result) {
   }
 
   c(
-    "## 9. Domestication Log", "",
+    "## 10. Domestication Log", "",
     paste0(nrow(dom), " endogenous enzyme site(s) were removed via silent mutations:"), "",
     md_table(df), ""
   )
 }
 
-#' Section 10: Configuration Parameters
+#' Section 11: Configuration Parameters
 report_config <- function(cfg) {
   params <- data.frame(
     Parameter = c("max_oligo_length", "max_geneblock_length",
@@ -518,7 +625,7 @@ report_config <- function(cfg) {
     stringsAsFactors = FALSE
   )
   c(
-    "## 10. Configuration Parameters", "",
+    "## 11. Configuration Parameters", "",
     md_table(params), ""
   )
 }

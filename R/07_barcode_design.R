@@ -229,7 +229,10 @@ design_barcodes <- function(n_variants,
     barcode_length      = resolved_length,
     ops_mode            = ops_mode,
     prefix_length       = if (ops_mode) prefix_length else NULL,
-    compliance_fraction = compliance
+    compliance_fraction = compliance,
+    violation_distribution = result$violation_distribution,
+    n_violations        = result$n_violations,
+    total_pairs         = result$total_pairs
   )
 }
 
@@ -324,12 +327,15 @@ design_barcodes_ops <- function(n_total, barcode_length, min_hamming,
   barcodes <- barcodes[seq_len(n_total)]
 
   # Step 5: Validate soft Hamming constraint
-  compliance <- validate_barcode_distances_soft(
+  soft_result <- validate_barcode_distances_soft(
     barcodes, min_hamming, prefix_length, tolerance
   )
 
   list(barcodes = barcodes, barcode_length = barcode_length,
-       compliance_fraction = compliance)
+       compliance_fraction = soft_result$compliance_fraction,
+       violation_distribution = soft_result$violation_distribution,
+       n_violations = soft_result$n_violations,
+       total_pairs = soft_result$total_pairs)
 }
 
 # ============================================================================
@@ -878,17 +884,30 @@ validate_barcode_distances <- function(barcodes, min_hamming, prefix_length = NU
 #' @param min_hamming Minimum Hamming distance
 #' @param prefix_length Prefix length
 #' @param tolerance Required fraction of compliant pairs
-#' @return Numeric compliance fraction
+#' @return List with compliance_fraction, violation_distribution (named integer
+#'   vector of pair counts at each distance 0..min_hamming-1), n_violations,
+#'   and total_pairs
 validate_barcode_distances_soft <- function(barcodes, min_hamming, prefix_length,
                                              tolerance) {
   n <- length(barcodes)
-  if (n <= 1) return(1.0)
+  if (n <= 1) {
+    return(list(
+      compliance_fraction = 1.0,
+      violation_distribution = stats::setNames(integer(min_hamming),
+                                                paste0("d=", 0:(min_hamming - 1L))),
+      n_violations = 0L,
+      total_pairs = 0
+    ))
+  }
 
   barcode_len <- nchar(barcodes[1])
   prefixes <- substring(barcodes, 1, prefix_length)
   prefix_groups <- split(seq_len(n), prefixes)
 
-  # Count violations within prefix groups (cross-prefix pairs are always OK)
+  # Track violations by distance (d=0, d=1, ..., d=min_hamming-1)
+  dist_counts <- integer(min_hamming)
+  names(dist_counts) <- paste0("d=", 0:(min_hamming - 1L))
+
   n_violations <- 0L
   n_within_pairs <- 0L
 
@@ -906,13 +925,20 @@ validate_barcode_distances_soft <- function(barcodes, min_hamming, prefix_length
                        nrow = k, ncol = ng)
       for (i in seq_len(ng - 1L)) {
         dists <- as.integer(colSums(bc_mat[, (i + 1L):ng, drop = FALSE] != bc_mat[, i]))
-        n_violations <- n_violations + sum(dists < min_hamming)
+        violating <- dists[dists < min_hamming]
+        n_violations <- n_violations + length(violating)
+        for (d in violating) {
+          dist_counts[d + 1L] <- dist_counts[d + 1L] + 1L
+        }
       }
     } else {
       for (i in seq_len(ng - 1L)) {
         for (j in (i + 1L):ng) {
           d <- hamming_distance(barcodes[idxs[i]], barcodes[idxs[j]])
-          if (d < min_hamming) n_violations <- n_violations + 1L
+          if (d < min_hamming) {
+            n_violations <- n_violations + 1L
+            dist_counts[d + 1L] <- dist_counts[d + 1L] + 1L
+          }
         }
       }
     }
@@ -932,6 +958,14 @@ validate_barcode_distances_soft <- function(barcodes, min_hamming, prefix_length
     round(compliance_fraction * 100, 2), "%"
   ))
 
+  if (n_violations > 0) {
+    nonzero <- dist_counts[dist_counts > 0]
+    cli::cli_alert_info(paste0(
+      "Violation distribution: ",
+      paste(names(nonzero), "=", nonzero, collapse = ", ")
+    ))
+  }
+
   if (compliance_fraction < tolerance) {
     stop(
       "Barcode soft Hamming constraint not met. Compliance: ",
@@ -949,5 +983,10 @@ validate_barcode_distances_soft <- function(barcodes, min_hamming, prefix_length
     tolerance * 100, "% threshold"
   ))
 
-  compliance_fraction
+  list(
+    compliance_fraction = compliance_fraction,
+    violation_distribution = dist_counts,
+    n_violations = n_violations,
+    total_pairs = total_pairs
+  )
 }

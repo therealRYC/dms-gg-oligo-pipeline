@@ -234,7 +234,8 @@ report_path <- generate_report(
   barcodes         = barcodes,
   qc_result        = qc_result,
   scan_result      = scan_result,
-  output_dir       = cfg$output_dir
+  output_dir       = cfg$output_dir,
+  barcode_result   = barcode_result
 )
 
 # --- Summary ---

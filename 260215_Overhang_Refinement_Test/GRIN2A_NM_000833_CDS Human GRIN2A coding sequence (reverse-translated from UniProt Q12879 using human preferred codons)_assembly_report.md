@@ -1,6 +1,6 @@
 # DMS-GG Assembly Report: GRIN2A_NM_000833_CDS Human GRIN2A coding sequence (reverse-translated from UniProt Q12879 using human preferred codons)
 
-Generated: 2026-02-16 19:28:10
+Generated: 2026-02-17 06:52:29
 Pipeline: dms-gg-oligo-pipeline (3-Enzyme Architecture: BsaI + BsmBI + PaqCI)
 
 ---
@@ -70,7 +70,28 @@ Every oligo in the pool has the same layout regardless of tile position:
 | 20   | 1326-1377 | 1040   | 207-207 nt   |
 | 21   | 1378-1448 | 1420   | 264-264 nt   |
 
-## 4. QC Summary
+## 4. Barcode Design
+
+### Design Parameters
+
+| Parameter            | Value                     |
+| -------------------- | ------------------------- |
+| Mode                 | Standard (global Hamming) |
+| Barcode length       | 15 nt                     |
+| Min Hamming distance | 3                         |
+| Barcodes per variant | 1                         |
+
+### Pool Statistics
+
+| Statistic          | Value                         |
+| ------------------ | ----------------------------- |
+| Total barcodes     | 28960                         |
+| Unique barcodes    | 28960                         |
+| GC content range   | 26.7% - 73.3%                 |
+| GC content mean    | 50%                           |
+| Hamming compliance | 100% (hard guarantee, d >= 3) |
+
+## 5. QC Summary
 
 **Overall:** ALL CHECKS PASSED
 
@@ -83,14 +104,14 @@ Every oligo in the pool has the same layout regardless of tile position:
 | tile_coverage          | Tiles cover entire gene without gaps                     | PASS   | 4344 / 4344 nt covered                                                                                          |
 | variant_count          | Expected number of variants generated                    | PASS   | 28960 variants (expected: 28960 = 1448 positions x 20 mutations)                                                |
 | single_codon_change    | Each variant differs by exactly one codon from WT        | PASS   | 28960 / 28960 variants confirmed                                                                                |
-| oligo_gc_content       | Oligo GC content within reasonable range (25-75%)        | PASS   | GC range: 48.6-65.5% | 0 oligo(s) with extreme GC                                                               |
+| oligo_gc_content       | Oligo GC content within reasonable range (25-75%)        | PASS   | GC range: 48.6-65.9% | 0 oligo(s) with extreme GC                                                               |
 | domestication_complete | Gene domesticated for all 3 enzymes (BsaI, BsmBI, PaqCI) | PASS   | No enzyme sites in gene                                                                                         |
 | overhang_fidelity      | Tile boundary overhangs have adequate fidelity           | PASS   | 0 tile(s) with low-fidelity boundary overhangs (<0.80)                                                          |
 | tile_manifests         | Per-tile assembly manifests complete                     | PASS   | 21 tile manifest(s) generated                                                                                   |
 | helper_plasmid         | Helper plasmid free of unintended BsmBI sites            | PASS   | OK                                                                                                              |
 | reaction_fidelity      | Per-reaction set-level overhang fidelity                 | PASS   | Min set fidelity: 0.9902 across 42 reactions | 0 reaction(s) below 0.90                                         |
 
-## 5. Fixed Overhangs & Helper Plasmid
+## 6. Fixed Overhangs & Helper Plasmid
 
 These overhangs are the same across all tile reactions:
 
@@ -114,7 +135,7 @@ Insert length: 72 nt
 oh_L = ATGG (first 4 nt of gene)
 oh_R = AAAA (= oh4, barcode-helper junction)
 
-## 6. Per-Tile Assembly Guide
+## 7. Per-Tile Assembly Guide
 
 ### Tile 1 of 21 -- Codons 1-62 (186 nt)
 
@@ -1200,7 +1221,7 @@ oh_R = AAAA (= oh4, barcode-helper junction)
 
 ---
 
-## 7. PaqCI Level 2 Reaction (37C)
+## 8. PaqCI Level 2 Reaction (37C)
 
 The final cloning step transfers the complete insert from the helper plasmid
 into the destination backbone.
@@ -1222,7 +1243,7 @@ into the destination backbone.
 [PaqCI** AGTC]--[gene+mutation]--[PolIII]--[barcode]--[PaqCI* TCGA]
 ```
 
-## 8. Gene Block Order Sheet
+## 9. Gene Block Order Sheet
 
 Order these gene blocks as synthesized gene fragments (e.g., Twist gene fragments, IDT gBlocks).
 Gene blocks are synthesized once and reused across experiments.
@@ -1289,7 +1310,7 @@ Gene blocks are synthesized once and reused across experiments.
 | bsmbi_3wt_tile9_sub1  | 1348        | BsmBI       | 3wt_polIII_tile9_sub1                                                                                                           |
 | bsmbi_polIII_tile21   | 272         | BsmBI       | polIII_tile21                                                                                                                   |
 
-## 9. Domestication Log
+## 10. Domestication Log
 
 7 endogenous enzyme site(s) were removed via silent mutations:
 
@@ -1303,7 +1324,7 @@ Gene blocks are synthesized once and reused across experiments.
 | 3914       | BsmBI  | -      | 1305      | AGA            | AGG       | R   |
 | 3595       | PaqCI  | +      | 1199      | CAC            | CAT       | H   |
 
-## 10. Configuration Parameters
+## 11. Configuration Parameters
 
 | Parameter                   | Value |
 | --------------------------- | ----- |

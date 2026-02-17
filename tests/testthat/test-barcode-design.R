@@ -381,8 +381,13 @@ test_that("validate_barcode_distances_soft returns compliance fraction", {
                 "TTTTGGGGACGT", "TTTTGGGGATCG")   # same prefix, may violate
   result <- validate_barcode_distances_soft(barcodes, min_hamming = 3,
                                              prefix_length = 8, tolerance = 0.50)
-  expect_true(is.numeric(result))
-  expect_true(result >= 0 && result <= 1)
+  expect_true(is.list(result))
+  expect_true(is.numeric(result$compliance_fraction))
+  expect_true(result$compliance_fraction >= 0 && result$compliance_fraction <= 1)
+  expect_true(!is.null(result$violation_distribution))
+  expect_equal(length(result$violation_distribution), 3L)  # d=0, d=1, d=2
+  expect_true(!is.null(result$n_violations))
+  expect_true(!is.null(result$total_pairs))
 })
 
 test_that("validate_barcode_distances_soft errors when below tolerance", {
