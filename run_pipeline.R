@@ -90,6 +90,23 @@ cli::cli_h2("Step 5: Designing mutations")
 variants <- design_mutations(gene$cds, codon_usage)
 variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
 
+# Step 5.5: Resolve barcode length (needed before tiling for oligo budget)
+if (cfg$ops_mode && identical(cfg$barcode_length, "auto")) {
+  cli::cli_h2("Step 5.5: Auto-sizing barcode length (OPS mode)")
+  n_variants_expected <- gene$n_codons * 20L
+  n_barcodes_needed <- n_variants_expected * cfg$barcodes_per_variant
+  cfg$barcode_length <- auto_size_barcode_length(
+    n_total          = n_barcodes_needed,
+    prefix_length    = cfg$barcode_prefix_length,
+    min_hamming      = cfg$min_hamming_distance,
+    tolerance        = cfg$barcode_capacity_tolerance
+  )
+  cli::cli_alert_success(paste0(
+    "Auto-sized barcode_length = ", cfg$barcode_length,
+    " nt for ", n_barcodes_needed, " barcodes"
+  ))
+}
+
 # Step 6: Plan assembly (dynamic tile boundary search + overhangs + superblocks)
 cli::cli_h2("Step 6: Planning assembly (dynamic tile boundary search)")
 tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
@@ -121,6 +138,10 @@ cli::cli_alert_success(paste0(
 
 # Step 7: Design barcodes
 cli::cli_h2("Step 7: Designing barcodes")
+cli::cli_alert_info(paste0(
+  "Barcode mode: ", if (cfg$ops_mode) "OPS" else "standard",
+  ", barcode_length=", cfg$barcode_length
+))
 barcode_result <- design_barcodes(
   n_variants          = nrow(variants),
   barcode_length      = cfg$barcode_length,
@@ -128,7 +149,9 @@ barcode_result <- design_barcodes(
   prefix_length       = cfg$barcode_prefix_length,
   gc_range            = cfg$barcode_gc_range,
   max_homopolymer     = cfg$barcode_max_homopolymer,
-  barcodes_per_variant = cfg$barcodes_per_variant
+  barcodes_per_variant = cfg$barcodes_per_variant,
+  ops_mode            = cfg$ops_mode,
+  capacity_tolerance  = cfg$barcode_capacity_tolerance
 )
 barcodes <- barcode_result$barcodes
 
@@ -223,6 +246,13 @@ cli::cli_alert_success(paste0("Oligos: ", nrow(oligos)))
 cli::cli_alert_success(paste0("Gene blocks: ", nrow(geneblock_result$blocks)))
 cli::cli_alert_success(paste0("Tiles: ", nrow(tiles)))
 cli::cli_alert_success(paste0("Fixed overhangs: oh3=", oh3, ", oh4=", oh4))
+cli::cli_alert_success(paste0(
+  "Barcodes: mode=", if (cfg$ops_mode) "OPS" else "standard",
+  ", length=", barcode_result$barcode_length,
+  if (!is.null(barcode_result$compliance_fraction))
+    paste0(", compliance=", round(barcode_result$compliance_fraction * 100, 1), "%")
+  else ""
+))
 cli::cli_alert_success(paste0("QC: ", if (qc_result$qc_pass) "ALL PASSED" else "ISSUES FOUND"))
 cli::cli_alert_success(paste0("Wetlab report: ", report_path))
 cli::cli_alert_success(paste0("Output directory: ", cfg$output_dir))

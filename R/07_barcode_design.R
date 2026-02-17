@@ -1,97 +1,219 @@
-# 07_barcode_design.R — Programmed barcodes with prefix-optimized Hamming distance
+# 07_barcode_design.R — Programmed barcodes with OPS / non-OPS mode support
 # DMS Golden Gate Oligo Pipeline
+#
+# Two modes:
+#   OPS mode (ops_mode=TRUE):  Prefix-first algorithm with hard prefix Hamming
+#     distance and soft full-barcode tolerance. Supports auto-sizing barcode_length
+#     to the minimum needed for the variant count.
+#   Non-OPS mode (ops_mode=FALSE): Global hard Hamming distance guarantee.
+#     No prefix/suffix splitting. Random+greedy generation for long barcodes.
+
+# ============================================================================
+# Capacity estimation helpers
+# ============================================================================
+
+#' Compute the Hamming ball volume V(n, t) over a 4-letter alphabet
+#'
+#' V(n, t) = sum_{i=0}^{t} choose(n, i) * 3^i
+#' This is the number of sequences within Hamming distance t of any given sequence.
+#'
+#' @param n Sequence length
+#' @param t Radius (typically floor((d-1)/2) for error-correction)
+#' @return Numeric ball volume
+hamming_ball_volume <- function(n, t) {
+  vol <- 0
+  for (i in 0:t) {
+    vol <- vol + choose(n, i) * (3^i)
+  }
+  vol
+}
+
+#' Estimate barcode capacity for prefix-first generation (hard suffix constraint)
+#'
+#' Used by the original hard-constraint path and for backward-compatible capacity checks.
+#'
+#' @param prefix_length Prefix length
+#' @param suffix_length Suffix length
+#' @param min_hamming Minimum Hamming distance
+#' @param filter_pass_rate Estimated filter pass rate (default 0.50)
+#' @return Numeric estimated capacity
+estimate_barcode_capacity <- function(prefix_length, suffix_length, min_hamming,
+                                       filter_pass_rate = 0.50) {
+  t_val <- floor((min_hamming - 1) / 2)
+
+  max_prefixes <- floor(4^prefix_length / hamming_ball_volume(prefix_length, t_val))
+
+  if (suffix_length == 0L) {
+    max_suffixes <- 1
+  } else {
+    max_suffixes <- floor(4^suffix_length / hamming_ball_volume(suffix_length, t_val))
+  }
+
+  max_prefixes * max_suffixes * filter_pass_rate
+}
+
+#' Estimate OPS capacity with soft suffix constraint
+#'
+#' In OPS mode, suffixes are NOT required to have mutual Hamming distance.
+#' Capacity = max_prefixes * (4^suffix_length * filter_pass_rate).
+#' Also estimates the expected violation fraction for the soft Hamming constraint.
+#'
+#' @param prefix_length Prefix length
+#' @param suffix_length Suffix length
+#' @param min_hamming Minimum Hamming distance
+#' @param filter_pass_rate Estimated filter pass rate (default 0.50)
+#' @return List with capacity and expected_violation_fraction
+estimate_ops_capacity <- function(prefix_length, suffix_length, min_hamming,
+                                   filter_pass_rate = 0.50) {
+  t_val <- floor((min_hamming - 1) / 2)
+  max_prefixes <- floor(4^prefix_length / hamming_ball_volume(prefix_length, t_val))
+
+  if (suffix_length == 0L) {
+    # No suffix: each prefix IS a barcode; all pairs have distance >= min_hamming
+    return(list(capacity = max_prefixes * filter_pass_rate,
+                expected_violation_fraction = 0))
+  }
+
+  suffixes_per_prefix <- floor(4^suffix_length * filter_pass_rate)
+  capacity <- max_prefixes * suffixes_per_prefix
+
+  # Estimate violation fraction:
+  # Cross-prefix pairs always have distance >= min_hamming (from prefix alone).
+  # Within-prefix pairs have distance = suffix distance.
+  # P(suffix_distance < min_hamming) = sum_{i=0}^{d-1} C(s,i)*3^i / 4^s
+  prob_suffix_close <- 0
+  for (i in 0:(min_hamming - 1L)) {
+    if (i > suffix_length) break
+    prob_suffix_close <- prob_suffix_close + choose(suffix_length, i) * (3^i)
+  }
+  prob_suffix_close <- prob_suffix_close / (4^suffix_length)
+
+  # Fraction of within-prefix pairs ≈ 1/num_prefixes (for large pools)
+  # Total pairs: N*(N-1)/2 where N = P * S
+  # Within-prefix pairs: P * S*(S-1)/2
+  # Fraction within: P*S*(S-1) / (P*S*(P*S-1)) ≈ (S-1) / (P*S - 1) ≈ 1/P for P >> 1
+  P <- max_prefixes
+  S <- suffixes_per_prefix
+  if (P > 0 && S > 1) {
+    frac_within <- (S - 1) / (P * S - 1)
+    expected_violation <- frac_within * prob_suffix_close
+  } else {
+    expected_violation <- 0
+  }
+
+  list(capacity = capacity, expected_violation_fraction = expected_violation)
+}
+
+#' Auto-size barcode length for OPS mode
+#'
+#' Finds the minimum barcode_length = prefix_length + suffix_length such that:
+#' 1. Estimated OPS capacity >= n_total
+#' 2. Expected violation fraction <= (1 - tolerance)
+#'
+#' @param n_total Total barcodes needed
+#' @param prefix_length Prefix length (fixed by OPS sequencing)
+#' @param min_hamming Minimum Hamming distance
+#' @param tolerance Fraction of pairs that must meet min_hamming (default 0.99)
+#' @param filter_pass_rate Estimated filter pass rate (default 0.50)
+#' @return Integer auto-sized barcode_length
+auto_size_barcode_length <- function(n_total, prefix_length, min_hamming,
+                                      tolerance = DEFAULT_BARCODE_CAPACITY_TOLERANCE,
+                                      filter_pass_rate = 0.50) {
+  max_violation <- 1 - tolerance
+
+  for (suffix_length in 0:22L) {
+    barcode_length <- prefix_length + suffix_length
+    if (barcode_length > 30L) break
+    if (barcode_length < 6L) next
+
+    est <- estimate_ops_capacity(prefix_length, suffix_length, min_hamming,
+                                  filter_pass_rate)
+
+    if (est$capacity >= n_total &&
+        est$expected_violation_fraction <= max_violation) {
+      cli::cli_alert_success(paste0(
+        "OPS auto-sizing: barcode_length=", barcode_length,
+        " (prefix=", prefix_length, " + suffix=", suffix_length, ")",
+        ", estimated capacity=", round(est$capacity),
+        ", expected violation=", round(est$expected_violation_fraction * 100, 2), "%",
+        ", need=", n_total
+      ))
+      return(as.integer(barcode_length))
+    }
+  }
+
+  stop(
+    "Cannot auto-size barcode length for ", n_total, " barcodes ",
+    "with prefix_length=", prefix_length, ", min_hamming=", min_hamming,
+    ", tolerance=", tolerance, ".\n",
+    "Maximum barcode_length=30 is insufficient. ",
+    "Consider reducing min_hamming_distance, increasing prefix_length, ",
+    "or reducing barcodes_per_variant."
+  )
+}
+
+# ============================================================================
+# Main entry point
+# ============================================================================
 
 #' Design programmed barcodes for all variants
 #'
-#' Uses a prefix-first approach:
-#' 1. Generate high-Hamming-distance k-nt prefixes using DNABarcodes
-#' 2. Extend each prefix with suffix candidates (enforcing within-group Hamming distance)
-#' 3. Filter for GC content, homopolymers, enzyme sites
-#' 4. Assign barcodes to variants (barcodes_per_variant each)
+#' Two modes:
+#' - OPS mode: prefix-first algorithm with hard prefix Hamming distance and
+#'   soft full-barcode tolerance. Auto-sizes barcode_length if "auto".
+#' - Non-OPS mode: global hard Hamming distance. Random+greedy for long barcodes.
 #'
 #' @param n_variants Number of variants needing barcodes
-#' @param barcode_length Total barcode length (default 12)
+#' @param barcode_length Total barcode length (integer or "auto" for OPS)
 #' @param min_hamming Minimum Hamming distance (default 3)
 #' @param prefix_length Prefix length for OPS optimization (default 8)
-#' @param gc_range Numeric vector c(min, max) for GC content (default c(0.25, 0.75))
+#' @param gc_range Numeric vector c(min, max) for GC content
 #' @param max_homopolymer Maximum homopolymer run length (default 4)
 #' @param barcodes_per_variant Number of barcodes per variant (default 1)
-#' @return List with:
-#'   - barcodes: character vector of all barcodes (length = n_variants * barcodes_per_variant)
-#'   - barcode_assignments: data frame with variant_idx, barcode_idx, barcode
+#' @param ops_mode Logical: use OPS mode? (default FALSE)
+#' @param capacity_tolerance Soft Hamming tolerance for OPS mode (default 0.99)
+#' @return List with barcodes, barcode_assignments, barcode_length, ops_mode,
+#'   prefix_length, compliance_fraction
 design_barcodes <- function(n_variants,
                             barcode_length = DEFAULT_BARCODE_LENGTH,
                             min_hamming = DEFAULT_MIN_HAMMING,
                             prefix_length = DEFAULT_PREFIX_LENGTH,
                             gc_range = DEFAULT_GC_RANGE,
                             max_homopolymer = DEFAULT_MAX_HOMOPOLYMER,
-                            barcodes_per_variant = DEFAULT_BARCODES_PER_VARIANT) {
+                            barcodes_per_variant = DEFAULT_BARCODES_PER_VARIANT,
+                            ops_mode = DEFAULT_OPS_MODE,
+                            capacity_tolerance = DEFAULT_BARCODE_CAPACITY_TOLERANCE) {
 
   n_total <- n_variants * barcodes_per_variant
-  suffix_length <- barcode_length - prefix_length
 
-  cli::cli_alert_info(paste0(
-    "Generating barcodes: length=", barcode_length,
-    ", prefix=", prefix_length, ", suffix=", suffix_length,
-    ", min Hamming=", min_hamming,
-    ", barcodes_per_variant=", barcodes_per_variant,
-    ", need ", n_total, " barcodes"
-  ))
-
-  # Capacity check
-  check_barcode_capacity(n_total, prefix_length, suffix_length, min_hamming,
-                         gc_range, max_homopolymer, barcodes_per_variant)
-
-  # Step 1: Generate prefix set with high Hamming distance
-  cli::cli_alert("Generating prefix set with DNABarcodes...")
-  prefixes <- generate_prefixes(prefix_length, min_hamming, n_total)
-
-  # Step 2: Generate all possible suffixes and pre-compute valid suffix groups
-  # A suffix group is a maximal set of suffixes with mutual Hamming distance >= min_hamming
-  suffixes <- generate_all_kmers(suffix_length)
-
-  # Pre-compute one valid suffix group (shared across all prefixes since suffix
-  # Hamming distance is independent of prefix). We pick the largest greedy set.
-  valid_suffix_group <- select_suffix_group(suffixes, min_hamming)
-
-  cli::cli_alert_info(paste0(
-    "Max suffixes per prefix group (d>=", min_hamming, "): ", length(valid_suffix_group)
-  ))
-
-  # Step 3: Combine prefixes with valid suffixes, filtering each full barcode
-  cli::cli_alert("Combining prefixes with suffixes and filtering...")
-
-  # Generate all prefix+suffix combinations at once for vectorized filtering
-  barcodes <- generate_filtered_barcodes(
-    prefixes, valid_suffix_group, gc_range, max_homopolymer, n_total
-  )
-
-  # If not enough, try greedy expansion of prefix pool
-  if (length(barcodes) < n_total) {
-    cli::cli_alert_info("Expanding prefix pool with greedy generation...")
-    extra_needed <- ceiling((n_total - length(barcodes)) / length(valid_suffix_group)) + 50L
-    extra_prefixes <- generate_prefixes_greedy_excluding(
-      prefix_length, min_hamming, extra_needed, prefixes
+  if (ops_mode) {
+    result <- design_barcodes_ops(
+      n_total, barcode_length, min_hamming, prefix_length,
+      gc_range, max_homopolymer, capacity_tolerance
     )
-    extra_barcodes <- generate_filtered_barcodes(
-      extra_prefixes, valid_suffix_group, gc_range, max_homopolymer,
-      n_total - length(barcodes)
+  } else {
+    result <- design_barcodes_standard(
+      n_total, barcode_length, min_hamming,
+      gc_range, max_homopolymer
     )
-    barcodes <- c(barcodes, extra_barcodes)
   }
 
-  if (length(barcodes) < n_total) {
-    stop("Could only generate ", length(barcodes), " barcodes, but need ", n_total,
-         ". Try: increase barcode_length, decrease min_hamming_distance, ",
-         "or decrease barcodes_per_variant.")
+  barcodes <- result$barcodes
+  resolved_length <- result$barcode_length
+  compliance <- result$compliance_fraction
+
+  cli::cli_alert_success(paste0(
+    "Generated ", n_total, " unique barcodes",
+    " (mode=", if (ops_mode) "OPS" else "standard",
+    ", length=", resolved_length, ")"
+  ))
+  if (ops_mode && !is.null(compliance)) {
+    cli::cli_alert_info(paste0(
+      "Hamming compliance: ", round(compliance * 100, 2),
+      "% of pairs >= ", min_hamming,
+      " (tolerance: ", capacity_tolerance * 100, "%)"
+    ))
   }
-
-  barcodes <- barcodes[seq_len(n_total)]
-
-  # Step 4: Validate full-length Hamming distances
-  validate_barcode_distances(barcodes, min_hamming, prefix_length)
-
-  cli::cli_alert_success(paste0("Generated ", n_total, " unique barcodes."))
 
   # Build assignment table
   barcode_assignments <- data.frame(
@@ -103,9 +225,286 @@ design_barcodes <- function(n_variants,
 
   list(
     barcodes            = barcodes,
-    barcode_assignments = barcode_assignments
+    barcode_assignments = barcode_assignments,
+    barcode_length      = resolved_length,
+    ops_mode            = ops_mode,
+    prefix_length       = if (ops_mode) prefix_length else NULL,
+    compliance_fraction = compliance
   )
 }
+
+# ============================================================================
+# OPS mode: prefix-first with soft full-barcode tolerance
+# ============================================================================
+
+#' Design barcodes in OPS mode (prefix-first, soft full-barcode constraint)
+#'
+#' @param n_total Total barcodes needed
+#' @param barcode_length Integer or "auto"
+#' @param min_hamming Minimum Hamming distance
+#' @param prefix_length Prefix length
+#' @param gc_range GC content range
+#' @param max_homopolymer Max homopolymer
+#' @param tolerance Soft Hamming tolerance
+#' @return List with barcodes, barcode_length, compliance_fraction
+design_barcodes_ops <- function(n_total, barcode_length, min_hamming,
+                                 prefix_length, gc_range, max_homopolymer,
+                                 tolerance) {
+
+  # Auto-size if requested
+  if (identical(barcode_length, "auto")) {
+    barcode_length <- auto_size_barcode_length(
+      n_total, prefix_length, min_hamming, tolerance
+    )
+  }
+
+  suffix_length <- barcode_length - prefix_length
+
+  cli::cli_alert_info(paste0(
+    "OPS mode: generating barcodes (length=", barcode_length,
+    ", prefix=", prefix_length, ", suffix=", suffix_length,
+    ", min_hamming=", min_hamming,
+    ", tolerance=", tolerance * 100, "%",
+    ", need ", n_total, ")"
+  ))
+
+  # Capacity check (using OPS estimate with relaxed suffix)
+  est <- estimate_ops_capacity(prefix_length, suffix_length, min_hamming)
+  if (est$capacity < n_total) {
+    stop("Insufficient OPS barcode capacity. Need ", n_total,
+         " but estimated capacity is ~", round(est$capacity), ".\n",
+         "  Try: increase barcode_length, decrease min_hamming_distance, ",
+         "or decrease barcodes_per_variant.")
+  }
+
+  # Step 1: Generate prefixes with HARD Hamming distance
+  cli::cli_alert("Generating prefix set (hard Hamming >= {min_hamming})...")
+  prefixes <- generate_prefixes(prefix_length, min_hamming, n_total)
+
+  # Step 2: Generate ALL valid suffixes (NO suffix Hamming constraint)
+  # This is the key difference from the hard-constraint path.
+  if (suffix_length > 0L) {
+    all_suffixes <- generate_all_kmers(suffix_length)
+    all_suffixes <- filter_sequences_fast(all_suffixes, max_homopolymer)
+    cli::cli_alert_info(paste0(
+      "Suffix pool (no Hamming constraint): ", length(all_suffixes),
+      " valid ", suffix_length, "-mers"
+    ))
+  } else {
+    all_suffixes <- ""
+  }
+
+  # Step 3: Combine prefixes with suffixes, filter full barcodes
+  cli::cli_alert("Combining prefixes with suffixes and filtering...")
+  barcodes <- generate_filtered_barcodes(
+    prefixes, all_suffixes, gc_range, max_homopolymer, n_total
+  )
+
+  # Step 4: If not enough, expand prefix pool
+  if (length(barcodes) < n_total) {
+    cli::cli_alert_info("Expanding prefix pool with greedy generation...")
+    extra_needed <- ceiling((n_total - length(barcodes)) /
+                              max(1L, length(all_suffixes))) + 50L
+    extra_prefixes <- generate_prefixes_greedy_excluding(
+      prefix_length, min_hamming, extra_needed, prefixes
+    )
+    extra_barcodes <- generate_filtered_barcodes(
+      extra_prefixes, all_suffixes, gc_range, max_homopolymer,
+      n_total - length(barcodes)
+    )
+    barcodes <- c(barcodes, extra_barcodes)
+  }
+
+  if (length(barcodes) < n_total) {
+    stop("Could only generate ", length(barcodes), " OPS barcodes, but need ", n_total,
+         ". Try: increase barcode_length, decrease min_hamming_distance, ",
+         "or decrease barcodes_per_variant.")
+  }
+
+  barcodes <- barcodes[seq_len(n_total)]
+
+  # Step 5: Validate soft Hamming constraint
+  compliance <- validate_barcode_distances_soft(
+    barcodes, min_hamming, prefix_length, tolerance
+  )
+
+  list(barcodes = barcodes, barcode_length = barcode_length,
+       compliance_fraction = compliance)
+}
+
+# ============================================================================
+# Non-OPS mode: global hard Hamming distance
+# ============================================================================
+
+#' Design barcodes in standard mode (global hard Hamming distance)
+#'
+#' @param n_total Total barcodes needed
+#' @param barcode_length Integer barcode length
+#' @param min_hamming Minimum Hamming distance
+#' @param gc_range GC content range
+#' @param max_homopolymer Max homopolymer
+#' @return List with barcodes, barcode_length, compliance_fraction
+design_barcodes_standard <- function(n_total, barcode_length, min_hamming,
+                                      gc_range, max_homopolymer) {
+
+  cli::cli_alert_info(paste0(
+    "Standard mode: generating barcodes (length=", barcode_length,
+    ", min_hamming=", min_hamming,
+    ", need ", n_total, ")"
+  ))
+
+  if (barcode_length <= 10L) {
+    # Small enough to enumerate all k-mers (4^10 = ~1M, manageable)
+    barcodes <- generate_barcodes_enumerated(
+      n_total, barcode_length, min_hamming, gc_range, max_homopolymer
+    )
+  } else {
+    # Too large for full enumeration; use random+greedy
+    barcodes <- generate_barcodes_global(
+      n_total, barcode_length, min_hamming, gc_range, max_homopolymer
+    )
+  }
+
+  # Validate with full hard constraint (no prefix structure)
+  validate_barcode_distances(barcodes, min_hamming, prefix_length = NULL)
+
+  list(barcodes = barcodes, barcode_length = barcode_length,
+       compliance_fraction = 1.0)
+}
+
+#' Generate barcodes via full enumeration + greedy selection (for short barcodes)
+#'
+#' @param n_total Number of barcodes needed
+#' @param barcode_length Barcode length (<= 10, to keep 4^k manageable)
+#' @param min_hamming Minimum Hamming distance
+#' @param gc_range GC content range
+#' @param max_homopolymer Max homopolymer
+#' @return Character vector of barcodes
+generate_barcodes_enumerated <- function(n_total, barcode_length, min_hamming,
+                                          gc_range, max_homopolymer) {
+  # Generate all k-mers and pre-filter
+  all_kmers <- generate_all_kmers(barcode_length)
+  all_kmers <- sample(all_kmers)  # shuffle for randomness
+  all_kmers <- filter_sequences_fast(all_kmers, max_homopolymer)
+
+  # GC filter
+  gc_counts <- nchar(gsub("[AT]", "", all_kmers))
+  gc_vals <- gc_counts / barcode_length
+  all_kmers <- all_kmers[gc_vals >= gc_range[1] & gc_vals <= gc_range[2]]
+
+  if (length(all_kmers) == 0) {
+    stop("No valid barcodes after filtering. Try relaxing GC or homopolymer constraints.")
+  }
+
+  # Greedy selection with hard Hamming distance
+  k <- barcode_length
+  n_cand <- length(all_kmers)
+  cand_mat <- matrix(unlist(lapply(all_kmers, utf8ToInt)),
+                     nrow = k, ncol = n_cand)
+
+  selected <- character(0)
+  sel_mat <- matrix(integer(0), nrow = k, ncol = 0)
+
+  for (i in seq_len(n_cand)) {
+    q_int <- cand_mat[, i]
+    if (ncol(sel_mat) == 0) {
+      selected <- all_kmers[i]
+      sel_mat <- matrix(q_int, nrow = k, ncol = 1)
+      next
+    }
+    dists <- as.integer(colSums(sel_mat != q_int))
+    if (all(dists >= min_hamming)) {
+      selected <- c(selected, all_kmers[i])
+      sel_mat <- cbind(sel_mat, q_int)
+    }
+    if (length(selected) >= n_total) break
+  }
+
+  if (length(selected) < n_total) {
+    stop("Could only generate ", length(selected), " barcodes with Hamming >= ",
+         min_hamming, ", need ", n_total,
+         ". Try: increase barcode_length or decrease min_hamming_distance.")
+  }
+
+  selected[seq_len(n_total)]
+}
+
+#' Generate barcodes via random sampling + greedy selection (for long barcodes)
+#'
+#' @param n_total Number of barcodes needed
+#' @param barcode_length Barcode length (> 12)
+#' @param min_hamming Minimum Hamming distance
+#' @param gc_range GC content range
+#' @param max_homopolymer Max homopolymer
+#' @return Character vector of barcodes
+generate_barcodes_global <- function(n_total, barcode_length, min_hamming,
+                                      gc_range, max_homopolymer) {
+  target <- n_total
+  batch_size <- 100000L
+  max_attempts <- 50L
+  k <- barcode_length
+
+  selected <- character(0)
+  sel_mat <- matrix(integer(0), nrow = k, ncol = 0)
+
+  for (attempt in seq_len(max_attempts)) {
+    if (length(selected) >= target) break
+
+    # Generate random candidate barcodes
+    candidates <- vapply(seq_len(batch_size), function(x) {
+      paste0(sample(c("A", "C", "G", "T"), k, replace = TRUE), collapse = "")
+    }, character(1))
+    candidates <- unique(candidates)
+
+    # Pre-filter
+    candidates <- filter_sequences_fast(candidates, max_homopolymer)
+    if (length(candidates) == 0) next
+
+    gc_counts <- nchar(gsub("[AT]", "", candidates))
+    gc_vals <- gc_counts / k
+    candidates <- candidates[gc_vals >= gc_range[1] & gc_vals <= gc_range[2]]
+    if (length(candidates) == 0) next
+
+    # Greedy selection against existing set
+    cand_mat <- matrix(unlist(lapply(candidates, utf8ToInt)),
+                       nrow = k, ncol = length(candidates))
+
+    for (i in seq_len(ncol(cand_mat))) {
+      q_int <- cand_mat[, i]
+      if (ncol(sel_mat) == 0) {
+        selected <- candidates[i]
+        sel_mat <- matrix(q_int, nrow = k, ncol = 1)
+        next
+      }
+      dists <- as.integer(colSums(sel_mat != q_int))
+      if (all(dists >= min_hamming)) {
+        selected <- c(selected, candidates[i])
+        sel_mat <- cbind(sel_mat, q_int)
+      }
+      if (length(selected) >= target) break
+    }
+
+    if (attempt %% 10 == 0) {
+      cli::cli_alert_info(paste0(
+        "Random+greedy progress: ", length(selected), "/", target,
+        " barcodes after ", attempt, " rounds"
+      ))
+    }
+  }
+
+  if (length(selected) < target) {
+    stop("Could only generate ", length(selected),
+         " barcodes with global Hamming >= ", min_hamming,
+         ", need ", target,
+         ". Try: increase barcode_length or decrease min_hamming_distance.")
+  }
+
+  selected[seq_len(target)]
+}
+
+# ============================================================================
+# Prefix/suffix generation helpers (shared with OPS mode)
+# ============================================================================
 
 #' Select a maximal greedy group of suffixes with mutual Hamming distance >= d
 #' @param suffixes Character vector of all possible suffixes
@@ -130,9 +529,8 @@ select_suffix_group <- function(suffixes, min_hamming) {
   selected
 }
 
-#' Check whether enough barcodes can be generated
+#' Check whether enough barcodes can be generated (hard-constraint estimate)
 #'
-#' Estimates theoretical capacity and errors immediately if insufficient.
 #' @param n_needed Total barcodes needed
 #' @param prefix_length Prefix length
 #' @param suffix_length Suffix length
@@ -142,32 +540,22 @@ select_suffix_group <- function(suffixes, min_hamming) {
 #' @param barcodes_per_variant Barcodes per variant
 check_barcode_capacity <- function(n_needed, prefix_length, suffix_length, min_hamming,
                                     gc_range, max_homopolymer, barcodes_per_variant) {
-  # Hamming ball volume V(k,d) for prefix capacity estimate
-  t_val <- floor((min_hamming - 1) / 2)
-  ball_vol <- 0
-  for (i in 0:t_val) {
-    ball_vol <- ball_vol + choose(prefix_length, i) * (3^i)
-  }
-  max_prefixes <- floor(4^prefix_length / ball_vol)
-
-  # Suffix capacity: max suffixes per group with mutual d >= min_hamming
-  suffix_ball_vol <- 0
-  for (i in 0:t_val) {
-    suffix_ball_vol <- suffix_ball_vol + choose(suffix_length, i) * (3^i)
-  }
-  max_suffixes_per_group <- floor(4^suffix_length / suffix_ball_vol)
-
-  # Filter pass rate estimate
-  estimated_pass_rate <- 0.50  # conservative
-  estimated_capacity <- max_prefixes * max_suffixes_per_group * estimated_pass_rate
+  estimated_capacity <- estimate_barcode_capacity(
+    prefix_length, suffix_length, min_hamming, filter_pass_rate = 0.50
+  )
 
   if (estimated_capacity < n_needed) {
+    t_val <- floor((min_hamming - 1) / 2)
+    max_prefixes <- floor(4^prefix_length / hamming_ball_volume(prefix_length, t_val))
+    max_suffixes <- if (suffix_length == 0L) 1 else {
+      floor(4^suffix_length / hamming_ball_volume(suffix_length, t_val))
+    }
     stop(
       "Insufficient barcode capacity. Need ", n_needed, " barcodes",
       " but estimated capacity is ~", round(estimated_capacity), ".\n",
       "  Max prefixes (prefix_length=", prefix_length, ", min_hamming=", min_hamming, "): ~", max_prefixes, "\n",
-      "  Max suffixes per group (suffix_length=", suffix_length, ", min_hamming=", min_hamming, "): ~", max_suffixes_per_group, "\n",
-      "  Estimated pass rate: ", estimated_pass_rate * 100, "%\n",
+      "  Max suffixes per group (suffix_length=", suffix_length, ", min_hamming=", min_hamming, "): ~", max_suffixes, "\n",
+      "  Estimated pass rate: 50%\n",
       "  Suggestions: increase barcode_length, decrease min_hamming_distance",
       if (barcodes_per_variant > 1) paste0(", or decrease barcodes_per_variant (currently ", barcodes_per_variant, ")") else ""
     )
@@ -175,9 +563,6 @@ check_barcode_capacity <- function(n_needed, prefix_length, suffix_length, min_h
 }
 
 #' Generate prefix sequences with guaranteed Hamming distance
-#'
-#' Uses greedy generation which is fast and produces near-optimal results.
-#' For k=8, d=3: typically generates ~950 valid prefixes in ~2 seconds.
 #'
 #' @param k Prefix length
 #' @param min_hamming Minimum Hamming distance
@@ -197,7 +582,7 @@ generate_prefixes <- function(k, min_hamming, n_needed) {
   prefixes
 }
 
-#' Greedy prefix generation fallback (vectorized)
+#' Greedy prefix generation (vectorized)
 #' @param k Prefix length
 #' @param min_hamming Minimum Hamming distance
 #' @param n_needed Number needed
@@ -237,14 +622,10 @@ generate_prefixes_greedy <- function(k, min_hamming, n_needed) {
 
 #' Greedy prefix generation excluding known prefixes (vectorized)
 #'
-#' Uses batch minimum-distance computation: for each existing prefix, compute
-#' distances to all candidates in one vectorized operation, then eliminate those
-#' too close. From survivors, greedily select new prefixes.
-#'
 #' @param k Prefix length
 #' @param min_hamming Minimum Hamming distance
 #' @param n_needed Number of additional prefixes needed
-#' @param existing_prefixes Prefixes already in use (must maintain d >= min_hamming)
+#' @param existing_prefixes Prefixes already in use
 #' @return Character vector of new prefixes
 generate_prefixes_greedy_excluding <- function(k, min_hamming, n_needed, existing_prefixes) {
   all_kmers <- generate_all_kmers(k)
@@ -260,13 +641,12 @@ generate_prefixes_greedy_excluding <- function(k, min_hamming, n_needed, existin
     return(character(0))
   }
 
-  # Convert all candidates to integer matrix (k × n_cand)
+  # Convert all candidates to integer matrix (k x n_cand)
   cand_mat <- matrix(unlist(lapply(all_kmers, utf8ToInt)),
                      nrow = k, ncol = n_cand)
 
   # Compute minimum distance to existing prefixes for each candidate
-  # Do this one existing prefix at a time to avoid huge memory allocation
-  min_dist <- rep(as.integer(k), n_cand)  # start with max possible distance
+  min_dist <- rep(as.integer(k), n_cand)
   for (ep in existing_prefixes) {
     ref <- utf8ToInt(ep)
     dists <- as.integer(colSums(cand_mat != ref))
@@ -282,12 +662,11 @@ generate_prefixes_greedy_excluding <- function(k, min_hamming, n_needed, existin
 
   # Greedy selection from valid candidates
   new_selected <- character(0)
-  sel_ints <- list()  # store as list of int vectors for fast access
+  sel_ints <- list()
 
   for (idx in valid) {
     q_int <- cand_mat[, idx]
 
-    # Check against previously selected new prefixes
     ok <- TRUE
     for (s_int in sel_ints) {
       if (sum(q_int != s_int) < min_hamming) {
@@ -334,21 +713,22 @@ generate_filtered_barcodes <- function(prefixes, suffix_group, gc_range,
   all_bcs
 }
 
+# ============================================================================
+# Filtering and k-mer helpers
+# ============================================================================
+
 #' Fast vectorized filter for enzyme sites and homopolymers
 #'
-#' Uses grepl on the full vector instead of per-element has_enzyme_sites/has_homopolymer.
 #' @param seqs Character vector of sequences
 #' @param max_homopolymer Maximum allowed homopolymer run
 #' @return Filtered character vector
 filter_sequences_fast <- function(seqs, max_homopolymer = 4L) {
-  # Build patterns for all enzyme recognition sites (fwd and RC)
   bad <- rep(FALSE, length(seqs))
   for (enz_name in names(ENZYMES)) {
     enz <- ENZYMES[[enz_name]]
     bad <- bad | grepl(enz$recog, seqs, fixed = TRUE) |
                  grepl(enz$recog_rc, seqs, fixed = TRUE)
   }
-  # Homopolymer check
   homo_pattern <- paste0("([ACGT])\\1{", max_homopolymer, ",}")
   bad <- bad | grepl(homo_pattern, seqs)
   seqs[!bad]
@@ -374,18 +754,16 @@ generate_all_kmers <- function(k) {
 #' @param max_homopolymer Max homopolymer run
 #' @return Logical
 passes_barcode_filters <- function(bc, gc_range, max_homopolymer) {
-  # GC content
   gc <- gc_content(bc)
   if (gc < gc_range[1] || gc > gc_range[2]) return(FALSE)
-
-  # Homopolymer
   if (has_homopolymer(bc, max_homopolymer)) return(FALSE)
-
-  # Enzyme sites
   if (has_enzyme_sites(bc)) return(FALSE)
-
   TRUE
 }
+
+# ============================================================================
+# Hamming distance helpers
+# ============================================================================
 
 #' Calculate Hamming distance between two equal-length strings
 #' @param a Character string
@@ -403,33 +781,34 @@ hamming_distance_1_to_many <- function(query, targets) {
   q_int <- utf8ToInt(query)
   k <- length(q_int)
   n <- length(targets)
-  # Convert all targets to a single raw matrix for vectorized comparison
   t_int <- matrix(unlist(lapply(targets, utf8ToInt)), nrow = k, ncol = n)
   as.integer(colSums(t_int != q_int))
 }
 
-#' Validate that all barcodes have minimum pairwise Hamming distance
+# ============================================================================
+# Validation
+# ============================================================================
+
+#' Validate that all barcodes have minimum pairwise Hamming distance (hard)
 #'
-#' Uses prefix-group validation: barcodes with different prefixes are guaranteed
-#' to have >= min_hamming distance (since prefix distances >= min_hamming).
-#' Within each prefix group, does exhaustive pairwise check.
-#' Errors (not warns) on violations.
+#' Uses prefix-group validation when prefix_length is known.
+#' Errors on any violation.
 #'
 #' @param barcodes Character vector of barcodes
 #' @param min_hamming Minimum required Hamming distance
-#' @param prefix_length Length of the prefix used during generation
+#' @param prefix_length Length of the prefix used during generation (or NULL)
 validate_barcode_distances <- function(barcodes, min_hamming, prefix_length = NULL) {
   n <- length(barcodes)
   if (n <= 1) return(invisible(NULL))
 
   barcode_len <- nchar(barcodes[1])
 
-  # Use prefix-group validation if prefix_length is known
-  if (!is.null(prefix_length) && prefix_length > 0 && prefix_length <= barcode_len) {
+  # Use prefix-group validation if prefix_length is known and < barcode_len
+  if (!is.null(prefix_length) && prefix_length > 0 &&
+      prefix_length < barcode_len) {
     prefixes <- substring(barcodes, 1, prefix_length)
     prefix_groups <- split(seq_len(n), prefixes)
 
-    # Within each prefix group, check all pairs exhaustively
     violations <- character(0)
     for (group_name in names(prefix_groups)) {
       idxs <- prefix_groups[[group_name]]
@@ -455,11 +834,11 @@ validate_barcode_distances <- function(barcodes, min_hamming, prefix_length = NU
 
     cli::cli_alert_success("Barcode distance validation passed (prefix-group check).")
   } else {
-    # Full pairwise check for small sets or unknown prefix
+    # Full pairwise check
     if (n > 5000) {
-      cli::cli_alert_info("Large barcode set without prefix info; performing sampled check...")
+      cli::cli_alert_info("Large barcode set; performing sampled check...")
       n_checks <- min(50000L, as.integer(n) * (as.integer(n) - 1L) / 2L)
-      for (k in seq_len(n_checks)) {
+      for (k_check in seq_len(n_checks)) {
         ij <- sample(n, 2)
         d <- hamming_distance(barcodes[ij[1]], barcodes[ij[2]])
         if (d < min_hamming) {
@@ -487,4 +866,88 @@ validate_barcode_distances <- function(barcodes, min_hamming, prefix_length = NU
   }
 
   invisible(NULL)
+}
+
+#' Validate barcodes with soft Hamming constraint (OPS mode)
+#'
+#' Cross-prefix pairs are guaranteed to have distance >= min_hamming (from prefix
+#' Hamming distance alone). Within-prefix pairs may violate since the suffix
+#' constraint is relaxed. Checks that the fraction of compliant pairs >= tolerance.
+#'
+#' @param barcodes Character vector of barcodes
+#' @param min_hamming Minimum Hamming distance
+#' @param prefix_length Prefix length
+#' @param tolerance Required fraction of compliant pairs
+#' @return Numeric compliance fraction
+validate_barcode_distances_soft <- function(barcodes, min_hamming, prefix_length,
+                                             tolerance) {
+  n <- length(barcodes)
+  if (n <= 1) return(1.0)
+
+  barcode_len <- nchar(barcodes[1])
+  prefixes <- substring(barcodes, 1, prefix_length)
+  prefix_groups <- split(seq_len(n), prefixes)
+
+  # Count violations within prefix groups (cross-prefix pairs are always OK)
+  n_violations <- 0L
+  n_within_pairs <- 0L
+
+  for (group_name in names(prefix_groups)) {
+    idxs <- prefix_groups[[group_name]]
+    ng <- length(idxs)
+    if (ng < 2) next
+    n_within_pairs <- n_within_pairs + ng * (ng - 1L) / 2L
+
+    # For large groups, use vectorized distance computation
+    if (ng > 50) {
+      group_bcs <- barcodes[idxs]
+      k <- barcode_len
+      bc_mat <- matrix(unlist(lapply(group_bcs, utf8ToInt)),
+                       nrow = k, ncol = ng)
+      for (i in seq_len(ng - 1L)) {
+        dists <- as.integer(colSums(bc_mat[, (i + 1L):ng, drop = FALSE] != bc_mat[, i]))
+        n_violations <- n_violations + sum(dists < min_hamming)
+      }
+    } else {
+      for (i in seq_len(ng - 1L)) {
+        for (j in (i + 1L):ng) {
+          d <- hamming_distance(barcodes[idxs[i]], barcodes[idxs[j]])
+          if (d < min_hamming) n_violations <- n_violations + 1L
+        }
+      }
+    }
+  }
+
+  # Total pairs = n*(n-1)/2
+  total_pairs <- as.numeric(n) * (as.numeric(n) - 1) / 2
+  # Cross-prefix pairs are all compliant
+  n_cross_pairs <- total_pairs - n_within_pairs
+  n_compliant <- n_cross_pairs + (n_within_pairs - n_violations)
+  compliance_fraction <- n_compliant / total_pairs
+
+  cli::cli_alert_info(paste0(
+    "Soft Hamming validation: ", n_violations, " violations in ",
+    n_within_pairs, " within-prefix pairs (",
+    total_pairs, " total pairs). Compliance: ",
+    round(compliance_fraction * 100, 2), "%"
+  ))
+
+  if (compliance_fraction < tolerance) {
+    stop(
+      "Barcode soft Hamming constraint not met. Compliance: ",
+      round(compliance_fraction * 100, 2), "%, required: ",
+      tolerance * 100, "%.\n",
+      "  Violations: ", n_violations, " pairs below min_hamming=", min_hamming, "\n",
+      "  Try: increase barcode_length, decrease barcodes_per_variant, ",
+      "or lower barcode_capacity_tolerance."
+    )
+  }
+
+  cli::cli_alert_success(paste0(
+    "Soft Hamming constraint met: ",
+    round(compliance_fraction * 100, 2), "% >= ",
+    tolerance * 100, "% threshold"
+  ))
+
+  compliance_fraction
 }
