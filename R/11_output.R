@@ -10,8 +10,10 @@
 #' @param qc_result List from run_qc_checks()
 #' @param output_dir Output directory path
 #' @param gene_name Name of the gene
+#' @param min_hamming_dist Integer vector of per-barcode nearest-neighbor Hamming distances (optional)
 write_outputs <- function(oligos, geneblock_result, variants, barcodes,
-                          qc_result, output_dir, gene_name = "gene") {
+                          qc_result, output_dir, gene_name = "gene",
+                          min_hamming_dist = NULL) {
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
   }
@@ -34,15 +36,16 @@ write_outputs <- function(oligos, geneblock_result, variants, barcodes,
 
   # 3. Variant-barcode map CSV
   barcode_map <- data.frame(
-    variant_id = variants$variant_id,
-    position   = variants$position,
-    wt_aa      = variants$wt_aa,
-    mut_aa     = variants$mut_aa,
-    wt_codon   = variants$wt_codon,
-    mut_codon  = variants$mut_codon,
-    barcode    = barcodes,
-    barcode_idx = if (!is.null(variants$barcode_idx)) variants$barcode_idx else rep(1L, nrow(variants)),
-    tile_id    = variants$tile_id,
+    variant_id       = variants$variant_id,
+    position         = variants$position,
+    wt_aa            = variants$wt_aa,
+    mut_aa           = variants$mut_aa,
+    wt_codon         = variants$wt_codon,
+    mut_codon        = variants$mut_codon,
+    barcode          = barcodes,
+    min_hamming_dist = if (!is.null(min_hamming_dist)) min_hamming_dist else NA_integer_,
+    barcode_idx      = if (!is.null(variants$barcode_idx)) variants$barcode_idx else rep(1L, nrow(variants)),
+    tile_id          = variants$tile_id,
     stringsAsFactors = FALSE
   )
   map_path <- file.path(output_dir, paste0(gene_name, "_variant_barcode_map.csv"))

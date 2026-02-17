@@ -211,13 +211,14 @@ qc_result <- run_qc_checks(
 # Step 11: Write outputs
 cli::cli_h2("Step 11: Writing outputs")
 output_paths <- write_outputs(
-  oligos          = oligos,
+  oligos           = oligos,
   geneblock_result = geneblock_result,
-  variants        = variants_expanded,
-  barcodes        = barcodes,
-  qc_result       = qc_result,
-  output_dir      = cfg$output_dir,
-  gene_name       = gene$gene_name
+  variants         = variants_expanded,
+  barcodes         = barcodes,
+  qc_result        = qc_result,
+  output_dir       = cfg$output_dir,
+  gene_name        = gene$gene_name,
+  min_hamming_dist = barcode_result$min_hamming_dist
 )
 
 # --- Summary ---
