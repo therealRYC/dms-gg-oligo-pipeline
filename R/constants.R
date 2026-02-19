@@ -1,3 +1,5 @@
+# Created: 2025-02-01
+# Last updated: 2026-02-18 — Unified hierarchical barcode mode: PREFIX_LENGTH=12, remove OPS/tolerance constants
 # constants.R — Enzyme definitions, synthesis limits, amino acid alphabet
 # DMS Golden Gate Oligo Pipeline
 
@@ -86,16 +88,12 @@ for (codon in names(CODON_TABLE)) {
 }
 
 # --- Barcode Defaults ---
-DEFAULT_BARCODE_LENGTH   <- 12L
+DEFAULT_BARCODE_LENGTH   <- 20L
 DEFAULT_MIN_HAMMING      <- 3L
-DEFAULT_PREFIX_LENGTH    <- 8L
+DEFAULT_PREFIX_LENGTH    <- 12L   # Unified hierarchical mode: prefix carries hard Hamming guarantee
 DEFAULT_GC_RANGE         <- c(0.25, 0.75)
 DEFAULT_MAX_HOMOPOLYMER  <- 4L
-
-# --- OPS Mode Defaults ---
-DEFAULT_OPS_MODE                    <- FALSE
-DEFAULT_BARCODE_CAPACITY_TOLERANCE  <- 0.99
-DEFAULT_NON_OPS_BARCODE_LENGTH      <- 20L
+DEFAULT_MIN_HAMMING_FLOOR <- 2L   # Floor for auto-adjustment when capacity is tight
 
 # --- Overhang Fidelity Threshold ---
 # Based on NEB Ligase Fidelity data (Potapov et al. 2018, 37C, 18h)
@@ -106,4 +104,4 @@ DEFAULT_NON_OPS_BARCODE_LENGTH      <- 20L
 DEFAULT_FIDELITY_THRESHOLD <- 0.95
 
 # --- Barcodes Per Variant ---
-DEFAULT_BARCODES_PER_VARIANT <- 1L
+DEFAULT_BARCODES_PER_VARIANT <- 10L

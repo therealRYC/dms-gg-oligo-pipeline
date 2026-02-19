@@ -176,33 +176,27 @@ report_barcode_summary <- function(barcode_result, barcodes, cfg) {
   add("## 4. Barcode Design")
   add("")
 
-  # Determine mode and parameters
-  is_ops <- isTRUE(barcode_result$ops_mode)
-  bc_length <- barcode_result$barcode_length %||% cfg$barcode_length %||% 12L
+  # Parameters from unified hierarchical mode
+  bc_length <- barcode_result$barcode_length %||% cfg$barcode_length %||% 20L
+  prefix_len <- barcode_result$prefix_length %||% cfg$barcode_prefix_length %||% 12L
+  suffix_len <- bc_length - prefix_len
+  effective_ham <- barcode_result$effective_hamming %||% cfg$min_hamming_distance %||% 3L
   min_ham <- cfg$min_hamming_distance %||% 3L
   barcodes_per <- cfg$barcodes_per_variant %||% 1L
 
   # --- Design Parameters table ---
-  param_names <- c("Mode", "Barcode length", "Min Hamming distance",
+  param_names <- c("Mode", "Barcode length", "Prefix length", "Suffix length",
+                   "Requested min Hamming", "Effective min Hamming",
                    "Barcodes per variant")
   param_vals <- c(
-    if (is_ops) "OPS (prefix-first)" else "Standard (global Hamming)",
+    "Unified hierarchical (prefix-suffix)",
     paste0(bc_length, " nt"),
+    paste0(prefix_len, " nt"),
+    paste0(suffix_len, " nt"),
     as.character(min_ham),
+    as.character(effective_ham),
     as.character(barcodes_per)
   )
-
-  if (is_ops) {
-    prefix_len <- barcode_result$prefix_length %||% cfg$barcode_prefix_length %||% 8L
-    suffix_len <- bc_length - prefix_len
-    tolerance <- cfg$barcode_capacity_tolerance %||% 0.99
-    param_names <- c(param_names, "Prefix length", "Suffix length",
-                     "Capacity tolerance")
-    param_vals <- c(param_vals,
-                    paste0(prefix_len, " nt"),
-                    paste0(suffix_len, " nt"),
-                    paste0(round(tolerance * 100, 1), "%"))
-  }
 
   param_df <- data.frame(Parameter = param_names, Value = param_vals,
                           stringsAsFactors = FALSE)
@@ -219,18 +213,12 @@ report_barcode_summary <- function(barcode_result, barcodes, cfg) {
                          round(max(gc_vals) * 100, 1), "%")
   gc_mean_str <- paste0(round(mean(gc_vals) * 100, 1), "%")
 
-  compliance <- barcode_result$compliance_fraction %||% 1.0
-  if (is_ops) {
-    compliance_str <- paste0(round(compliance * 100, 2),
-                             "% of pairs >= ", min_ham)
-  } else {
-    compliance_str <- paste0("100% (hard guarantee, d >= ", min_ham, ")")
-  }
+  compliance_str <- paste0("100% cross-variant (prefix d >= ", effective_ham, ")")
 
   stat_df <- data.frame(
     Statistic = c("Total barcodes", "Unique barcodes",
                   "GC content range", "GC content mean",
-                  "Hamming compliance"),
+                  "Hamming guarantee"),
     Value = c(n_total, n_unique, gc_range_str, gc_mean_str,
               compliance_str),
     stringsAsFactors = FALSE
@@ -239,34 +227,6 @@ report_barcode_summary <- function(barcode_result, barcodes, cfg) {
   add("")
   add(md_table(stat_df))
   add("")
-
-  # --- Sub-threshold distribution (OPS mode only) ---
-  if (is_ops && !is.null(barcode_result$violation_distribution)) {
-    viol_dist <- barcode_result$violation_distribution
-    n_violations <- barcode_result$n_violations %||% sum(viol_dist)
-    total_pairs <- barcode_result$total_pairs %||% 0
-
-    if (n_violations > 0 && total_pairs > 0) {
-      add("### Sub-threshold Hamming Distance Distribution")
-      add("")
-      add(paste0("Of ", format(total_pairs, big.mark = ","),
-                 " total barcode pairs, ", format(n_violations, big.mark = ","),
-                 " fall below the minimum Hamming distance of ", min_ham, ":"))
-      add("")
-      dist_df <- data.frame(
-        Distance = names(viol_dist),
-        Pairs = as.integer(viol_dist),
-        Fraction = paste0(round(as.numeric(viol_dist) / total_pairs * 100, 4), "%"),
-        stringsAsFactors = FALSE
-      )
-      add(md_table(dist_df))
-      add("")
-    } else {
-      add(paste0("No sub-threshold violations detected among ",
-                 format(total_pairs, big.mark = ","), " barcode pairs."))
-      add("")
-    }
-  }
 
   lines
 }
@@ -389,47 +349,66 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
     character(0)
   }
 
-  # Build component table
+  # Build component table (physical assembly order: 5' → 3')
   comp_rows <- list()
   comp_idx <- 1L
+
+  # Get superblock junction overhangs for this tile's 5'WT blocks
+  sb <- assembly_plan$superblock_splits
+  sb_bsai <- if (!is.null(sb) && nrow(sb) > 0) {
+    sb[sb$tile_id == tid & sb$block_type == "bsai_5wt", , drop = FALSE]
+  } else {
+    data.frame(junction_oh = character(0), stringsAsFactors = FALSE)
+  }
+
+  # 5'WT gene blocks first (physical order)
+  if (length(bsai_part_names) == 0) {
+    comp_rows[[comp_idx]] <- c(comp_idx,
+                                "5'WT gene block",
+                                "(none -- tile starts at gene nt 1)",
+                                "--", "--", "--")
+    comp_idx <- comp_idx + 1L
+  } else {
+    n_bsai <- length(bsai_part_names)
+    for (j in seq_along(bsai_part_names)) {
+      bp <- bsai_part_names[j]
+      block_row <- blocks[blocks$block_name == bp, ]
+      blen <- if (nrow(block_row) > 0) paste0(block_row$length[1], " nt") else "?"
+      # Overhang chain: oh_L -- [sub1] -- jxn[1] -- [sub2] -- ... -- oh1
+      oh_5 <- if (j == 1L) assembly_plan$oh_L
+              else sb_bsai$junction_oh[j - 1L]
+      oh_3 <- if (j == n_bsai) tile$oh1_seq
+              else sb_bsai$junction_oh[j]
+      comp_rows[[comp_idx]] <- c(comp_idx, "5'WT gene block", bp, blen, oh_5, oh_3)
+      comp_idx <- comp_idx + 1L
+    }
+  }
 
   # Oligo pool
   oligo_range <- if (nrow(tile_oligos) > 0) {
     paste0(min(tile_oligos$length), "-", max(tile_oligos$length), " nt")
   } else { "--" }
+  oligo_oh_5 <- if (length(bsai_part_names) > 0) tile$oh1_seq else assembly_plan$oh_L
+  oligo_oh_3 <- assembly_plan$oh4
   comp_rows[[comp_idx]] <- c(comp_idx, "Oligo pool",
                               paste0("Tile ", tid, " (", nrow(tile_oligos), " oligos)"),
-                              oligo_range)
+                              oligo_range, oligo_oh_5, oligo_oh_3)
   comp_idx <- comp_idx + 1L
 
-  # 5'WT gene blocks
-  if (length(bsai_part_names) == 0) {
-    comp_rows[[comp_idx]] <- c(comp_idx,
-                                "5'WT gene block",
-                                "(none -- tile starts at gene nt 1)",
-                                "--")
-    comp_idx <- comp_idx + 1L
-  } else {
-    for (bp in bsai_part_names) {
-      block_row <- blocks[blocks$block_name == bp, ]
-      blen <- if (nrow(block_row) > 0) paste0(block_row$length[1], " nt") else "?"
-      comp_rows[[comp_idx]] <- c(comp_idx, "5'WT gene block", bp, blen)
-      comp_idx <- comp_idx + 1L
-    }
-  }
-
   # Helper plasmid
-  comp_rows[[comp_idx]] <- c(comp_idx, "Helper plasmid", "helper_plasmid_insert", "--")
+  comp_rows[[comp_idx]] <- c(comp_idx, "Helper plasmid", "helper_plasmid_insert",
+                              "--", "--", "--")
   comp_idx <- comp_idx + 1L
 
   # Enzyme
-  comp_rows[[comp_idx]] <- c(comp_idx, "Enzyme + buffer", "BsaI-HFv2 + CutSmart", "--")
+  comp_rows[[comp_idx]] <- c(comp_idx, "Enzyme + buffer", "BsaI-HFv2 + CutSmart",
+                              "--", "--", "--")
 
   comp_df <- data.frame(
     do.call(rbind, comp_rows),
     stringsAsFactors = FALSE
   )
-  names(comp_df) <- c("#", "Component", "Part name", "Length")
+  names(comp_df) <- c("#", "Component", "Part name", "Length", "5' OH", "3' OH")
 
   add("**Components:**")
   add("")
@@ -470,32 +449,61 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
   comp_rows2 <- list()
   comp_idx2 <- 1L
 
+  # Get superblock junction overhangs for this tile's 3'WT blocks
+  sb_bsmbi <- if (!is.null(sb) && nrow(sb) > 0) {
+    sb[sb$tile_id == tid & sb$block_type == "bsmbi_3wt", , drop = FALSE]
+  } else {
+    data.frame(junction_oh = character(0), stringsAsFactors = FALSE)
+  }
+
   # BsaI product
-  comp_rows2[[comp_idx2]] <- c(comp_idx2, "BsaI product", "(in helper plasmid)", "--")
+  comp_rows2[[comp_idx2]] <- c(comp_idx2, "BsaI product", "(in helper plasmid)",
+                                "--", "--", "--")
   comp_idx2 <- comp_idx2 + 1L
 
-  # 3'WT+PolIII gene blocks
+  # 3'WT+PolIII gene blocks — only the final sub-block contains PolIII
   if (length(bsmbi_part_names) == 0) {
-    comp_rows2[[comp_idx2]] <- c(comp_idx2, "3'WT+PolIII block", "(none)", "--")
+    comp_rows2[[comp_idx2]] <- c(comp_idx2, "3'WT+PolIII block", "(none)",
+                                  "--", "--", "--")
     comp_idx2 <- comp_idx2 + 1L
   } else {
-    for (bp in bsmbi_part_names) {
+    # Find the index of the last 3'WT block (non-PolIII-only) to label correctly
+    last_3wt_idx <- max(which(!grepl("^bsmbi_polIII_tile", bsmbi_part_names)),
+                         0L)
+    n_bsmbi <- length(bsmbi_part_names)
+    for (bp_idx in seq_along(bsmbi_part_names)) {
+      bp <- bsmbi_part_names[bp_idx]
       block_row <- blocks[blocks$block_name == bp, ]
       blen <- if (nrow(block_row) > 0) paste0(block_row$length[1], " nt") else "?"
-      label <- if (grepl("polIII_tile", bp)) "PolIII-only fragment" else "3'WT+PolIII block"
-      comp_rows2[[comp_idx2]] <- c(comp_idx2, label, bp, blen)
+      # PolIII-only fragment (last tile, no 3'WT gene content)
+      if (grepl("^bsmbi_polIII_tile", bp)) {
+        label <- "PolIII-only fragment"
+      # Final 3'WT sub-block (or single block) — contains PolIII
+      } else if (bp_idx == last_3wt_idx || !grepl("_sub", bp)) {
+        label <- "3'WT+PolIII block"
+      # Non-final sub-block — gene content only, no PolIII
+      } else {
+        label <- "3'WT block"
+      }
+      # Overhang chain: oh2 -- [sub1] -- jxn[1] -- [sub2] -- ... -- oh3
+      oh_5 <- if (bp_idx == 1L) tile$oh2_seq
+              else sb_bsmbi$junction_oh[bp_idx - 1L]
+      oh_3 <- if (bp_idx == n_bsmbi) assembly_plan$oh3
+              else sb_bsmbi$junction_oh[bp_idx]
+      comp_rows2[[comp_idx2]] <- c(comp_idx2, label, bp, blen, oh_5, oh_3)
       comp_idx2 <- comp_idx2 + 1L
     }
   }
 
   # Enzyme
-  comp_rows2[[comp_idx2]] <- c(comp_idx2, "Enzyme + buffer", "BsmBI-v2 + NEBuffer r3.1", "--")
+  comp_rows2[[comp_idx2]] <- c(comp_idx2, "Enzyme + buffer", "BsmBI-v2 + NEBuffer r3.1",
+                                "--", "--", "--")
 
   comp_df2 <- data.frame(
     do.call(rbind, comp_rows2),
     stringsAsFactors = FALSE
   )
-  names(comp_df2) <- c("#", "Component", "Part name", "Length")
+  names(comp_df2) <- c("#", "Component", "Part name", "Length", "5' OH", "3' OH")
 
   add("**Components:**")
   add("")
@@ -703,12 +711,17 @@ format_bsmbi_overhang_map <- function(oh2, bsmbi_part_names, oh3,
 
   if (length(bsmbi_part_names) > 0) {
     if (nrow(sb_bsmbi) > 0) {
-      for (j in seq_len(length(bsmbi_part_names))) {
-        is_polIII_only <- grepl("polIII_tile", bsmbi_part_names[j])
+      n_parts <- length(bsmbi_part_names)
+      # Find the last 3'WT block (non-PolIII-only) — only it contains PolIII
+      last_3wt_idx <- max(which(!grepl("^bsmbi_polIII_tile", bsmbi_part_names)), 0L)
+      for (j in seq_len(n_parts)) {
+        is_polIII_only <- grepl("^bsmbi_polIII_tile", bsmbi_part_names[j])
         if (is_polIII_only) {
           labels <- c(labels, "PolIII")
+        } else if (j == last_3wt_idx) {
+          labels <- c(labels, paste0("3'WT+PolIII sub", j))
         } else {
-          labels <- c(labels, paste0("3'WT+PolIII", if (nrow(sb_bsmbi) > 0) paste0(" sub", j) else ""))
+          labels <- c(labels, paste0("3'WT sub", j))
         }
         if (j <= nrow(sb_bsmbi)) {
           ohs <- c(ohs, sb_bsmbi$junction_oh[j])
@@ -716,7 +729,7 @@ format_bsmbi_overhang_map <- function(oh2, bsmbi_part_names, oh3,
         }
       }
     } else {
-      is_polIII_only <- grepl("polIII_tile", bsmbi_part_names[1])
+      is_polIII_only <- grepl("^bsmbi_polIII_tile", bsmbi_part_names[1])
       labels <- c(labels, if (is_polIII_only) "PolIII" else "3'WT+PolIII")
     }
   }

@@ -1,4 +1,6 @@
 #!/usr/bin/env Rscript
+# Created: 2025-02-01
+# Last updated: 2026-02-18 — Add per-step timing output for pipeline performance diagnostics
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -48,30 +50,45 @@ source(file.path(pipeline_dir, "R", "11_output.R"))
 source(file.path(pipeline_dir, "R", "12_report.R"))
 
 # --- Run Pipeline ---
+pipeline_start <- proc.time()
 cli::cli_h1("DMS Golden Gate Oligo Pipeline (3-Enzyme Architecture)")
 cli::cli_alert_info(paste("Config:", config_path))
 
+# Accumulate step timings for final summary
+step_timings <- list()
+
 # Step 1: Load configuration
 cli::cli_h2("Step 1: Loading configuration")
+step_start <- proc.time()
 cfg <- load_config(config_path)
-cli::cli_alert_success("Configuration loaded and validated.")
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["1_config"]] <- step_elapsed
+cli::cli_alert_success("Configuration loaded and validated. [{round(step_elapsed, 1)}s]")
 
 # Step 2: Read and validate gene
 cli::cli_h2("Step 2: Reading gene")
+step_start <- proc.time()
 gene <- read_gene(cfg$gene_fasta)
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["2_gene_input"]] <- step_elapsed
 cli::cli_alert_success(paste0(
   "Gene '", gene$gene_name, "': ", nchar(gene$cds), " nt, ",
-  gene$n_codons, " codons, ", nchar(gene$protein), " aa"
+  gene$n_codons, " codons, ", nchar(gene$protein), " aa",
+  " [{round(step_elapsed, 1)}s]"
 ))
 
 # Step 3: Load codon usage
 cli::cli_h2("Step 3: Loading codon usage table")
+step_start <- proc.time()
 codon_usage <- load_codon_usage()
 preferred_codons <- get_preferred_codons(codon_usage)
-cli::cli_alert_success("Codon usage table loaded.")
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["3_codon_usage"]] <- step_elapsed
+cli::cli_alert_success("Codon usage table loaded. [{round(step_elapsed, 1)}s]")
 
 # Step 4: Scan and domesticate enzyme sites (BsaI + BsmBI + PaqCI)
 cli::cli_h2("Step 4: Scanning for enzyme sites (BsaI, BsmBI, PaqCI)")
+step_start <- proc.time()
 scan_result <- scan_enzyme_sites(gene$cds, cfg$polIII_promoter, codon_usage)
 
 if (cfg$auto_domesticate && nrow(scan_result$domestication) > 0) {
@@ -84,31 +101,40 @@ if (cfg$auto_domesticate && nrow(scan_result$domestication) > 0) {
   }
   cli::cli_alert_success("Gene domesticated for all 3 enzymes.")
 }
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["4_enzyme_scan"]] <- step_elapsed
+cli::cli_alert_info("Step 4 completed. [{round(step_elapsed, 1)}s]")
 
 # Step 5: Design mutations
 cli::cli_h2("Step 5: Designing mutations")
+step_start <- proc.time()
 variants <- design_mutations(gene$cds, codon_usage)
 variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["5_mutations"]] <- step_elapsed
+cli::cli_alert_success(paste0(
+  nrow(variants), " variants designed. [{round(step_elapsed, 1)}s]"
+))
 
 # Step 5.5: Resolve barcode length (needed before tiling for oligo budget)
-if (cfg$ops_mode && identical(cfg$barcode_length, "auto")) {
-  cli::cli_h2("Step 5.5: Auto-sizing barcode length (OPS mode)")
+if (identical(cfg$barcode_length, "auto")) {
+  cli::cli_h2("Step 5.5: Auto-sizing barcode length")
   n_variants_expected <- gene$n_codons * 20L
-  n_barcodes_needed <- n_variants_expected * cfg$barcodes_per_variant
   cfg$barcode_length <- auto_size_barcode_length(
-    n_total          = n_barcodes_needed,
+    n_variants       = n_variants_expected,
     prefix_length    = cfg$barcode_prefix_length,
-    min_hamming      = cfg$min_hamming_distance,
-    tolerance        = cfg$barcode_capacity_tolerance
+    barcodes_per_variant = cfg$barcodes_per_variant,
+    min_hamming      = cfg$min_hamming_distance
   )
   cli::cli_alert_success(paste0(
     "Auto-sized barcode_length = ", cfg$barcode_length,
-    " nt for ", n_barcodes_needed, " barcodes"
+    " nt for ", n_variants_expected, " variants x ", cfg$barcodes_per_variant, " barcodes"
   ))
 }
 
 # Step 6: Plan assembly (dynamic tile boundary search + overhangs + superblocks)
 cli::cli_h2("Step 6: Planning assembly (dynamic tile boundary search)")
+step_start <- proc.time()
 tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
 assembly_plan <- plan_assembly(
   cds = gene$cds,
@@ -129,18 +155,23 @@ oh3 <- assembly_plan$oh3
 oh4 <- assembly_plan$oh4
 tile_overhangs <- extract_tile_overhangs(tiles)
 variants <- assign_variants_to_tiles(variants, tiles)
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["6_assembly_plan"]] <- step_elapsed
 
 cli::cli_alert_success(paste0(
   "Assembly planned: ", assembly_plan$summary$n_tiles, " tiles, ",
   assembly_plan$summary$n_boundaries_both_in_hf, "/",
-  assembly_plan$summary$n_boundaries, " boundaries both in HF set"
+  assembly_plan$summary$n_boundaries, " boundaries both in HF set",
+  " [{round(step_elapsed, 1)}s]"
 ))
 
 # Step 7: Design barcodes
 cli::cli_h2("Step 7: Designing barcodes")
+step_start <- proc.time()
 cli::cli_alert_info(paste0(
-  "Barcode mode: ", if (cfg$ops_mode) "OPS" else "standard",
-  ", barcode_length=", cfg$barcode_length
+  "Barcode mode: unified hierarchical",
+  ", barcode_length=", cfg$barcode_length,
+  ", prefix_length=", cfg$barcode_prefix_length
 ))
 barcode_result <- design_barcodes(
   n_variants          = nrow(variants),
@@ -149,11 +180,12 @@ barcode_result <- design_barcodes(
   prefix_length       = cfg$barcode_prefix_length,
   gc_range            = cfg$barcode_gc_range,
   max_homopolymer     = cfg$barcode_max_homopolymer,
-  barcodes_per_variant = cfg$barcodes_per_variant,
-  ops_mode            = cfg$ops_mode,
-  capacity_tolerance  = cfg$barcode_capacity_tolerance
+  barcodes_per_variant = cfg$barcodes_per_variant
 )
 barcodes <- barcode_result$barcodes
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["7_barcodes"]] <- step_elapsed
+cli::cli_alert_info("Step 7 completed. [{round(step_elapsed, 1)}s]")
 
 # Expand variants for multi-barcode support
 if (cfg$barcodes_per_variant > 1L) {
@@ -167,6 +199,7 @@ if (cfg$barcodes_per_variant > 1L) {
 
 # Step 8: Assemble oligos (universal structure)
 cli::cli_h2("Step 8: Assembling oligos (universal 3-enzyme structure)")
+step_start <- proc.time()
 oligos <- assemble_oligos(
   variants    = variants_expanded,
   cds         = gene$cds,
@@ -176,9 +209,15 @@ oligos <- assemble_oligos(
   oh4         = oh4,
   max_oligo_length = cfg$max_oligo_length
 )
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["8_oligo_assembly"]] <- step_elapsed
+cli::cli_alert_success(paste0(
+  nrow(oligos), " oligos assembled. [{round(step_elapsed, 1)}s]"
+))
 
 # Step 9: Design WT gene blocks + helper plasmid
 cli::cli_h2("Step 9: Designing gene blocks and helper plasmid")
+step_start <- proc.time()
 geneblock_result <- design_wt_geneblocks(
   cds         = gene$cds,
   polIII      = cfg$polIII_promoter,
@@ -191,9 +230,15 @@ geneblock_result <- design_wt_geneblocks(
   fidelity_threshold  = cfg$overhang_fidelity_threshold,
   assembly_plan       = assembly_plan
 )
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["9_geneblocks"]] <- step_elapsed
+cli::cli_alert_success(paste0(
+  nrow(geneblock_result$blocks), " gene blocks designed. [{round(step_elapsed, 1)}s]"
+))
 
 # Step 10: QC checks
 cli::cli_h2("Step 10: Running QC checks")
+step_start <- proc.time()
 qc_result <- run_qc_checks(
   oligos          = oligos,
   geneblock_result = geneblock_result,
@@ -209,9 +254,16 @@ qc_result <- run_qc_checks(
   min_hamming      = cfg$min_hamming_distance,
   assembly_plan    = assembly_plan
 )
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["10_qc"]] <- step_elapsed
+cli::cli_alert_success(paste0(
+  "QC: ", if (qc_result$qc_pass) "ALL PASSED" else "ISSUES FOUND",
+  " [{round(step_elapsed, 1)}s]"
+))
 
 # Step 11: Write outputs
 cli::cli_h2("Step 11: Writing outputs")
+step_start <- proc.time()
 output_paths <- write_outputs(
   oligos           = oligos,
   geneblock_result = geneblock_result,
@@ -222,9 +274,13 @@ output_paths <- write_outputs(
   gene_name        = gene$gene_name,
   min_hamming_dist = barcode_result$min_hamming_dist
 )
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["11_output"]] <- step_elapsed
+cli::cli_alert_success("Outputs written. [{round(step_elapsed, 1)}s]")
 
 # Step 12: Generate wetlab assembly report
 cli::cli_h2("Step 12: Generating wetlab assembly report")
+step_start <- proc.time()
 report_path <- generate_report(
   gene             = gene,
   cfg              = cfg,
@@ -238,8 +294,12 @@ report_path <- generate_report(
   output_dir       = cfg$output_dir,
   barcode_result   = barcode_result
 )
+step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+step_timings[["12_report"]] <- step_elapsed
+cli::cli_alert_success("Report generated. [{round(step_elapsed, 1)}s]")
 
 # --- Summary ---
+pipeline_elapsed <- (proc.time() - pipeline_start)[["elapsed"]]
 cli::cli_h1("Pipeline Complete")
 cli::cli_alert_success(paste0("Gene: ", gene$gene_name))
 cli::cli_alert_success(paste0("Architecture: 3-enzyme (BsaI + BsmBI + PaqCI)"))
@@ -249,12 +309,20 @@ cli::cli_alert_success(paste0("Gene blocks: ", nrow(geneblock_result$blocks)))
 cli::cli_alert_success(paste0("Tiles: ", nrow(tiles)))
 cli::cli_alert_success(paste0("Fixed overhangs: oh3=", oh3, ", oh4=", oh4))
 cli::cli_alert_success(paste0(
-  "Barcodes: mode=", if (cfg$ops_mode) "OPS" else "standard",
+  "Barcodes: mode=unified hierarchical",
   ", length=", barcode_result$barcode_length,
-  if (!is.null(barcode_result$compliance_fraction))
-    paste0(", compliance=", round(barcode_result$compliance_fraction * 100, 1), "%")
-  else ""
+  ", prefix=", barcode_result$prefix_length,
+  ", effective_hamming=", barcode_result$effective_hamming
 ))
 cli::cli_alert_success(paste0("QC: ", if (qc_result$qc_pass) "ALL PASSED" else "ISSUES FOUND"))
 cli::cli_alert_success(paste0("Wetlab report: ", report_path))
 cli::cli_alert_success(paste0("Output directory: ", cfg$output_dir))
+
+# --- Timing breakdown ---
+cli::cli_h2("Timing Breakdown")
+for (step_name in names(step_timings)) {
+  cli::cli_alert_info(paste0(
+    sprintf("%-20s", step_name), " ", round(step_timings[[step_name]], 1), "s"
+  ))
+}
+cli::cli_alert_success(paste0("Total pipeline time: ", round(pipeline_elapsed, 1), "s"))

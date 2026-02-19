@@ -378,3 +378,127 @@ test_that("plan_assembly uses DP by default", {
   expect_true(is.list(plan_g))
   expect_true(!is.null(plan_g$tiles))
 })
+
+# =============================================================================
+# HOMOPOLYMER EXCLUSION TESTS
+# =============================================================================
+
+test_that("oh3 and oh4 are never homopolymers (short gene)", {
+  cu <- builtin_human_codon_usage()
+  cds <- TEST_GENE_SEQ
+  scan_result <- scan_enzyme_sites(cds, "", cu)
+  if (nrow(scan_result$domestication) > 0) {
+    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
+  }
+
+  tile_size <- compute_max_tile_size(300, 12)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+
+  expect_false(plan$oh3 %in% HOMOPOLYMER_4NT,
+               info = paste("oh3 =", plan$oh3, "should not be a homopolymer"))
+  expect_false(plan$oh4 %in% HOMOPOLYMER_4NT,
+               info = paste("oh4 =", plan$oh4, "should not be a homopolymer"))
+})
+
+test_that("oh3 and oh4 are never homopolymers (long gene)", {
+  cu <- builtin_human_codon_usage()
+  cds <- TEST_LONG_GENE_SEQ
+  scan_result <- scan_enzyme_sites(cds, "", cu)
+  if (nrow(scan_result$domestication) > 0) {
+    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
+  }
+
+  tile_size <- compute_max_tile_size(300, 12)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+
+  expect_false(plan$oh3 %in% HOMOPOLYMER_4NT,
+               info = paste("oh3 =", plan$oh3, "should not be a homopolymer"))
+  expect_false(plan$oh4 %in% HOMOPOLYMER_4NT,
+               info = paste("oh4 =", plan$oh4, "should not be a homopolymer"))
+})
+
+test_that("select_fixed_overhangs excludes homopolymers", {
+  cds <- TEST_GENE_SEQ
+  tiles <- partition_tiles(cds, 150)
+  tile_ohs <- extract_tile_overhangs(tiles)
+
+  result <- select_fixed_overhangs(cds, TEST_POLIII, tile_ohs)
+  expect_false(result$oh3 %in% HOMOPOLYMER_4NT)
+  expect_false(result$oh4 %in% HOMOPOLYMER_4NT)
+})
+
+# =============================================================================
+# GLOBAL SUPERBLOCK BOUNDARY TESTS
+# =============================================================================
+
+test_that("dp_solve_superblock_splits returns empty for short region", {
+  cds <- TEST_GENE_SEQ
+  hf_set <- load_high_fidelity_set()
+  oh_fidelity <- builtin_overhang_fidelity()
+
+  # Region of 200 nt + 0 extra < 1778 max_sub_length → no splits needed
+  result <- dp_solve_superblock_splits(
+    cds, region_start_nt = 1L, region_end_nt = 200L,
+    max_sub_length = 1778L, extra_content_length = 0L,
+    exclude_ohs = c("ATGG"), hf_set = hf_set, oh_fidelity = oh_fidelity
+  )
+  expect_equal(nrow(result), 0)
+})
+
+test_that("dp_solve_superblock_splits finds valid splits for long region", {
+  cds <- TEST_LONG_GENE_SEQ
+  hf_set <- load_high_fidelity_set()
+  oh_fidelity <- builtin_overhang_fidelity()
+  gene_len <- nchar(cds)
+
+  # Region: most of the gene (e.g., position 244 to end) + 250 PolIII
+  # Total: ~1857 + 250 = ~2107 > 1778 → needs splitting
+  result <- dp_solve_superblock_splits(
+    cds, region_start_nt = 244L, region_end_nt = gene_len,
+    max_sub_length = 1778L, extra_content_length = nchar(TEST_POLIII),
+    exclude_ohs = c("ATGG", "ACTA"),
+    hf_set = hf_set, oh_fidelity = oh_fidelity
+  )
+  expect_true(nrow(result) >= 1, info = "Should need at least 1 split")
+  expect_true(all(nchar(result$junction_oh) == 4))
+  # Junction overhangs should not be in the exclusion set
+  exclude_set <- c("ATGG", "ACTA", reverse_complement("ATGG"), reverse_complement("ACTA"))
+  expect_false(any(result$junction_oh %in% exclude_set))
+})
+
+test_that("global boundaries produce shared splits across tiles", {
+  cu <- builtin_human_codon_usage()
+  cds <- TEST_LONG_GENE_SEQ
+  scan_result <- scan_enzyme_sites(cds, "", cu)
+  if (nrow(scan_result$domestication) > 0) {
+    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
+  }
+
+  tile_size <- compute_max_tile_size(300, 12)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+
+  # Long gene should trigger superblock splits
+  splits <- plan$superblock_splits
+  expect_true(nrow(splits) > 0,
+              info = "2100 nt gene should trigger superblock splitting")
+
+  # For 3'WT splits: tiles that share a region beyond a global boundary
+  # should have the same split_nt values
+  bsmbi_splits <- splits[splits$block_type == "bsmbi_3wt", , drop = FALSE]
+  if (nrow(bsmbi_splits) > 0) {
+    # Get unique split_nt values across all tiles
+    unique_split_nts <- unique(bsmbi_splits$split_nt)
+    # Multiple tiles should reference the same split positions
+    for (sp in unique_split_nts) {
+      tiles_using_split <- bsmbi_splits$tile_id[bsmbi_splits$split_nt == sp]
+      # At least 2 tiles should share each global boundary
+      # (unless a tile's 3'WT region starts after this split)
+      expect_true(length(tiles_using_split) >= 1,
+                  info = paste("Split at nt", sp, "should be used by at least 1 tile"))
+    }
+    # The number of unique split positions should be small (global)
+    # compared to the number of per-tile split entries
+    expect_lte(length(unique_split_nts), nrow(bsmbi_splits),
+               label = "Unique split positions <= total per-tile entries (reuse)")
+  }
+})

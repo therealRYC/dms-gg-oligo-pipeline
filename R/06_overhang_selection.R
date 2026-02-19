@@ -1,3 +1,5 @@
+# Created: 2025-02-01
+# Last updated: 2026-02-18 — Derive oh3 from PolIII promoter 3' end (PerturbView architecture)
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -16,6 +18,15 @@
 # Key references:
 #   Potapov et al. 2018, ACS Synth Bio — 256x256 ligation fidelity matrices, HF overhang sets
 #   Pryor et al. 2020, PLOS ONE — Enzyme-specific (BsaI, BsmBI) pairwise matrices
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# Homopolymer 4-nt overhangs — excluded from oh3/oh4 selection because
+# polyA/polyT runs after PolIII promoters can cause premature transcription
+# termination, and homopolymer overhangs have poor ligation specificity.
+HOMOPOLYMER_4NT <- c("AAAA", "CCCC", "GGGG", "TTTT")
 
 # =============================================================================
 # DATA LOADING
@@ -539,6 +550,9 @@ precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
   oh1_hf  <- logical(n_codons)
   oh2_hf  <- logical(n_codons)
 
+  cli::cli_alert_info("Precomputing boundary scores for {n_codons - 1L} candidate positions...")
+  precomp_start <- proc.time()
+
   for (b in seq_len(n_codons - 1L)) {
     oh2_pos <- b * 3L
     oh1_pos <- oh2_pos + 1L
@@ -581,6 +595,9 @@ precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
 
     scores[b] <- hf_bonus + 2.0 * oh1_pw + 1.0 * oh2_fid + fid_penalty
   }
+
+  precomp_elapsed <- (proc.time() - precomp_start)[["elapsed"]]
+  cli::cli_alert_success("Boundary scores precomputed in {round(precomp_elapsed, 1)}s.")
 
   list(
     oh1_seq = oh1_seq, oh2_seq = oh2_seq,
@@ -788,6 +805,7 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
   best_avg_score <- -Inf
   k_results <- list()
 
+  dp_start <- proc.time()
   for (K in k_range) {
     result <- dp_solve_k(K, n_codons, min_codons, max_codons,
                           precomp$score, precomp$valid)
@@ -801,6 +819,9 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
       }
     }
   }
+
+  dp_elapsed <- (proc.time() - dp_start)[["elapsed"]]
+  cli::cli_alert_info("DP tile boundary search completed in {round(dp_elapsed, 1)}s ({length(k_range)} K values).")
 
   if (is.null(best_result)) {
     cli::cli_alert_warning("DP found no valid solution; falling back to greedy search.")
@@ -1010,6 +1031,406 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 }
 
 # =============================================================================
+# GLOBAL SUPERBLOCK BOUNDARY OPTIMIZATION
+# =============================================================================
+
+#' DP-optimize superblock split positions within a gene region
+#'
+#' Finds the set of split positions maximizing total junction fidelity,
+#' using exactly K splits (where K = minimum splits needed for all sub-blocks
+#' to fit within max_sub_length). Uses a layered DP analogous to dp_solve_k()
+#' for tile boundaries.
+#'
+#' The DP uses the same scoring as tile boundary search:
+#'   score(p) = 10 * (junction_oh in HF set) + fidelity(junction_oh)
+#'
+#' Constraint: every sub-block's gene content <= max_sub_length nt, where
+#' the last sub-block also carries extra_content_length (e.g., PolIII).
+#'
+#' @param cds Full domesticated gene sequence
+#' @param region_start_nt Start of region in CDS (1-based, inclusive)
+#' @param region_end_nt End of region in CDS (1-based, inclusive)
+#' @param max_sub_length Max nucleotide content per sub-block (gene content only,
+#'   excluding enzyme site overhead — caller should subtract block_overhead)
+#' @param extra_content_length Extra content appended to the last sub-block
+#'   (e.g., PolIII promoter length for 3'WT blocks). Default 0.
+#' @param exclude_ohs Character vector of overhangs to exclude (already committed
+#'   in the same GG reaction — e.g., oh3 + all oh2 values for BsmBI)
+#' @param hf_set High-fidelity overhang set
+#' @param oh_fidelity Fidelity data frame (overhang + fidelity columns)
+#' @return Data frame with split_nt, junction_oh, junction_in_hf, junction_fidelity
+dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
+                                        max_sub_length, extra_content_length = 0L,
+                                        exclude_ohs, hf_set, oh_fidelity) {
+
+  gene_region_length <- region_end_nt - region_start_nt + 1L
+  total_content <- gene_region_length + extra_content_length
+
+  cli::cli_alert_info(paste0(
+    "Superblock DP: region [", region_start_nt, ", ", region_end_nt,
+    "] (", gene_region_length, " nt gene + ", extra_content_length,
+    " nt extra = ", total_content, " nt total)"
+  ))
+  sb_start <- proc.time()
+
+  # No splitting needed if total content fits in one sub-block
+  if (total_content <= max_sub_length) {
+    return(data.frame(
+      split_nt = integer(0), junction_oh = character(0),
+      junction_in_hf = logical(0), junction_fidelity = numeric(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+
+  # Build exclusion set including reverse complements
+  exclude_set <- unique(c(
+    exclude_ohs,
+    vapply(exclude_ohs, reverse_complement, character(1))
+  ))
+
+  # Candidate split positions: codon boundaries (multiples of 3) within the region.
+  # A split at nt position p means sub-blocks [..., p] and [p+1, ...].
+  # The junction overhang is the 4-nt ending at p: substring(cds, p-3, p).
+  # Require p >= 4 so the overhang is exactly 4 nt (substring(cds, p-3, p)).
+  all_codon_ends <- seq(3L, nchar(cds), by = 3L)
+  candidates <- all_codon_ends[
+    all_codon_ends >= max(region_start_nt + 2L, 4L) &
+    all_codon_ends <= region_end_nt - 3L
+  ]
+
+  if (length(candidates) == 0) {
+    cli::cli_alert_warning(
+      "No valid superblock split candidates in region [{region_start_nt}, {region_end_nt}]."
+    )
+    return(data.frame(
+      split_nt = integer(0), junction_oh = character(0),
+      junction_in_hf = logical(0), junction_fidelity = numeric(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  # Score each candidate position
+  n_cand <- length(candidates)
+  cand_oh    <- character(n_cand)
+  cand_score <- numeric(n_cand)
+  cand_valid <- logical(n_cand)
+  cand_in_hf <- logical(n_cand)
+  cand_fid   <- numeric(n_cand)
+  prev_boundary <- region_start_nt - 1L  # implicit zeroth boundary
+
+  for (ci in seq_len(n_cand)) {
+    p <- candidates[ci]
+    oh <- substring(cds, p - 3L, p)
+    cand_oh[ci] <- oh
+
+    # Exclude overhangs that collide with committed overhangs in the same reaction
+    if (nchar(oh) != 4L || oh %in% exclude_set) {
+      cand_valid[ci] <- FALSE
+      next
+    }
+    cand_valid[ci] <- TRUE
+
+    in_hf <- oh %in% hf_set
+    fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else 0.5
+    cand_in_hf[ci] <- in_hf
+    cand_fid[ci] <- fid
+    cand_score[ci] <- 10 * in_hf + fid
+  }
+
+  # Determine minimum number of splits K
+  # K+1 sub-blocks must each be <= max_sub_length (last carries extra_content)
+  K_min <- ceiling(total_content / max_sub_length) - 1L
+  if (K_min < 1L) K_min <- 1L
+
+  # Try K = K_min, then K_min+1, etc. up to a reasonable max.
+  # This handles edge cases where the minimum K fails due to exclusion constraints.
+  best_score <- -Inf
+  best_ci <- NA_integer_
+  best_K <- NA_integer_
+  best_parent <- NULL
+
+  for (K in K_min:min(K_min + 5L, 10L)) {
+
+    # Layered DP for exactly K splits (analogous to dp_solve_k for tile boundaries)
+    # dp_prev[ci] = best total score with previous boundary layer ending at candidate ci
+    # parent[k, ci] = predecessor candidate index for layer k at position ci
+    dp_prev <- rep(-Inf, n_cand)
+    parent  <- matrix(NA_integer_, nrow = K, ncol = n_cand)
+
+    # Layer k=1: first split. Sub-block from region_start to candidates[ci].
+    for (ci in seq_len(n_cand)) {
+      if (!cand_valid[ci]) next
+      p <- candidates[ci]
+      first_sub <- p - prev_boundary  # = p - region_start_nt + 1
+      if (first_sub <= max_sub_length) {
+        dp_prev[ci] <- cand_score[ci]
+      }
+    }
+
+    # Layers k=2..K
+    if (K >= 2L) {
+      for (k in 2L:K) {
+        dp_curr <- rep(-Inf, n_cand)
+        for (ci in seq_len(n_cand)) {
+          if (!cand_valid[ci]) next
+          p <- candidates[ci]
+
+          # Check predecessors within max_sub_length distance (sliding window)
+          for (cj in rev(seq_len(ci - 1L))) {
+            sub_len <- p - candidates[cj]
+            if (sub_len > max_sub_length) break  # all earlier are farther
+            if (!is.finite(dp_prev[cj])) next
+
+            new_score <- dp_prev[cj] + cand_score[ci]
+            if (new_score > dp_curr[ci]) {
+              dp_curr[ci] <- new_score
+              parent[k, ci] <- cj
+            }
+          }
+        }
+        dp_prev <- dp_curr
+      }
+    }
+
+    # Find best endpoint: last sub-block (from last split to region_end + extra)
+    # must fit within max_sub_length
+    for (ci in seq_len(n_cand)) {
+      if (!is.finite(dp_prev[ci])) next
+      last_sub <- (region_end_nt - candidates[ci]) + extra_content_length
+      if (last_sub <= max_sub_length && last_sub > 0L) {
+        if (dp_prev[ci] > best_score) {
+          best_score <- dp_prev[ci]
+          best_ci <- ci
+          best_K <- K
+          best_parent <- parent
+        }
+      }
+    }
+
+    # Stop as soon as we find a feasible solution at the minimum K
+    if (is.finite(best_score)) break
+  }
+
+  if (!is.finite(best_score)) {
+    cli::cli_alert_warning(paste0(
+      "DP superblock split found no valid solution for region [",
+      region_start_nt, ", ", region_end_nt, "]."
+    ))
+    return(data.frame(
+      split_nt = integer(0), junction_oh = character(0),
+      junction_in_hf = logical(0), junction_fidelity = numeric(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  sb_elapsed <- (proc.time() - sb_start)[["elapsed"]]
+  cli::cli_alert_success(paste0(
+    "Superblock DP solved: ", best_K, " split(s) in ", round(sb_elapsed, 1), "s."
+  ))
+
+  K <- best_K
+  parent <- best_parent
+
+  # Backtrack to recover split positions
+  boundaries <- integer(K)
+  boundaries[K] <- best_ci
+  if (K >= 2L) {
+    for (k in K:2L) {
+      boundaries[k - 1L] <- parent[k, boundaries[k]]
+    }
+  }
+
+  data.frame(
+    split_nt         = candidates[boundaries],
+    junction_oh      = cand_oh[boundaries],
+    junction_in_hf   = cand_in_hf[boundaries],
+    junction_fidelity = cand_fid[boundaries],
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Compute global superblock boundaries for 3'WT and 5'WT regions
+#'
+#' Instead of computing split points independently per tile (which produces
+#' tile-specific boundaries that drift and prevent block reuse), this function
+#' computes GLOBAL boundaries shared across all tiles. Each tile then gets
+#' the subset of global boundaries within its WT region range.
+#'
+#' This maximizes block reuse: tiles with overlapping WT regions share the
+#' same boundary-to-boundary sub-blocks, so deduplication removes far more
+#' duplicates.
+#'
+#' @param cds Full domesticated gene sequence
+#' @param gene_len Length of CDS in nt
+#' @param tiles Data frame of tiles from search_tile_boundaries_dp()
+#' @param polIII_len Length of PolIII promoter in nt
+#' @param max_sub_length Max gene content per sub-block (max_block_length - overhead)
+#' @param hf_set High-fidelity overhang set
+#' @param oh_fidelity Fidelity data frame
+#' @param oh3 Fixed BsmBI overhang
+#' @param oh4 Fixed BsaI overhang
+#' @param oh_L First 4 nt of gene (BsaI overhang)
+#' @return List with $splits_3wt and $splits_5wt data frames
+compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
+                                                  polIII_len, max_sub_length,
+                                                  hf_set, oh_fidelity,
+                                                  oh3, oh4, oh_L) {
+
+  # --- 3'WT boundaries (BsmBI reaction) ---
+  # The longest possible 3'WT region: from earliest tile end to gene end
+  earliest_3wt_start <- min(tiles$end_nt) + 1L
+
+  # Exclusion set: oh3 + all oh2 values + their RCs (all in BsmBI reactions)
+  exclude_3wt <- unique(c(
+    oh3, tiles$oh2_seq,
+    vapply(c(oh3, tiles$oh2_seq), reverse_complement, character(1))
+  ))
+
+  splits_3wt <- dp_solve_superblock_splits(
+    cds = cds,
+    region_start_nt = earliest_3wt_start,
+    region_end_nt = gene_len,
+    max_sub_length = max_sub_length,
+    extra_content_length = polIII_len,
+    exclude_ohs = exclude_3wt,
+    hf_set = hf_set,
+    oh_fidelity = oh_fidelity
+  )
+
+  # --- 5'WT boundaries (BsaI reaction) ---
+  # The longest possible 5'WT region: from gene start to latest tile start
+  latest_5wt_end <- max(tiles$start_nt) - 1L
+
+  # Exclusion set: oh_L + oh4 + all oh1 values + their RCs (all in BsaI reactions)
+  exclude_5wt <- unique(c(
+    oh_L, oh4, tiles$oh1_seq,
+    vapply(c(oh_L, oh4, tiles$oh1_seq), reverse_complement, character(1))
+  ))
+
+  # Only compute 5'WT splits if there's actually a 5'WT region to split
+  if (latest_5wt_end >= 1L) {
+    splits_5wt <- dp_solve_superblock_splits(
+      cds = cds,
+      region_start_nt = 1L,
+      region_end_nt = latest_5wt_end,
+      max_sub_length = max_sub_length,
+      extra_content_length = 0L,
+      exclude_ohs = exclude_5wt,
+      hf_set = hf_set,
+      oh_fidelity = oh_fidelity
+    )
+  } else {
+    splits_5wt <- data.frame(
+      split_nt = integer(0), junction_oh = character(0),
+      junction_in_hf = logical(0), junction_fidelity = numeric(0),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  list(splits_3wt = splits_3wt, splits_5wt = splits_5wt)
+}
+
+#' Assign global superblock boundaries to individual tiles
+#'
+#' For each tile, selects the subset of global boundaries that fall within
+#' that tile's WT region range. The result is a per-tile split data frame
+#' in the same format as the old per-tile optimize_split_points() output.
+#'
+#' Because boundaries are global, tiles with overlapping WT regions share
+#' the same boundary-to-boundary sub-blocks, enabling efficient deduplication.
+#'
+#' @param tiles Data frame of tiles
+#' @param global_3wt Data frame of global 3'WT split positions
+#' @param global_5wt Data frame of global 5'WT split positions
+#' @param gene_len Gene length in nt
+#' @return Data frame with split_nt, junction_oh, junction_in_hf,
+#'   junction_fidelity, block_type, tile_id
+assign_global_boundaries_to_tiles <- function(tiles, global_3wt, global_5wt,
+                                               gene_len) {
+  splits_list <- list()
+
+  for (i in seq_len(nrow(tiles))) {
+    tile <- tiles[i, ]
+
+    # 3'WT: tile's 3'WT region is [tile$end_nt + 1, gene_len]
+    # Assign global splits that fall strictly within this range
+    if (nrow(global_3wt) > 0 && tile$end_nt < gene_len) {
+      in_range <- global_3wt$split_nt > tile$end_nt &
+                  global_3wt$split_nt < gene_len
+      if (any(in_range)) {
+        s3 <- global_3wt[in_range, , drop = FALSE]
+        s3$block_type <- "bsmbi_3wt"
+        s3$tile_id <- tile$tile_id
+        splits_list[[length(splits_list) + 1L]] <- s3
+      }
+    }
+
+    # 5'WT: tile's 5'WT region is [1, tile$start_nt - 1]
+    # Assign global splits that fall strictly within this range
+    if (nrow(global_5wt) > 0 && tile$start_nt > 1L) {
+      in_range <- global_5wt$split_nt >= 1L &
+                  global_5wt$split_nt < tile$start_nt
+      if (any(in_range)) {
+        s5 <- global_5wt[in_range, , drop = FALSE]
+        s5$block_type <- "bsai_5wt"
+        s5$tile_id <- tile$tile_id
+        splits_list[[length(splits_list) + 1L]] <- s5
+      }
+    }
+  }
+
+  if (length(splits_list) > 0) {
+    all_splits <- do.call(rbind, splits_list)
+    rownames(all_splits) <- NULL
+    all_splits
+  } else {
+    data.frame(
+      split_nt = integer(0), junction_oh = character(0),
+      junction_in_hf = logical(0), junction_fidelity = numeric(0),
+      block_type = character(0), tile_id = integer(0),
+      stringsAsFactors = FALSE
+    )
+  }
+}
+
+# =============================================================================
+# PROMOTER-DERIVED oh3
+# =============================================================================
+
+#' Derive oh3 overhang and spacer from the PolIII promoter's 3' end
+#'
+#' In PerturbView/pCROP-Seq-v2 architecture, oh3 (the BsmBI overhang at the
+#' PolIII–barcode junction) is derived from the promoter's terminal nucleotides:
+#'   - Last 5 nt of promoter = oh3 (4 nt) + spacer (1 nt)
+#'   - Example: promoter ends ...GAAACACCG → oh3=CACC, spacer=G
+#'   - core_polIII = promoter minus last 5 nt (used in gene blocks)
+#'
+#' After BsmBI digestion and ligation, the junction reconstructs:
+#'   ...core_polIII + oh3 + barcode (seamless, no duplicated sequence)
+#'
+#' The terminal nucleotide (spacer) is positioned between the BsmBI recognition
+#' site and the overhang on the gene block. It is cut away during digestion, so
+#' it doesn't appear in the final assembled product — but it must be present for
+#' BsmBI to recognize and cut the block correctly.
+#'
+#' @param polIII Character string of PolIII promoter sequence
+#' @return List with oh3, spacer, core_polIII; or NULL if promoter < 5 nt
+derive_oh3_from_promoter <- function(polIII) {
+  polIII_upper <- toupper(polIII)
+  n <- nchar(polIII_upper)
+  if (n < 5L) return(NULL)
+
+  oh3 <- substring(polIII_upper, n - 4L, n - 1L)        # 4 nt overhang
+  spacer <- substring(polIII_upper, n, n)                 # terminal nucleotide
+  core_polIII <- substring(polIII_upper, 1L, n - 5L)     # promoter without oh3+spacer
+
+  list(oh3 = oh3, spacer = spacer, core_polIII = core_polIII)
+}
+
+# =============================================================================
 # MASTER ASSEMBLY PLANNER
 # =============================================================================
 
@@ -1017,7 +1438,7 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 #'
 #' Master function that orchestrates:
 #'   Phase 1-3: Dynamic tile boundary search
-#'   Phase 4: oh3/oh4 selection from HF set
+#'   Phase 4: oh3 derivation from promoter + oh4 selection from HF set
 #'   Phase 5: Superblock split-point optimization
 #'   Phase 6: Per-reaction pairwise validation
 #'
@@ -1077,9 +1498,18 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     )
   }
 
-  # Phase 4: Select oh3, oh4
+  # Phase 4: Select oh3 (from promoter), oh4 (from HF set)
   cli::cli_h3("Selecting fixed overhangs (oh3, oh4)")
   oh_L <- substring(cds, 1, 4)
+
+  # Collect committed gene-derived overhangs (needed for orthogonality checks)
+  all_oh1 <- unique(c(oh_L, tiles$oh1_seq))
+  all_oh2 <- unique(tiles$oh2_seq)
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+  strategy_used <- "promoter_derived"
+  core_polIII <- NULL
+  oh3_spacer <- NULL
 
   if (!is.null(manual_oh3) && !is.null(manual_oh4)) {
     validate_fixed_overhangs(manual_oh3, manual_oh4)
@@ -1087,41 +1517,63 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     oh4 <- toupper(manual_oh4)
     oh3_in_hf <- oh3 %in% hf_set
     oh4_in_hf <- oh4 %in% hf_set
+    strategy_used <- "manual"
     cli::cli_alert_info(paste0("Using manual overhangs: oh3=", oh3, ", oh4=", oh4))
   } else {
-    # Collect committed gene-derived overhangs
-    all_oh1 <- unique(c(oh_L, tiles$oh1_seq))
-    all_oh2 <- unique(tiles$oh2_seq)
+    # --- oh3: derive from PolIII promoter 3' end ---
+    # In PerturbView/pCROP-Seq-v2 architecture, the promoter's terminal 5 nt
+    # encode oh3 (4 nt overhang) + spacer (1 nt for BsmBI), so the BsmBI
+    # junction seamlessly reconstructs the promoter–barcode boundary.
+    oh3_exclude <- unique(c(all_oh2, vapply(all_oh2, reverse_complement, character(1))))
+    promoter_derived <- derive_oh3_from_promoter(polIII)
 
-    # oh4 must be orthogonal to ALL oh1 values (BsaI reactions)
+    if (!is.null(promoter_derived) &&
+        !(promoter_derived$oh3 %in% oh3_exclude) &&
+        !(promoter_derived$oh3 %in% HOMOPOLYMER_4NT)) {
+      oh3 <- promoter_derived$oh3
+      core_polIII <- promoter_derived$core_polIII
+      oh3_spacer <- promoter_derived$spacer
+      oh3_in_hf <- oh3 %in% hf_set
+      oh3_fid <- if (oh3 %in% names(fid_lookup)) unname(fid_lookup[oh3]) else NA_real_
+      cli::cli_alert_info(paste0(
+        "Derived oh3=", oh3, " from PolIII promoter 3' end",
+        " (fidelity=", round(oh3_fid, 3), ")"
+      ))
+    } else {
+      # Promoter-derived oh3 not usable — fall back to HF set selection
+      if (is.null(promoter_derived)) {
+        cli::cli_alert_warning("PolIII promoter too short for oh3 derivation. Falling back to HF set.")
+      } else {
+        cli::cli_alert_warning(paste0(
+          "Promoter-derived oh3=", promoter_derived$oh3,
+          " collides with oh2 or is homopolymer. Falling back to HF set."
+        ))
+      }
+      strategy_used <- "hf_set"
+      oh3_candidates <- hf_set[!(hf_set %in% oh3_exclude)]
+      oh3_candidates <- oh3_candidates[!(oh3_candidates %in% HOMOPOLYMER_4NT)]
+
+      if (length(oh3_candidates) > 0) {
+        oh3_fids <- unname(fid_lookup[oh3_candidates])
+        oh3 <- oh3_candidates[which.max(oh3_fids)]
+        oh3_in_hf <- TRUE
+      } else {
+        cli::cli_alert_warning("No HF-set oh3 candidate available. Using pairwise fallback.")
+        strategy_used <- "pairwise_matrix"
+        all_ohs <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.90]
+        all_ohs <- all_ohs[!(all_ohs %in% oh3_exclude)]
+        all_ohs <- all_ohs[!(all_ohs %in% HOMOPOLYMER_4NT)]
+        if (length(all_ohs) == 0) stop("Cannot find any valid oh3 candidate.")
+        oh3_fids <- unname(fid_lookup[all_ohs])
+        oh3 <- all_ohs[which.max(oh3_fids)]
+        oh3_in_hf <- FALSE
+      }
+    }
+
+    # --- oh4: auto-select from HF set (unchanged logic) ---
     oh4_exclude <- unique(c(all_oh1, vapply(all_oh1, reverse_complement, character(1))))
     oh4_candidates <- hf_set[!(hf_set %in% oh4_exclude)]
-
-    # oh3 must be orthogonal to ALL oh2 values (BsmBI reactions)
-    oh3_exclude <- unique(c(all_oh2, vapply(all_oh2, reverse_complement, character(1))))
-    oh3_candidates <- hf_set[!(hf_set %in% oh3_exclude)]
-
-    # Pick highest-fidelity candidate
-    fid_lookup <- oh_fidelity$fidelity
-    names(fid_lookup) <- oh_fidelity$overhang
-
-    strategy_used <- "hf_set"
-
-    if (length(oh3_candidates) > 0) {
-      oh3_fids <- unname(fid_lookup[oh3_candidates])
-      oh3 <- oh3_candidates[which.max(oh3_fids)]
-      oh3_in_hf <- TRUE
-    } else {
-      # Tier 2 fallback: use all overhangs above threshold
-      cli::cli_alert_warning("No HF-set oh3 candidate available. Using pairwise fallback.")
-      strategy_used <- "pairwise_matrix"
-      all_ohs <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.90]
-      all_ohs <- all_ohs[!(all_ohs %in% oh3_exclude)]
-      if (length(all_ohs) == 0) stop("Cannot find any valid oh3 candidate.")
-      oh3_fids <- unname(fid_lookup[all_ohs])
-      oh3 <- all_ohs[which.max(oh3_fids)]
-      oh3_in_hf <- FALSE
-    }
+    oh4_candidates <- oh4_candidates[!(oh4_candidates %in% HOMOPOLYMER_4NT)]
 
     if (length(oh4_candidates) > 0) {
       oh4_fids <- unname(fid_lookup[oh4_candidates])
@@ -1129,9 +1581,10 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       oh4_in_hf <- TRUE
     } else {
       cli::cli_alert_warning("No HF-set oh4 candidate available. Using pairwise fallback.")
-      strategy_used <- "pairwise_matrix"
+      if (strategy_used != "pairwise_matrix") strategy_used <- "hf_set"
       all_ohs <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.90]
       all_ohs <- all_ohs[!(all_ohs %in% oh4_exclude)]
+      all_ohs <- all_ohs[!(all_ohs %in% HOMOPOLYMER_4NT)]
       if (length(all_ohs) == 0) stop("Cannot find any valid oh4 candidate.")
       oh4_fids <- unname(fid_lookup[all_ohs])
       oh4 <- all_ohs[which.max(oh4_fids)]
@@ -1146,66 +1599,41 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     if (oh4_in_hf) " (HF)" else " (non-HF)"
   ))
 
-  # Phase 5: Superblock split-point optimization
-  cli::cli_h3("Checking gene block sizes for superblock splitting")
+  # Phase 5: Global superblock boundary optimization (DP)
+  #
+  # Instead of computing split points independently per tile (which causes
+  # boundary drift and prevents block reuse), compute GLOBAL boundaries shared
+  # across all tiles, then assign each tile the subset within its WT range.
+  cli::cli_h3("Computing global superblock boundaries (DP optimizer)")
   block_overhead <- 22L  # 2 x 11-nt enzyme sites per block
   n_tiles <- nrow(tiles)
-  superblock_splits <- list()
 
-  for (i in seq_len(n_tiles)) {
-    tile <- tiles[i, ]
+  global_boundaries <- compute_global_superblock_boundaries(
+    cds = cds, gene_len = gene_len, tiles = tiles,
+    polIII_len = polIII_len,
+    max_sub_length = max_block_length - block_overhead,
+    hf_set = hf_set, oh_fidelity = oh_fidelity,
+    oh3 = oh3, oh4 = oh4, oh_L = oh_L
+  )
 
-    # 5'WT block (BsaI reaction): gene start to this tile's start
-    if (tile$start_nt > 1L) {
-      wt5_len <- tile$start_nt - 1L + block_overhead
-      if (wt5_len > max_block_length) {
-        existing_ohs <- unique(c(oh_L, tiles$oh1_seq[i], oh4))
-        splits <- optimize_split_points(
-          cds, 1L, tile$start_nt - 1L,
-          max_block_length - block_overhead, existing_ohs,
-          hf_set, oh_fidelity
-        )
-        if (nrow(splits) > 0) {
-          splits$block_type <- "bsai_5wt"
-          splits$tile_id <- i
-          superblock_splits[[length(superblock_splits) + 1L]] <- splits
-        }
-      }
-    }
+  all_splits <- assign_global_boundaries_to_tiles(
+    tiles = tiles,
+    global_3wt = global_boundaries$splits_3wt,
+    global_5wt = global_boundaries$splits_5wt,
+    gene_len = gene_len
+  )
 
-    # 3'WT + PolIII block (BsmBI reaction): this tile's end to gene end + PolIII
-    wt3_start <- tile$end_nt + 1L
-    wt3_content_len <- (gene_len - tile$end_nt) + polIII_len
-    if (wt3_content_len + block_overhead > max_block_length) {
-      existing_ohs <- unique(c(tiles$oh2_seq[i], oh3))
-      splits <- optimize_split_points(
-        cds, wt3_start, gene_len,
-        max_block_length - block_overhead, existing_ohs,
-        hf_set, oh_fidelity,
-        extra_content_length = polIII_len
-      )
-      if (nrow(splits) > 0) {
-        splits$block_type <- "bsmbi_3wt"
-        splits$tile_id <- i
-        superblock_splits[[length(superblock_splits) + 1L]] <- splits
-      }
-    }
-  }
-
-  if (length(superblock_splits) > 0) {
-    all_splits <- do.call(rbind, superblock_splits)
-    rownames(all_splits) <- NULL
+  n_global_3wt <- nrow(global_boundaries$splits_3wt)
+  n_global_5wt <- nrow(global_boundaries$splits_5wt)
+  if (n_global_3wt + n_global_5wt > 0) {
+    n_hf <- sum(global_boundaries$splits_3wt$junction_in_hf) +
+            sum(global_boundaries$splits_5wt$junction_in_hf)
     cli::cli_alert_info(paste0(
-      "Optimized ", nrow(all_splits), " superblock split point(s). ",
-      sum(all_splits$junction_in_hf), " junction(s) in HF set."
+      "Global boundaries: ", n_global_3wt, " 3'WT + ", n_global_5wt,
+      " 5'WT split(s). ", n_hf, " junction(s) in HF set. ",
+      "Assigned ", nrow(all_splits), " per-tile split entries."
     ))
   } else {
-    all_splits <- data.frame(
-      split_nt = integer(0), junction_oh = character(0),
-      junction_in_hf = logical(0), junction_fidelity = numeric(0),
-      block_type = character(0), tile_id = integer(0),
-      stringsAsFactors = FALSE
-    )
     cli::cli_alert_success("All gene blocks within synthesis limit. No superblock splits needed.")
   }
 
@@ -1291,9 +1719,11 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     oh_L = oh_L,
     oh3_in_hf = oh3_in_hf,
     oh4_in_hf = oh4_in_hf,
+    core_polIII = core_polIII,     # promoter minus last 5 nt (NULL if not derived)
+    oh3_spacer = oh3_spacer,       # terminal nt of promoter (NULL if not derived)
     superblock_splits = all_splits,
     reaction_fidelity = reaction_fidelity_df,
-    strategy_used = if (exists("strategy_used")) strategy_used else "hf_set",
+    strategy_used = strategy_used,
     hf_set_used = hf_set,
     summary = list(
       n_tiles = n_tiles,
@@ -1468,6 +1898,7 @@ select_fixed_overhangs <- function(cds, polIII, tile_overhangs,
 
   # Try HF set first
   candidates <- hf_set[!(hf_set %in% used)]
+  candidates <- candidates[!(candidates %in% HOMOPOLYMER_4NT)]
   if (length(candidates) >= 2) {
     selected <- select_orthogonal_set(candidates, 2)
     result <- list(oh3 = selected[1], oh4 = selected[2])
@@ -1476,9 +1907,11 @@ select_fixed_overhangs <- function(cds, polIII, tile_overhangs,
     oh_data <- oh_data[order(oh_data$fidelity, decreasing = TRUE), ]
     candidates <- oh_data$overhang[oh_data$fidelity >= fidelity_threshold]
     candidates <- candidates[!(candidates %in% used)]
+    candidates <- candidates[!(candidates %in% HOMOPOLYMER_4NT)]
     if (length(candidates) < 2) {
       candidates <- oh_data$overhang[oh_data$fidelity >= 0.85]
       candidates <- candidates[!(candidates %in% used)]
+      candidates <- candidates[!(candidates %in% HOMOPOLYMER_4NT)]
     }
     selected <- select_orthogonal_set(candidates, 2)
     result <- list(oh3 = selected[1], oh4 = selected[2])
