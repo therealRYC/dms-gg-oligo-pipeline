@@ -18,9 +18,19 @@ The final construct in the plasmid:
 [Backbone]--PaqCI**--[Full gene with one mutation]--[PolIII promoter]--[Barcode]--PaqCI*--[Backbone]
 ```
 
-## Quick Start
+Every oligo in the pool has the same universal structure regardless of tile position:
+```
+5'--[BsaI>>]--oh1--[mutable region]--[<<BsmBI]--[BsmBI>>]--barcode--[<<BsaI]--3'
+     7 nt     4 nt    variable          11 nt      11 nt    20 nt    11 nt
+                                                          (= 56 nt overhead)
+```
+
+## Quick Start (Command Line)
 
 ```bash
+# Install BiocManager (needed for Bioconductor packages)
+Rscript -e 'install.packages("BiocManager")'
+
 # Install R dependencies
 Rscript -e 'install.packages(c("yaml", "readr", "data.table", "cli", "testthat", "rmarkdown"))'
 Rscript -e 'BiocManager::install(c("Biostrings", "DNABarcodes"))'
@@ -33,38 +43,24 @@ cp config_template.yaml my_config.yaml
 Rscript run_pipeline.R my_config.yaml
 ```
 
-## Outputs
+## Quick Start (RStudio / IDE)
 
-| File | Description |
-|------|-------------|
-| `oligo_pool.csv` | Oligo name, sequence, length, variant ID, tile ID, tile type |
-| `wt_geneblocks.csv` | Gene block name, sequence, length, block type, associated tile IDs |
-| `variant_barcode_map.csv` | Variant ID, position, WT/mutant AA, barcode, tile ID |
+1. **Open the project**: Double-click `dmsggoligo.Rproj` to open in RStudio, or set the working directory manually:
+   ```r
+   setwd("/path/to/dms-gg-oligo-pipeline")
+   ```
 
-## Pipeline Steps
+2. **Install dependencies** (once): Run the install commands from Quick Start above in the R console.
 
-1. **Config** (`00_config.R`) -- Parse YAML, validate parameters, apply defaults
-2. **Gene input** (`01_gene_input.R`) -- Read FASTA, validate CDS (divisible by 3, starts ATG, no internal stops)
-3. **Enzyme site scan** (`02_enzyme_site_scan.R`) -- Find endogenous BsaI/BsmBI/PaqCI sites, suggest silent mutations for domestication
-4. **Codon table** (`03_codon_table.R`) -- Human codon usage table, preferred codon lookup
-5. **Mutation design** (`04_mutation_design.R`) -- Generate all single-AA substitutions + stops using preferred human codons
-6. **Tiling** (`05_tiling.R`) -- Partition gene into tiles within the oligo length budget (~200-250 nt per tile)
-7. **Overhang selection** (`06_overhang_selection.R`) -- DP optimizer for tile boundary placement maximizing overhang quality; oh3/oh4 auto-selection from NEB high-fidelity sets; superblock split-point optimization
-8. **Barcode design** (`07_barcode_design.R`) -- Programmed barcodes with prefix-optimized Hamming distance for optical pooled screening
-9. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences per tile type (leading/internal/trailing)
-10. **Gene block design** (`09_wt_geneblock_design.R`) -- WT gene blocks with correct flanking enzyme sites; superblock splitting for fragments >1800 bp
-11. **QC** (`10_qc_checks.R`) -- Validates oligo lengths, enzyme site absence, barcode uniqueness, tile coverage, gene block sizes
-12. **Output** (`11_output.R`) -- Write CSV files
+3. **Run the pipeline** interactively:
+   ```r
+   # Option A: Source from the console
+   config_path <- "my_config.yaml"
+   source("run_pipeline.R")
 
-## Key Design Decisions
-
-**Mutation strategy**: Fully specified codons (no degenerate NNK/NNS). Each oligo encodes exactly one mutation using the most-preferred human codon.
-
-**Tile boundary optimization**: A dynamic programming optimizer searches all valid codon-boundary positions to find tile placements where gene-derived overhangs have high ligation fidelity (Potapov et al. 2018 NEB data). Supports multi-K search across different tile counts.
-
-**Barcode design**: Prefix-first algorithm generates high-Hamming-distance prefixes (for OPS compatibility) then extends with filtered suffixes. Default: 12 nt, Hamming distance >= 3.
-
-**Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split at positions with high-fidelity BsmBI overhangs.
+   # Option B: Use the terminal pane
+   # In RStudio's Terminal tab: Rscript run_pipeline.R my_config.yaml
+   ```
 
 ## Configuration
 
@@ -74,11 +70,53 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 |-----------|---------|-------------|
 | `max_oligo_length` | 300 | Twist oligo pool maximum (nt) |
 | `max_geneblock_length` | 1800 | Gene fragment synthesis maximum (nt) |
-| `barcode_length` | 12 | Barcode length (nt) |
-| `min_hamming_distance` | 3 | Minimum Hamming distance between barcodes |
-| `barcode_prefix_length` | 8 | Prefix length for OPS optimization |
+| `barcode_length` | 20 | Total barcode length (nt) |
+| `min_hamming_distance` | 3 | Minimum Hamming distance between variant prefixes |
+| `barcode_prefix_length` | 12 | Prefix length for Hamming-constrained region (nt) |
+| `barcodes_per_variant` | 10 | Number of unique barcodes per variant |
 | `boundary_method` | `"dp"` | `"dp"` (global optimum) or `"greedy"` (local search) |
 | `overhang_fidelity_threshold` | 0.95 | Minimum fidelity for auto-selected overhangs |
+
+## Outputs
+
+The pipeline writes 9 files to the output directory (all prefixed with the gene name):
+
+| File | Description |
+|------|-------------|
+| `<gene>_oligo_pool.csv` | Oligo name, sequence, length, variant ID, tile ID |
+| `<gene>_geneblock_order.csv` | Gene block name, sequence, length, enzyme type, gene region |
+| `<gene>_variant_barcode_map.csv` | Variant ID, position, WT/mutant AA, barcode, tile ID |
+| `<gene>_tile_manifests.csv` | Per-tile BsaI and BsmBI reaction component lists |
+| `<gene>_helper_plasmid.csv` | Helper plasmid insert sequence for BsaI Level 1 |
+| `<gene>_qc_report.csv` | QC check results (pass/fail, details) |
+| `<gene>_oligo_pool.fasta` | Oligo pool in FASTA format (for Twist ordering) |
+| `<gene>_geneblock_order.fasta` | Gene blocks in FASTA format |
+| `<gene>_assembly_report.md` | Wetlab-compatible Markdown report with per-tile assembly guides |
+
+## Pipeline Steps
+
+1. **Config** (`00_config.R`) -- Parse YAML, validate parameters, apply defaults
+2. **Gene input** (`01_gene_input.R`) -- Read FASTA, validate CDS (divisible by 3, starts ATG, no internal stops)
+3. **Enzyme site scan** (`02_enzyme_site_scan.R`) -- Find endogenous BsaI/BsmBI/PaqCI sites, suggest silent mutations for domestication
+4. **Codon table** (`03_codon_table.R`) -- Human codon usage table, preferred codon lookup
+5. **Mutation design** (`04_mutation_design.R`) -- Generate all single-AA substitutions + stops using preferred human codons
+6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- DP optimizer for tile boundary placement maximizing overhang quality; oh3/oh4 auto-selection from NEB high-fidelity sets; superblock split-point optimization
+7. **Barcode design** (`07_barcode_design.R`) -- Unified hierarchical prefix-suffix barcodes with Hamming distance guarantee on prefixes
+8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles)
+9. **Gene block design** (`09_wt_geneblock_design.R`) -- WT gene blocks with correct flanking enzyme sites; superblock splitting for fragments >1800 bp
+10. **QC** (`10_qc_checks.R`) -- Validates oligo lengths, enzyme site absence, barcode uniqueness, tile coverage, gene block sizes
+11. **Output** (`11_output.R`) -- Write CSV and FASTA files
+12. **Report** (`12_report.R`) -- Generate wetlab-compatible Markdown assembly report with per-tile guides
+
+## Key Design Decisions
+
+**Mutation strategy**: Fully specified codons (no degenerate NNK/NNS). Each oligo encodes exactly one mutation using the most-preferred human codon.
+
+**Tile boundary optimization**: A dynamic programming optimizer searches all valid codon-boundary positions to find tile placements where gene-derived overhangs have high ligation fidelity (Potapov et al. 2018 NEB data). Supports multi-K search across different tile counts.
+
+**Barcode design**: Unified hierarchical prefix-suffix mode -- each variant gets a unique high-Hamming-distance prefix (12 nt), extended with filtered random suffixes to the full barcode length (20 nt). Cross-variant Hamming distance is guaranteed by the prefix; within-variant replicates differ only in their suffix. Configurable `barcodes_per_variant` (default 10) for experimental replication.
+
+**Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split at positions with high-fidelity BsmBI overhangs.
 
 ## Repository Structure
 
@@ -86,6 +124,7 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 dms-gg-oligo-pipeline/
 ├── run_pipeline.R              # Master entry point
 ├── config_template.yaml        # Annotated config template
+├── dmsggoligo.Rproj            # RStudio project file
 ├── R/
 │   ├── constants.R             # Enzyme definitions, synthesis limits, AA alphabet
 │   ├── utils.R                 # Shared helpers (reverse complement, GC content, etc.)
@@ -96,16 +135,22 @@ dms-gg-oligo-pipeline/
 │   ├── 04_mutation_design.R    # Single-AA substitution + stop codon generation
 │   ├── 05_tiling.R             # Gene partitioning into tiles
 │   ├── 06_overhang_selection.R # DP boundary optimizer + overhang selection
-│   ├── 07_barcode_design.R     # Programmed barcode generation
-│   ├── 08_oligo_assembly.R     # Full oligo sequence construction
+│   ├── 07_barcode_design.R     # Programmed barcode generation (unified hierarchical)
+│   ├── 08_oligo_assembly.R     # Full oligo sequence construction (universal structure)
 │   ├── 09_wt_geneblock_design.R# WT gene block + superblock design
 │   ├── 10_qc_checks.R         # Comprehensive QC validation
-│   └── 11_output.R            # CSV/FASTA output writing
+│   ├── 11_output.R            # CSV/FASTA output writing
+│   └── 12_report.R            # Wetlab-compatible Markdown assembly report
 ├── data/
 │   ├── human_codon_usage.rds   # Kazusa human codon usage table
 │   ├── neb_overhang_fidelity/  # Potapov 2018 ligation fidelity matrices (BsaI, BsmBI)
 │   ├── GRIN2A_NM_000833_CDS.fasta
-│   └── SLC6A1_NM_003042_CDS.fasta
+│   ├── SLC6A1_NM_003042_CDS.fasta
+│   └── AKAP11_NM_016248_CDS.fasta
+├── scripts/                    # Helper scripts for generating test gene FASTA files
+│   ├── generate_grin2a_cds.R
+│   ├── generate_slc6a1_cds.R
+│   └── generate_akap11_cds.R
 ├── tests/testthat/             # Unit + integration tests
 ├── DESCRIPTION                 # R package metadata
 └── CLAUDE.md                   # Detailed project context and design rationale
@@ -121,6 +166,11 @@ dms-gg-oligo-pipeline/
 
 ```bash
 Rscript -e 'testthat::test_dir("tests/testthat")'
+```
+
+For the full test suite including slow integration tests (TRIO gene, ~9 kb):
+```bash
+RUN_SLOW_TESTS=true Rscript -e 'testthat::test_dir("tests/testthat")'
 ```
 
 ## References

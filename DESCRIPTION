@@ -4,7 +4,7 @@ Version: 0.1.0
 Authors@R: person("Robert", "Chen", email = "robchen@uw.edu",
                    role = c("aut", "cre"))
 Description: Design oligonucleotide pools for Deep Mutational Scanning (DMS)
-    via two-level Golden Gate Assembly. Generates all single amino acid
+    via three-enzyme Golden Gate Assembly. Generates all single amino acid
     substitutions with programmed barcodes, WT gene blocks, and QC reports.
 License: MIT + file LICENSE
 Encoding: UTF-8
