@@ -7,41 +7,32 @@ gene_fasta: "path/to/gene.fasta"          # Path to FASTA file with coding seque
 # --- PolIII Promoter ---
 # Sequence of the PolIII promoter (e.g., U6 with internal T7) placed between
 # the gene and barcode. This drives barcode transcription.
-polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGATAATTAGAATTAATTTGACTGTAAACACAAAGATATTAGTACAAAATACGTGACGTAGAAAGTAATAATTTCTTGGGTAGTTTGCAGTTTTAAAATTATGTTTTAAAATGGACTATCATATGCTTACCGTAACTTGAAAGTATTTCGATTTCTTGGCTTTATATATCTTGTGGAAAGGACGAAACACCG"
+polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGATAATTAGAATTAATTTGACTGTAAACACAAAGATATTAGTACAAAATACGTGACGTAGAAAGTAATAATTTCTTGGGTAGTTTGCAGTTTTTAATACGACTCACTATAGGGACTATCATATGCTTACCGTAACTTGAAAGTATTTCGATTTCTTGGCTTTATATATCTTGTGGAAAGGACGAAACACCG"
 
 # --- Oligo Synthesis ---
 max_oligo_length: 300                      # Twist oligo pool max (nt)
 max_geneblock_length: 1800                 # Gene fragment synthesis max (nt)
 
 # --- Barcode Design ---
-ops_mode: false                            # Optical Pooled Screening mode toggle.
-                                           # When true: prefix-optimized short barcodes for OPS.
-                                           #   barcode_length auto-calculated to minimum needed.
-                                           #   Prefix Hamming distance is hard-guaranteed; full-barcode
-                                           #   distance uses a soft tolerance (see below).
-                                           # When false: global Hamming distance guarantee without
-                                           #   prefix/suffix splitting. Longer barcodes for capacity.
+# Unified hierarchical prefix-suffix mode:
+#   barcode = prefix(p nt) + suffix(L-p nt)
+#   - One unique prefix per variant with hard Hamming distance guarantee
+#   - Random filtered suffixes for replicate barcodes (no pairwise constraint)
+#   - Cross-variant pairs: d(full) >= d(prefix) >= min_hamming
+#   - Within-variant pairs: d(full) = d(suffix) = random (same variant, OK)
 
-barcode_length: 12                         # Barcode length (nt). Range: 6-30.
-                                           # When ops_mode=true: set to "auto" (default) to auto-calculate
-                                           #   minimum length, or specify an explicit integer.
-                                           # When ops_mode=false: default 20 for higher capacity.
+barcode_length: 20                         # Total barcode length (nt). Range: 6-30, or "auto" to
+                                           # auto-calculate minimum length for the variant count.
 
-min_hamming_distance: 3                    # Minimum Hamming distance between any two barcodes.
+min_hamming_distance: 3                    # Minimum Hamming distance between variant prefixes.
                                            # For sequencing: 3 allows single-error correction + detection.
+                                           # Auto-reduced (with warning) if prefix capacity is tight.
 
-barcode_prefix_length: 8                   # Prefix length for OPS optimization (only used when
-                                           # ops_mode=true). First k nucleotides are optimized for
-                                           # maximum Hamming distance, critical for optical pooled
-                                           # screening where accuracy degrades with cycles.
-                                           # Must be >= min_hamming_distance.
-
-barcode_capacity_tolerance: 0.99           # OPS mode soft Hamming constraint: fraction of all barcode
-                                           # pairs that must have Hamming distance >= min_hamming_distance.
-                                           # 0.99 = up to 1% of pairs may have lower distance.
-                                           # Prefix distances are always hard-guaranteed; only within-
-                                           # prefix-group pairs (sharing the same prefix) can violate.
-                                           # Ignored in non-OPS mode (hard constraint always).
+barcode_prefix_length: 12                  # Prefix length — the Hamming-constrained region. First p
+                                           # nucleotides carry the hard distance guarantee. Critical for
+                                           # optical pooled screening where accuracy degrades with cycles.
+                                           # Must be >= min_hamming_distance and < barcode_length
+                                           # (unless barcodes_per_variant == 1).
 
 barcode_gc_range: [0.25, 0.75]             # Acceptable GC content range for barcodes.
 barcode_max_homopolymer: 4                 # Max homopolymer run in barcodes.

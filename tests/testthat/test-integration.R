@@ -17,9 +17,10 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
     "max_geneblock_length: 1800",
     "barcode_length: 12",
     "min_hamming_distance: 3",
-    "barcode_prefix_length: 8",
+    "barcode_prefix_length: 12",
     "barcode_gc_range: [0.25, 0.75]",
     "barcode_max_homopolymer: 4",
+    "barcodes_per_variant: 1",
     "overhang_fidelity_threshold: 0.95",
     "search_window_K: 15",
     "auto_domesticate: true",
@@ -101,7 +102,8 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
     n_variants = nrow(variants),
     barcode_length = cfg$barcode_length,
     min_hamming = cfg$min_hamming_distance,
-    prefix_length = cfg$barcode_prefix_length
+    prefix_length = cfg$barcode_prefix_length,
+    barcodes_per_variant = cfg$barcodes_per_variant
   )
   barcodes <- barcode_result$barcodes
   expect_equal(length(barcodes), nrow(variants))
@@ -187,9 +189,10 @@ test_that("full pipeline runs on long test gene with superblocking", {
     "max_geneblock_length: 1800",
     "barcode_length: 12",
     "min_hamming_distance: 3",
-    "barcode_prefix_length: 8",
+    "barcode_prefix_length: 12",
     "barcode_gc_range: [0.25, 0.75]",
     "barcode_max_homopolymer: 4",
+    "barcodes_per_variant: 1",
     "overhang_fidelity_threshold: 0.95",
     "search_window_K: 15",
     "auto_domesticate: true",
@@ -269,7 +272,8 @@ test_that("full pipeline runs on long test gene with superblocking", {
     n_variants = nrow(variants),
     barcode_length = cfg$barcode_length,
     min_hamming = cfg$min_hamming_distance,
-    prefix_length = cfg$barcode_prefix_length
+    prefix_length = cfg$barcode_prefix_length,
+    barcodes_per_variant = cfg$barcodes_per_variant
   )
   barcodes <- barcode_result$barcodes
   expect_equal(length(barcodes), nrow(variants))
@@ -353,9 +357,10 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
     "max_geneblock_length: 1800",
     "barcode_length: 12",
     "min_hamming_distance: 3",
-    "barcode_prefix_length: 8",
+    "barcode_prefix_length: 12",
     "barcode_gc_range: [0.25, 0.75]",
     "barcode_max_homopolymer: 4",
+    "barcodes_per_variant: 1",
     "overhang_fidelity_threshold: 0.95",
     "search_window_K: 15",
     "auto_domesticate: true",
@@ -433,7 +438,8 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
     n_variants = nrow(variants),
     barcode_length = cfg$barcode_length,
     min_hamming = cfg$min_hamming_distance,
-    prefix_length = cfg$barcode_prefix_length
+    prefix_length = cfg$barcode_prefix_length,
+    barcodes_per_variant = cfg$barcodes_per_variant
   )
   barcodes <- barcode_result$barcodes
   expect_equal(length(barcodes), nrow(variants))

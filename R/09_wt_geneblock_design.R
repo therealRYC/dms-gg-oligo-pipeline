@@ -1,3 +1,4 @@
+# Last updated: 2026-02-18 — Use core_polIII and oh3_spacer for promoter-derived oh3 architecture
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -46,6 +47,17 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
   gene_len <- nchar(cds)
   blocks <- list()
   manifests <- list()
+
+  # Use core_polIII (promoter minus last 5 nt) when oh3 is derived from promoter.
+  # This avoids duplicating the oh3+spacer sequence that's already encoded in the
+  # BsmBI site. After ligation: ...core_polIII + oh3 + barcode (seamless junction).
+  polIII_for_block <- if (!is.null(assembly_plan) && !is.null(assembly_plan$core_polIII)) {
+    assembly_plan$core_polIII
+  } else {
+    polIII
+  }
+  # Use the promoter-derived spacer for BsmBI sites with oh3 as 3' overhang
+  oh3_spacer <- if (!is.null(assembly_plan)) assembly_plan$oh3_spacer else NULL
 
   # If assembly_plan is provided, extract superblock splits in old format
   use_precomputed_splits <- !is.null(assembly_plan)
@@ -175,7 +187,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
         oh_5 <- tile$oh2_seq
         oh_3 <- oh3
-        block_seq <- create_bsmbi_block(paste0(wt_3prime_seq, polIII), oh_5, oh_3)
+        block_seq <- create_bsmbi_block(paste0(wt_3prime_seq, polIII_for_block),
+                                         oh_5, oh_3, oh3_spacer = oh3_spacer)
 
         blocks[[length(blocks) + 1]] <- data.frame(
           block_name = block_name, sequence = block_seq,
@@ -193,18 +206,22 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           sub_end <- split_points[s + 1L]
           sub_seq <- substring(cds, sub_start, sub_end)
           # Last sub-block gets PolIII appended
-          if (s == n_sub) sub_seq <- paste0(sub_seq, polIII)
+          if (s == n_sub) sub_seq <- paste0(sub_seq, polIII_for_block)
 
           block_name <- paste0("bsmbi_3wt_tile", tile$tile_id, "_sub", s)
           oh_5 <- if (s == 1L) tile$oh2_seq else sb_3wt_region$junction_oh[s - 1L]
           oh_3 <- if (s < n_sub) sb_3wt_region$junction_oh[s] else oh3
 
-          block_seq <- create_bsmbi_block(sub_seq, oh_5, oh_3)
+          # Use oh3_spacer only when the 3' overhang is oh3 (last sub-block)
+          spacer_for_sub <- if (s == n_sub) oh3_spacer else NULL
+          block_seq <- create_bsmbi_block(sub_seq, oh_5, oh_3, oh3_spacer = spacer_for_sub)
 
+          # Only the final sub-block contains PolIII — label accordingly
+          gene_region_prefix <- if (s == n_sub) "3wt_polIII_tile" else "3wt_tile"
           blocks[[length(blocks) + 1]] <- data.frame(
             block_name = block_name, sequence = block_seq,
             length = nchar(block_seq), enzyme_type = "BsmBI",
-            gene_region = paste0("3wt_polIII_tile", tile$tile_id, "_sub", s),
+            gene_region = paste0(gene_region_prefix, tile$tile_id, "_sub", s),
             stringsAsFactors = FALSE
           )
           bsmbi_parts <- c(bsmbi_parts, block_name)
@@ -215,7 +232,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       block_name <- paste0("bsmbi_polIII_tile", tile$tile_id)
       oh_5 <- tile$oh2_seq
       oh_3 <- oh3
-      block_seq <- create_bsmbi_block(polIII, oh_5, oh_3)
+      block_seq <- create_bsmbi_block(polIII_for_block, oh_5, oh_3,
+                                       oh3_spacer = oh3_spacer)
 
       blocks[[length(blocks) + 1]] <- data.frame(
         block_name = block_name, sequence = block_seq,
@@ -324,10 +342,13 @@ create_bsai_block <- function(gene_seq, oh_5prime, oh_3prime) {
 #' @param gene_seq WT gene sequence for this block (may include PolIII)
 #' @param oh_5prime 4-nt overhang at 5' end
 #' @param oh_3prime 4-nt overhang at 3' end
+#' @param oh3_spacer Optional spacer for 3' BsmBI reverse site. When oh3 is
+#'   derived from the PolIII promoter, this is the promoter's terminal nucleotide
+#'   (e.g., "G") instead of the default "A". Only applies to the reverse site.
 #' @return Complete block sequence with flanking BsmBI sites
-create_bsmbi_block <- function(gene_seq, oh_5prime, oh_3prime) {
+create_bsmbi_block <- function(gene_seq, oh_5prime, oh_3prime, oh3_spacer = NULL) {
   bsmbi_fwd <- orient_enzyme_site("BsmBI", oh_5prime, "forward")
-  bsmbi_rev <- orient_enzyme_site("BsmBI", oh_3prime, "reverse")
+  bsmbi_rev <- orient_enzyme_site("BsmBI", oh_3prime, "reverse", spacer_seq = oh3_spacer)
   paste0(bsmbi_fwd, gene_seq, bsmbi_rev)
 }
 

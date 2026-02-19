@@ -1,3 +1,5 @@
+# Created: 2025-02-01
+# Last updated: 2026-02-18 — Unified hierarchical barcode mode: remove ops_mode/tolerance, update defaults
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -11,27 +13,36 @@ load_config <- function(config_path) {
 
   cfg <- yaml::read_yaml(config_path)
 
-  # Track which barcode params are user-supplied vs defaulted
-  user_set_barcode_length <- !is.null(cfg$barcode_length)
+  # --- Deprecation warning for ops_mode ---
+  if (!is.null(cfg$ops_mode)) {
+    cli::cli_alert_warning(
+      "ops_mode is deprecated and ignored -- barcode generation now uses unified hierarchical mode"
+    )
+    cfg$ops_mode <- NULL
+  }
+  if (!is.null(cfg$barcode_capacity_tolerance)) {
+    cli::cli_alert_warning(
+      "barcode_capacity_tolerance is deprecated and ignored -- unified mode uses prefix-only Hamming guarantee"
+    )
+    cfg$barcode_capacity_tolerance <- NULL
+  }
 
   # --- Apply defaults ---
   defaults <- list(
     max_oligo_length         = 300L,
     max_geneblock_length     = 1800L,
-    barcode_length           = 12L,
+    barcode_length           = 20L,
     min_hamming_distance     = 3L,
-    barcode_prefix_length    = 8L,
+    barcode_prefix_length    = 12L,
     barcode_gc_range         = c(0.25, 0.75),
     barcode_max_homopolymer  = 4L,
     overhang_fidelity_threshold = 0.95,
     search_window_K          = 15L,
     boundary_method          = "dp",
     multi_k_search           = TRUE,
-    barcodes_per_variant     = 1L,
+    barcodes_per_variant     = 10L,
     auto_domesticate         = TRUE,
-    output_dir               = "output",
-    ops_mode                 = FALSE,
-    barcode_capacity_tolerance = 0.99
+    output_dir               = "output"
   )
 
   for (key in names(defaults)) {
@@ -40,23 +51,10 @@ load_config <- function(config_path) {
     }
   }
 
-  # --- Coerce OPS mode first (needed for barcode_length defaulting) ---
-  cfg$ops_mode <- as.logical(cfg$ops_mode)
-  cfg$barcode_capacity_tolerance <- as.numeric(cfg$barcode_capacity_tolerance)
-
-  # --- OPS-mode-dependent barcode_length defaults ---
-  if (!user_set_barcode_length) {
-    if (cfg$ops_mode) {
-      cfg$barcode_length <- "auto"
-    } else {
-      cfg$barcode_length <- DEFAULT_NON_OPS_BARCODE_LENGTH
-    }
-  }
-
   # Coerce types
   cfg$max_oligo_length      <- as.integer(cfg$max_oligo_length)
   cfg$max_geneblock_length  <- as.integer(cfg$max_geneblock_length)
-  # barcode_length: handle "auto" sentinel for OPS mode
+  # barcode_length: handle "auto" sentinel
   if (is.character(cfg$barcode_length) && tolower(cfg$barcode_length) == "auto") {
     cfg$barcode_length <- "auto"
   } else {
@@ -70,7 +68,7 @@ load_config <- function(config_path) {
   cfg$search_window_K       <- as.integer(cfg$search_window_K)
   cfg$boundary_method       <- as.character(cfg$boundary_method)
   cfg$multi_k_search        <- as.logical(cfg$multi_k_search)
-  cfg$barcodes_per_variant <- as.integer(cfg$barcodes_per_variant)
+  cfg$barcodes_per_variant  <- as.integer(cfg$barcodes_per_variant)
 
   # --- Validate oh3 and oh4 ---
   # These are fixed BsmBI/BsaI overhangs used in the 3-enzyme assembly
@@ -146,14 +144,12 @@ validate_config <- function(cfg) {
     errors <- c(errors, "max_oligo_length must be between 100 and 500")
   }
 
-  # barcode_length: "auto" is valid only in OPS mode; otherwise must be 6-30
+  # barcode_length: "auto" or 6-30
   if (identical(cfg$barcode_length, "auto")) {
-    if (!cfg$ops_mode) {
-      errors <- c(errors, "barcode_length='auto' is only valid when ops_mode=true")
-    }
+    # "auto" is always valid in unified mode
   } else {
     if (cfg$barcode_length < 6 || cfg$barcode_length > 30) {
-      errors <- c(errors, "barcode_length must be between 6 and 30 (or 'auto' in OPS mode)")
+      errors <- c(errors, "barcode_length must be between 6 and 30 (or 'auto')")
     }
   }
 
@@ -165,21 +161,20 @@ validate_config <- function(cfg) {
     errors <- c(errors, "min_hamming_distance must be <= barcode_length")
   }
 
-  # prefix_length validation is OPS-mode-dependent
-  if (cfg$ops_mode) {
-    if (cfg$barcode_prefix_length < cfg$min_hamming_distance) {
-      errors <- c(errors, "barcode_prefix_length must be >= min_hamming_distance")
-    }
-    if (!identical(cfg$barcode_length, "auto") &&
-        cfg$barcode_prefix_length > cfg$barcode_length) {
-      errors <- c(errors, "barcode_prefix_length must be <= barcode_length")
-    }
+  # prefix_length validation (always used in unified hierarchical mode)
+  if (cfg$barcode_prefix_length < cfg$min_hamming_distance) {
+    errors <- c(errors, "barcode_prefix_length must be >= min_hamming_distance")
   }
-  # In non-OPS mode, prefix_length is ignored, so skip validation
-
-  # Tolerance validation
-  if (cfg$barcode_capacity_tolerance <= 0 || cfg$barcode_capacity_tolerance > 1) {
-    errors <- c(errors, "barcode_capacity_tolerance must be in (0, 1]")
+  if (!identical(cfg$barcode_length, "auto") &&
+      cfg$barcode_prefix_length > cfg$barcode_length) {
+    errors <- c(errors, "barcode_prefix_length must be <= barcode_length")
+  }
+  # prefix_length == barcode_length only valid when barcodes_per_variant == 1
+  if (!identical(cfg$barcode_length, "auto") &&
+      cfg$barcode_prefix_length >= cfg$barcode_length &&
+      cfg$barcodes_per_variant > 1L) {
+    errors <- c(errors,
+      "barcode_prefix_length must be < barcode_length when barcodes_per_variant > 1 (suffix space needed for replicate barcodes)")
   }
 
   if (length(cfg$barcode_gc_range) != 2 ||

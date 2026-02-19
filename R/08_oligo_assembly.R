@@ -1,3 +1,5 @@
+# Created: 2025-02-01
+# Last updated: 2026-02-18 — Vectorize by tile: local mutation + pre-computed constants + paste0
 # 08_oligo_assembly.R — Assemble universal oligo sequences for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 #
@@ -19,6 +21,12 @@
 #' Uses the universal 3-enzyme oligo structure — every tile type has the
 #' same oligo layout. No tile-type-specific logic needed.
 #'
+#' Performance: vectorized by tile. Instead of per-oligo full-CDS rebuilds and
+#' repeated enzyme site computation, this version:
+#'   (A) Pre-extracts WT tile regions and mutates locally within the ~230nt tile
+#'   (B) Pre-computes all enzyme site strings (constant across oligos)
+#'   (C) Uses vectorized paste0() per tile to build all oligos at once
+#'
 #' @param variants Data frame with variant info including tile_id
 #' @param cds Character string of domesticated CDS
 #' @param barcodes Character vector of barcodes (one per variant row)
@@ -32,50 +40,86 @@ assemble_oligos <- function(variants, cds, barcodes, tiles,
                             max_oligo_length = MAX_OLIGO_LENGTH) {
 
   n <- nrow(variants)
+
+  # --- (B) Pre-compute invariant enzyme site strings ---
+  # These are constant for ALL oligos — compute once, not n times.
+  bsai_5prime <- paste0(ENZYMES$BsaI$recog,
+                         paste(rep("A", ENZYMES$BsaI$spacer_len), collapse = ""))
+  bsmbi_oh3_str <- orient_enzyme_site("BsmBI", oh3, "forward")
+  bsai_oh4_str <- orient_enzyme_site("BsaI", oh4, "reverse")
+
+  # --- (A) Pre-extract WT tile regions and per-tile enzyme sites ---
+  n_tiles <- nrow(tiles)
+  wt_tile_seqs <- character(n_tiles)
+  tile_oh1 <- tiles$oh1_seq
+  tile_oh2_rev <- character(n_tiles)
+  tile_start_nt <- tiles$start_nt
+  tile_lens <- integer(n_tiles)
+
+  for (t in seq_len(n_tiles)) {
+    wt_tile_seqs[t] <- substring(cds, tiles$start_nt[t], tiles$end_nt[t])
+    tile_oh2_rev[t] <- orient_enzyme_site("BsmBI", tiles$oh2_seq[t], "reverse")
+    tile_lens[t] <- tiles$end_nt[t] - tiles$start_nt[t] + 1L
+  }
+
+  # --- (C) Pre-allocate output vectors ---
+  oligo_names <- character(n)
+  sequences <- character(n)
+
+  # --- Vectorize by tile: build all oligos for each tile at once ---
+  for (tid in seq_len(n_tiles)) {
+    idx <- which(variants$tile_id == tid)
+    if (length(idx) == 0L) next
+
+    wt_tile <- wt_tile_seqs[tid]
+    t_start <- tile_start_nt[tid]
+    t_len <- tile_lens[tid]
+
+    # (A) Local mutation: codon start position within tile (1-based)
+    # Instead of rebuilding the full CDS per oligo, mutate within the ~230nt tile
+    cs <- (variants$position[idx] - 1L) * 3L + 1L - t_start + 1L
+
+    # Build mutant tiles locally — vectorized via substring() recycling
+    # substring(scalar_text, vector_first, vector_last) → character vector
+    mutant_tiles <- paste0(
+      substring(wt_tile, 1L, cs - 1L),
+      variants$mut_codon[idx],
+      substring(wt_tile, cs + 3L)
+    )
+
+    # Extract mutable regions (strip oh1=4nt front, oh2=4nt back)
+    mutable_regions <- substring(mutant_tiles, 5L, t_len - 4L)
+
+    # (C) Vectorized oligo assembly — single paste0 for all variants in tile
+    sequences[idx] <- paste0(
+      bsai_5prime,
+      tile_oh1[tid],
+      mutable_regions,
+      tile_oh2_rev[tid],
+      bsmbi_oh3_str,
+      barcodes[idx],
+      bsai_oh4_str
+    )
+    oligo_names[idx] <- paste0("oligo_", variants$variant_id[idx])
+  }
+
+  lengths <- nchar(sequences)
+
+  # Build output data frame once at end (avoids per-row assignment overhead)
   oligos <- data.frame(
-    oligo_name = character(n),
-    sequence   = character(n),
-    length     = integer(n),
-    variant_id = character(n),
-    tile_id    = integer(n),
+    oligo_name = oligo_names,
+    sequence   = sequences,
+    length     = lengths,
+    variant_id = variants$variant_id,
+    tile_id    = variants$tile_id,
     stringsAsFactors = FALSE
   )
 
-  for (i in seq_len(n)) {
-    v <- variants[i, ]
-    barcode <- barcodes[i]
-    tile <- tiles[tiles$tile_id == v$tile_id, ]
-
-    # Build the mutant tile mutable region
-    # The mutable region is the tile interior EXCLUDING oh1 (first 4nt) and oh2 (last 4nt)
-    mutant_tile_full <- build_mutant_tile(cds, v$position, v$mut_codon,
-                                          tile$start_nt, tile$end_nt)
-    # Extract just the mutable region (strip oh1 from front, oh2 from back)
-    tile_len <- nchar(mutant_tile_full)
-    mutable_region <- substring(mutant_tile_full, 5L, tile_len - 4L)
-
-    # Build the universal oligo
-    oligo_seq <- build_oligo(
-      mutable_region = mutable_region,
-      barcode   = barcode,
-      oh1_seq   = tile$oh1_seq,
-      oh2_seq   = tile$oh2_seq,
-      oh3       = oh3,
-      oh4       = oh4
-    )
-
-    oligos$oligo_name[i] <- paste0("oligo_", v$variant_id)
-    oligos$sequence[i]   <- oligo_seq
-    oligos$length[i]     <- nchar(oligo_seq)
-    oligos$variant_id[i] <- v$variant_id
-    oligos$tile_id[i]    <- v$tile_id
-  }
-
   # Validate lengths
-  over_limit <- oligos$length > max_oligo_length
+  over_limit <- lengths > max_oligo_length
   if (any(over_limit)) {
     n_over <- sum(over_limit)
-    max_len <- max(oligos$length)
+    max_len <- max(lengths)
     cli::cli_warn(paste0(
       n_over, " oligo(s) exceed max length of ", max_oligo_length,
       " nt (max observed: ", max_len, " nt)."
@@ -83,7 +127,7 @@ assemble_oligos <- function(variants, cds, barcodes, tiles,
   } else {
     cli::cli_alert_success(paste0(
       "All ", n, " oligos within length limit. ",
-      "Range: ", min(oligos$length), "-", max(oligos$length), " nt."
+      "Range: ", min(lengths), "-", max(lengths), " nt."
     ))
   }
 
