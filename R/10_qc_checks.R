@@ -1,3 +1,5 @@
+# Created: 2025-02-01
+# Last updated: 2026-02-20 — Fix variant_count check for barcodes_per_variant > 1
 # 10_qc_checks.R — Comprehensive QC validation for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 
@@ -75,15 +77,16 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
     detail = paste0(sum(covered), " / ", gene_len, " nt covered")
   )
 
-  # 6. Variant count
+  # 6. Variant count (use unique variant_id to handle barcodes_per_variant > 1)
   expected_per_pos <- 20L  # 19 AA subs + 1 stop
   n_codons <- gene_len %/% 3L
   expected_total <- n_codons * expected_per_pos
+  n_unique_variants <- length(unique(variants$variant_id))
   checks[[6]] <- qc_check(
     name   = "variant_count",
     desc   = "Expected number of variants generated",
-    pass   = nrow(variants) == expected_total,
-    detail = paste0(nrow(variants), " variants (expected: ", expected_total,
+    pass   = n_unique_variants == expected_total,
+    detail = paste0(n_unique_variants, " unique variants (expected: ", expected_total,
                     " = ", n_codons, " positions x ", expected_per_pos, " mutations)")
   )
 

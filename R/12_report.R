@@ -1,3 +1,5 @@
+# Created: 2025-02-01
+# Last updated: 2026-02-20 — Fix variant/oligo counts, per-tile length display, use gene_description
 # 12_report.R — Wetlab-compatible Markdown assembly report
 # DMS Golden Gate Oligo Pipeline
 #
@@ -96,18 +98,26 @@ generate_report <- function(gene, cfg, assembly_plan, geneblock_result,
 report_gene_summary <- function(gene, assembly_plan, oligos, variants, blocks, cfg) {
   tiles <- assembly_plan$tiles
   barcodes_per <- cfg$barcodes_per_variant %||% 1L
+  # Use full description for display, unique variant_id for variant count
+  display_name <- gene$gene_description %||% gene$gene_name
+  n_unique_variants <- length(unique(variants$variant_id))
+  oligo_len_range <- if (min(oligos$length) == max(oligos$length)) {
+    paste0(min(oligos$length), " nt")
+  } else {
+    paste0(min(oligos$length), "-", max(oligos$length), " nt")
+  }
   df <- data.frame(
     Property = c("Gene name", "CDS length", "Protein length", "Number of tiles",
                  "Total variants", "Total oligos", "Oligo length range",
                  "Gene blocks to order", "Barcodes per variant"),
     Value = c(
-      gene$gene_name,
+      display_name,
       paste0(nchar(gene$cds), " nt (", gene$n_codons, " codons)"),
       paste0(nchar(gene$protein), " aa"),
       nrow(tiles),
-      nrow(variants),
+      n_unique_variants,
       nrow(oligos),
-      paste0(min(oligos$length), "-", max(oligos$length), " nt"),
+      oligo_len_range,
       nrow(blocks),
       barcodes_per
     ),
@@ -144,7 +154,7 @@ report_oligo_summary <- function(oligos, tiles) {
     Tile = integer(nrow(tiles)),
     Codons = character(nrow(tiles)),
     Oligos = integer(nrow(tiles)),
-    `Length range` = character(nrow(tiles)),
+    Length = character(nrow(tiles)),
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
@@ -155,9 +165,15 @@ report_oligo_summary <- function(oligos, tiles) {
     per_tile$Codons[i] <- paste0(tiles$start_codon[i], "-", tiles$end_codon[i])
     per_tile$Oligos[i] <- nrow(tile_oligos)
     if (nrow(tile_oligos) > 0) {
-      per_tile$`Length range`[i] <- paste0(min(tile_oligos$length), "-", max(tile_oligos$length), " nt")
+      min_len <- min(tile_oligos$length)
+      max_len <- max(tile_oligos$length)
+      per_tile$Length[i] <- if (min_len == max_len) {
+        paste0(min_len, " nt")
+      } else {
+        paste0(min_len, "-", max_len, " nt")
+      }
     } else {
-      per_tile$`Length range`[i] <- "--"
+      per_tile$Length[i] <- "--"
     }
   }
   c(
@@ -386,7 +402,9 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
 
   # Oligo pool
   oligo_range <- if (nrow(tile_oligos) > 0) {
-    paste0(min(tile_oligos$length), "-", max(tile_oligos$length), " nt")
+    min_len <- min(tile_oligos$length)
+    max_len <- max(tile_oligos$length)
+    if (min_len == max_len) paste0(min_len, " nt") else paste0(min_len, "-", max_len, " nt")
   } else { "--" }
   oligo_oh_5 <- if (length(bsai_part_names) > 0) tile$oh1_seq else assembly_plan$oh_L
   oligo_oh_3 <- assembly_plan$oh4

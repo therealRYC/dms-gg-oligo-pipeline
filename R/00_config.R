@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-18 — Unified hierarchical barcode mode: remove ops_mode/tolerance, update defaults
+# Last updated: 2026-02-20 — Add gene_name and gene_cds config options; mutual exclusivity with gene_fasta
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -87,11 +87,32 @@ load_config <- function(config_path) {
 validate_config <- function(cfg) {
   errors <- character(0)
 
-  # Required fields
-  if (is.null(cfg$gene_fasta) || !nzchar(cfg$gene_fasta)) {
-    errors <- c(errors, "gene_fasta is required")
-  } else if (!file.exists(cfg$gene_fasta)) {
+  # Gene input: require exactly one of gene_fasta or gene_cds
+  has_fasta <- !is.null(cfg$gene_fasta) && nzchar(cfg$gene_fasta)
+  has_cds   <- !is.null(cfg$gene_cds) && nzchar(cfg$gene_cds)
+  if (has_fasta && has_cds) {
+    errors <- c(errors, "Specify only one of gene_fasta or gene_cds (not both)")
+  } else if (!has_fasta && !has_cds) {
+    errors <- c(errors, "One of gene_fasta or gene_cds is required")
+  } else if (has_fasta && !file.exists(cfg$gene_fasta)) {
     errors <- c(errors, paste("gene_fasta file not found:", cfg$gene_fasta))
+  } else if (has_cds) {
+    cds_upper <- toupper(cfg$gene_cds)
+    if (grepl("[^ACGT]", cds_upper)) {
+      errors <- c(errors, "gene_cds contains non-ACGT characters")
+    }
+    if (nchar(cds_upper) %% 3 != 0) {
+      errors <- c(errors, paste0("gene_cds length (", nchar(cds_upper), ") is not divisible by 3"))
+    }
+  }
+
+  # gene_name: optional override, must be filesystem-safe if provided
+  if (!is.null(cfg$gene_name)) {
+    if (!nzchar(cfg$gene_name)) {
+      errors <- c(errors, "gene_name must be non-empty if provided")
+    } else if (grepl('[/\\\\:*?"<>|]', cfg$gene_name)) {
+      errors <- c(errors, "gene_name contains filesystem-unsafe characters (/\\:*?\"<>|)")
+    }
   }
 
   if (is.null(cfg$polIII_promoter) || !nzchar(cfg$polIII_promoter)) {

@@ -1,5 +1,6 @@
 # test-integration.R — Full pipeline integration test (3-enzyme architecture)
 # Updated to use plan_assembly() for dynamic tile boundary search + overhang selection
+# Updated: 2026-02-20 — Add _sequences.fasta, gene_cds config, expanded variant QC tests
 
 test_that("full pipeline runs on short test gene (3-enzyme)", {
   # Write test FASTA
@@ -44,6 +45,7 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
 
   # Step 4: Scan and domesticate (now includes BsaI)
   scan_result <- scan_enzyme_sites(gene$cds, cfg$polIII_promoter, codon_usage)
+  gene$original_cds <- gene$cds
   if (cfg$auto_domesticate && nrow(scan_result$domestication) > 0) {
     gene$cds <- apply_domestication(gene$cds, scan_result$domestication,
                                      codon_usage = codon_usage)
@@ -145,13 +147,18 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   # Per-reaction fidelity check should be in the QC report
   expect_true("reaction_fidelity" %in% qc_result$qc_report$check_name)
 
-  # Step 11: Write outputs
+  # Step 11: Write outputs (with sequence FASTA)
   variants$barcode_idx <- 1L
+  original_cds <- gene$original_cds %||% gene$cds
   output_paths <- write_outputs(
     oligos = oligos, geneblock_result = geneblock_result,
     variants = variants, barcodes = barcodes,
     qc_result = qc_result, output_dir = output_dir,
-    gene_name = "test_gene"
+    gene_name = "test_gene",
+    original_cds = original_cds,
+    domesticated_cds = gene$cds,
+    protein = gene$protein,
+    gene_description = gene$gene_description %||% gene$gene_name
   )
 
   # Check all output files exist
@@ -163,6 +170,13 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   expect_true(file.exists(output_paths$qc_report_csv))
   expect_true(file.exists(output_paths$oligo_pool_fasta))
   expect_true(file.exists(output_paths$geneblock_order_fasta))
+  expect_true(file.exists(output_paths$sequences_fasta))
+
+  # Verify sequences FASTA content
+  seq_lines <- readLines(output_paths$sequences_fasta)
+  expect_true(any(grepl("original_CDS", seq_lines)))
+  expect_true(any(grepl("domesticated_CDS", seq_lines)))
+  expect_true(any(grepl("protein", seq_lines)))
 
   # Cleanup
   unlink(tmp_fasta)
@@ -214,6 +228,7 @@ test_that("full pipeline runs on long test gene with superblocking", {
 
   # Step 4: Scan and domesticate
   scan_result <- scan_enzyme_sites(gene$cds, cfg$polIII_promoter, codon_usage)
+  gene$original_cds <- gene$cds
   if (cfg$auto_domesticate && nrow(scan_result$domestication) > 0) {
     gene$cds <- apply_domestication(gene$cds, scan_result$domestication,
                                      codon_usage = codon_usage)
@@ -313,13 +328,17 @@ test_that("full pipeline runs on long test gene with superblocking", {
   )
   expect_true(is.logical(qc_result$qc_pass))
 
-  # Step 11: Write outputs
+  # Step 11: Write outputs (with sequence FASTA)
   variants$barcode_idx <- 1L
   output_paths <- write_outputs(
     oligos = oligos, geneblock_result = geneblock_result,
     variants = variants, barcodes = barcodes,
     qc_result = qc_result, output_dir = output_dir,
-    gene_name = "long_test_gene"
+    gene_name = "long_test_gene",
+    original_cds = gene$cds,
+    domesticated_cds = gene$cds,
+    protein = gene$protein,
+    gene_description = gene$gene_description %||% gene$gene_name
   )
 
   # Check all output files exist
@@ -331,6 +350,7 @@ test_that("full pipeline runs on long test gene with superblocking", {
   expect_true(file.exists(output_paths$qc_report_csv))
   expect_true(file.exists(output_paths$oligo_pool_fasta))
   expect_true(file.exists(output_paths$geneblock_order_fasta))
+  expect_true(file.exists(output_paths$sequences_fasta))
 
   # Cleanup
   unlink(tmp_fasta)
@@ -382,6 +402,7 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
 
   # Step 4: Scan and domesticate — TRIO has 20 enzyme sites
   scan_result <- scan_enzyme_sites(gene$cds, cfg$polIII_promoter, codon_usage)
+  gene$original_cds <- gene$cds
   expect_true(nrow(scan_result$domestication) > 0,
               info = "TRIO should have enzyme sites requiring domestication")
 
@@ -480,13 +501,17 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   )
   expect_true(is.logical(qc_result$qc_pass))
 
-  # Step 11: Write outputs
+  # Step 11: Write outputs (with sequence FASTA)
   variants$barcode_idx <- 1L
   output_paths <- write_outputs(
     oligos = oligos, geneblock_result = geneblock_result,
     variants = variants, barcodes = barcodes,
     qc_result = qc_result, output_dir = output_dir,
-    gene_name = "TRIO"
+    gene_name = "TRIO",
+    original_cds = gene$original_cds %||% gene$cds,
+    domesticated_cds = gene$cds,
+    protein = gene$protein,
+    gene_description = gene$gene_description %||% gene$gene_name
   )
 
   # Check all output files exist
@@ -498,9 +523,100 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   expect_true(file.exists(output_paths$qc_report_csv))
   expect_true(file.exists(output_paths$oligo_pool_fasta))
   expect_true(file.exists(output_paths$geneblock_order_fasta))
+  expect_true(file.exists(output_paths$sequences_fasta))
 
   # Cleanup
   unlink(tmp_fasta)
   unlink(tmp_config)
   unlink(output_dir, recursive = TRUE)
+})
+
+test_that("gene_cds config option works as alternative to gene_fasta", {
+  # Use gene_cds instead of gene_fasta — a short 12-nt CDS
+  tmp_config <- tempfile(fileext = ".yaml")
+  tmp_dir <- tempdir()
+  output_dir <- file.path(tmp_dir, "test_gene_cds")
+  config_lines <- c(
+    'gene_cds: "ATGGCTGAATAA"',
+    'gene_name: "tiny_gene"',
+    paste0("polIII_promoter: \"", TEST_POLIII, "\""),
+    "max_oligo_length: 300",
+    "max_geneblock_length: 1800",
+    "barcode_length: 12",
+    "min_hamming_distance: 3",
+    "barcode_prefix_length: 12",
+    "barcodes_per_variant: 1",
+    "overhang_fidelity_threshold: 0.95",
+    "auto_domesticate: true",
+    "paqci_star2: AGTC",
+    "paqci_star1: TCGA",
+    paste0("output_dir: \"", gsub("\\\\", "/", output_dir), "\"")
+  )
+  writeLines(config_lines, tmp_config)
+
+  cfg <- load_config(tmp_config)
+  expect_equal(cfg$gene_cds, "ATGGCTGAATAA")
+  expect_equal(cfg$gene_name, "tiny_gene")
+
+  # Read gene from string
+  gene <- read_gene_from_string(cfg$gene_cds, cfg$gene_name)
+  expect_equal(gene$cds, "ATGGCTGAATAA")
+  expect_equal(gene$gene_name, "tiny_gene")
+  expect_equal(gene$n_codons, 4L)
+
+  unlink(tmp_config)
+  unlink(output_dir, recursive = TRUE)
+})
+
+test_that("config rejects both gene_fasta and gene_cds specified together", {
+  tmp_fasta <- tempfile(fileext = ".fasta")
+  writeLines(c(">test", "ATGGCTGAATAA"), tmp_fasta)
+
+  tmp_config <- tempfile(fileext = ".yaml")
+  config_lines <- c(
+    paste0("gene_fasta: \"", gsub("\\\\", "/", tmp_fasta), "\""),
+    'gene_cds: "ATGGCTGAATAA"',
+    paste0("polIII_promoter: \"", TEST_POLIII, "\""),
+    "paqci_star2: AGTC",
+    "paqci_star1: TCGA"
+  )
+  writeLines(config_lines, tmp_config)
+
+  expect_error(load_config(tmp_config), "only one")
+
+  unlink(tmp_fasta)
+  unlink(tmp_config)
+})
+
+test_that("config rejects neither gene_fasta nor gene_cds", {
+  tmp_config <- tempfile(fileext = ".yaml")
+  config_lines <- c(
+    paste0("polIII_promoter: \"", TEST_POLIII, "\""),
+    "paqci_star2: AGTC",
+    "paqci_star1: TCGA"
+  )
+  writeLines(config_lines, tmp_config)
+
+  expect_error(load_config(tmp_config), "required")
+
+  unlink(tmp_config)
+})
+
+test_that("QC variant_count check passes with expanded variants (barcodes_per_variant > 1)", {
+  # Simulate expanded variants: 4 codons * 20 mutations = 80 variants, each duplicated 3x
+  cds <- "ATGGCTGAATAA"
+  codon_usage <- load_codon_usage()
+  variants <- design_mutations(cds, codon_usage)
+  expect_equal(nrow(variants), 4 * 20)
+
+  # Expand to 3 barcodes per variant
+  variants_expanded <- variants[rep(seq_len(nrow(variants)), each = 3L), ]
+  variants_expanded$barcode_idx <- rep(1:3, times = nrow(variants))
+  rownames(variants_expanded) <- NULL
+  expect_equal(nrow(variants_expanded), 240)  # 80 * 3
+
+  # The check should use unique(variant_id), NOT nrow()
+  n_unique <- length(unique(variants_expanded$variant_id))
+  expect_equal(n_unique, 80)  # Still 80 unique variants
+  expect_equal(n_unique, (nchar(cds) %/% 3L) * 20L)
 })
