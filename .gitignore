@@ -11,6 +11,10 @@ output/
 results/
 figures/
 *.html
+260*/
+
+# Claude Code
+.claude/
 
 # OS
 .DS_Store
