@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Add gene_cds input, gene_name override, sequence FASTA output, fix variant/oligo counts
+# Last updated: 2026-02-21 — Add optional Step 10b: in-silico GG assembly simulation
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -48,6 +48,7 @@ source(file.path(pipeline_dir, "R", "09_wt_geneblock_design.R"))
 source(file.path(pipeline_dir, "R", "10_qc_checks.R"))
 source(file.path(pipeline_dir, "R", "11_output.R"))
 source(file.path(pipeline_dir, "R", "12_report.R"))
+source(file.path(pipeline_dir, "R", "13_gg_simulator.R"))
 
 # --- Run Pipeline ---
 pipeline_start <- proc.time()
@@ -271,6 +272,46 @@ cli::cli_alert_success(paste0(
   "QC: ", if (qc_result$qc_pass) "ALL PASSED" else "ISSUES FOUND",
   " [{round(step_elapsed, 1)}s]"
 ))
+
+# Step 10b: In-silico assembly simulation (optional)
+if (isTRUE(cfg$simulate_assembly)) {
+  cli::cli_h2("Step 10b: In-silico GG assembly simulation")
+  step_start <- proc.time()
+  sim_results <- simulate_pipeline_assembly(
+    oligos           = oligos,
+    geneblock_result = geneblock_result,
+    tiles            = tiles,
+    variants         = variants_expanded,
+    barcodes         = barcodes,
+    cds              = gene$cds,
+    polIII           = cfg$polIII_promoter,
+    assembly_plan    = assembly_plan,
+    samples_per_tile = cfg$simulation_samples_per_tile
+  )
+  n_pass <- sum(sim_results$pass, na.rm = TRUE)
+  n_total <- nrow(sim_results)
+  step_elapsed <- (proc.time() - step_start)[["elapsed"]]
+  step_timings[["10b_simulation"]] <- step_elapsed
+  if (n_pass == n_total) {
+    cli::cli_alert_success(paste0(
+      "Assembly simulation: ", n_pass, "/", n_total, " tiles passed. [{round(step_elapsed, 1)}s]"
+    ))
+  } else {
+    cli::cli_alert_warning(paste0(
+      "Assembly simulation: ", n_pass, "/", n_total, " tiles passed (",
+      n_total - n_pass, " failures). [{round(step_elapsed, 1)}s]"
+    ))
+    failed <- sim_results[!sim_results$pass, ]
+    for (i in seq_len(nrow(failed))) {
+      cli::cli_alert_danger(paste0(
+        "  Tile ", failed$tile_id[i], " variant ", failed$variant_id[i],
+        ": ", failed$error[i]
+      ))
+    }
+  }
+} else {
+  cli::cli_alert_info("Step 10b: Assembly simulation skipped (simulate_assembly = false)")
+}
 
 # Step 11: Write outputs
 cli::cli_h2("Step 11: Writing outputs")

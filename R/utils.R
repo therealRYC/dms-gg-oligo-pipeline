@@ -1,4 +1,5 @@
-# utils.R — Shared helper functions
+# Created: 2025-02-01
+# Last updated: 2026-02-21 — Fix orient_enzyme_site() reverse case: use RC(overhang) for complementary overhangs
 # DMS Golden Gate Oligo Pipeline
 
 # Null-coalescing operator (not in base R; available in rlang)
@@ -117,9 +118,11 @@ orient_enzyme_site <- function(enzyme_name, overhang, orientation = "forward",
     # After cutting, overhang is left as 5' or 3' sticky end
     paste0(enz$recog, spacer_seq, overhang)
   } else {
-    # Reverse orientation: put on opposite strand
-    # The oligo carries the RC so that the enzyme reads it on the complementary strand
-    reverse_complement(paste0(enz$recog, spacer_seq, overhang))
+    # Reverse orientation: put on opposite strand.
+    # Use RC(overhang) so the exposed sticky end after digestion is complementary
+    # to the forward site's overhang — required for Golden Gate ligation.
+    # Result: starts with overhang, ends with RC(recognition).
+    reverse_complement(paste0(enz$recog, spacer_seq, reverse_complement(overhang)))
   }
 }
 

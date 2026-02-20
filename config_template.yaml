@@ -73,5 +73,12 @@ paqci_star1: "NNNN"                        # PaqCI* overhang (3' end of insert)
 # --- Enzyme Site Domestication ---
 auto_domesticate: true                     # Automatically apply silent mutations to remove sites
 
+# --- Assembly Simulation (optional) ---
+simulate_assembly: false                   # Run in-silico GG assembly simulation after design.
+                                           # Verifies that oligos + gene blocks assemble correctly
+                                           # by simulating BsaI and BsmBI digestion + ligation.
+simulation_samples_per_tile: 1             # Number of randomly sampled variants per tile to simulate.
+                                           # Higher values increase coverage but take longer.
+
 # --- Output ---
 output_dir: "output"                       # Directory for output files
