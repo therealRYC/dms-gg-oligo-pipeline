@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-18 — Vectorize by tile: local mutation + pre-computed constants + paste0
+# Last updated: 2026-02-21 — Fix oligo naming: include barcode_idx when barcodes_per_variant > 1
 # 08_oligo_assembly.R — Assemble universal oligo sequences for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 #
@@ -100,7 +100,13 @@ assemble_oligos <- function(variants, cds, barcodes, tiles,
       barcodes[idx],
       bsai_oh4_str
     )
-    oligo_names[idx] <- paste0("oligo_", variants$variant_id[idx])
+    # Include barcode_idx in name when barcodes_per_variant > 1 to ensure uniqueness
+    if ("barcode_idx" %in% names(variants) && max(variants$barcode_idx) > 1L) {
+      oligo_names[idx] <- paste0("oligo_", variants$variant_id[idx],
+                                  "_b", variants$barcode_idx[idx])
+    } else {
+      oligo_names[idx] <- paste0("oligo_", variants$variant_id[idx])
+    }
   }
 
   lengths <- nchar(sequences)

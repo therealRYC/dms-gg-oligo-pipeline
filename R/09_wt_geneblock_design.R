@@ -1,4 +1,5 @@
-# Last updated: 2026-02-18 — Use core_polIII and oh3_spacer for promoter-derived oh3 architecture
+# Created: 2025-02-01
+# Last updated: 2026-02-21 — Fix create_bsai_block() 5' duplication: trim oh_5prime from gene_seq
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -321,18 +322,23 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
 
 #' Create a BsaI-flanked gene block
 #'
-#' Structure: BsaI_fwd + oh_5prime + [gene_seq] + oh_3prime + BsaI_rev
-#' The oh_5prime and oh_3prime are already part of gene_seq (first/last 4nt)
-#' so we just add the enzyme recognition sites.
+#' Structure: BsaI_fwd(oh_5prime) + gene_interior + BsaI_rev(oh_3prime)
 #'
-#' @param gene_seq WT gene sequence for this block
+#' gene_seq starts with oh_5prime (first 4 nt), and BsaI_fwd already
+#' embeds oh_5prime. Trim the leading overlap to avoid 4-nt duplication.
+#' The 3' end has no overlap: oh_3prime is the next tile's boundary,
+#' NOT the last 4 nt of gene_seq.
+#'
+#' @param gene_seq WT gene sequence for this block (starts with oh_5prime)
 #' @param oh_5prime 4-nt overhang at 5' end
 #' @param oh_3prime 4-nt overhang at 3' end
 #' @return Complete block sequence with flanking BsaI sites
 create_bsai_block <- function(gene_seq, oh_5prime, oh_3prime) {
   bsai_fwd <- orient_enzyme_site("BsaI", oh_5prime, "forward")
   bsai_rev <- orient_enzyme_site("BsaI", oh_3prime, "reverse")
-  paste0(bsai_fwd, gene_seq, bsai_rev)
+  # gene_seq starts with oh_5prime — trim to avoid duplication with bsai_fwd
+  gene_interior <- substring(gene_seq, nchar(oh_5prime) + 1L)
+  paste0(bsai_fwd, gene_interior, bsai_rev)
 }
 
 #' Create a BsmBI-flanked gene block

@@ -102,10 +102,15 @@ test_that("orient_enzyme_site builds correct BsmBI sequences", {
   expect_true(endsWith(fwd, "ACTA"))
   expect_equal(nchar(fwd), 11)  # 6 + 1 + 4
 
-  # BsmBI reverse: RC of (CGTCTC + spacer + overhang)
+  # BsmBI reverse: RC(CGTCTC + spacer + RC(overhang))
+  # Result starts with the overhang, ends with RC(recognition)
   rev_site <- orient_enzyme_site("BsmBI", "ACTA", "reverse")
   expect_equal(nchar(rev_site), 11)
-  expect_equal(rev_site, reverse_complement(fwd))
+  expect_true(startsWith(rev_site, "ACTA"))
+  expect_true(endsWith(rev_site, reverse_complement("CGTCTC")))
+  # Verify full construction: RC(recog + spacer + RC(overhang))
+  expected <- reverse_complement(paste0("CGTCTC", "A", reverse_complement("ACTA")))
+  expect_equal(rev_site, expected)
 })
 
 test_that("orient_enzyme_site builds correct BsaI sequences", {
@@ -115,8 +120,33 @@ test_that("orient_enzyme_site builds correct BsaI sequences", {
   expect_true(endsWith(fwd, "ACTA"))
   expect_equal(nchar(fwd), 11)  # 6 + 1 + 4
 
-  # BsaI reverse: RC of (GGTCTC + spacer + overhang)
+  # BsaI reverse: RC(GGTCTC + spacer + RC(overhang))
+  # Result starts with the overhang, ends with RC(recognition)
   rev_site <- orient_enzyme_site("BsaI", "ACTA", "reverse")
   expect_equal(nchar(rev_site), 11)
-  expect_equal(rev_site, reverse_complement(fwd))
+  expect_true(startsWith(rev_site, "ACTA"))
+  expect_true(endsWith(rev_site, reverse_complement("GGTCTC")))
+  # Verify full construction
+  expected <- reverse_complement(paste0("GGTCTC", "A", reverse_complement("ACTA")))
+  expect_equal(rev_site, expected)
+})
+
+test_that("orient_enzyme_site reverse produces complementary overhangs", {
+  # After digestion, forward and reverse sites with the same overhang
+  # should produce complementary sticky ends for Golden Gate ligation.
+  # Use a non-palindromic overhang so fwd != RC(fwd) tests are meaningful.
+  for (enz_name in c("BsaI", "BsmBI")) {
+    oh <- "ATGG"  # non-palindromic (RC = CCAT)
+    fwd <- orient_enzyme_site(enz_name, oh, "forward")
+    rev <- orient_enzyme_site(enz_name, oh, "reverse")
+
+    # Forward site ends with the overhang
+    expect_true(endsWith(fwd, oh))
+    # Reverse site starts with the overhang (not RC — the top-strand representation)
+    expect_true(startsWith(rev, oh))
+    # With the fix, reverse = RC(recog + spacer + RC(overhang)).
+    # For non-palindromic overhangs, this differs from RC(recog + spacer + overhang) = RC(fwd).
+    expect_false(rev == reverse_complement(fwd),
+                 info = paste(enz_name, ": rev should differ from RC(fwd) for non-palindromic oh"))
+  }
 })
