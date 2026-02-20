@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-02-21 — Add optional Step 10b: in-silico GG assembly simulation
+# Last updated: 2026-02-20 — Thread overlap_codons and barcode junction context through pipeline
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -131,7 +131,7 @@ cli::cli_alert_success(paste0(
 # Step 5.5: Resolve barcode length (needed before tiling for oligo budget)
 if (identical(cfg$barcode_length, "auto")) {
   cli::cli_h2("Step 5.5: Auto-sizing barcode length")
-  n_variants_expected <- gene$n_codons * 20L
+  n_variants_expected <- (gene$n_codons - 2L) * 20L  # exclude Met and stop codons
   cfg$barcode_length <- auto_size_barcode_length(
     n_variants       = n_variants_expected,
     prefix_length    = cfg$barcode_prefix_length,
@@ -159,7 +159,8 @@ assembly_plan <- plan_assembly(
     manual_oh4 = cfg$oh4,
     search_window_K = cfg$search_window_K,
     boundary_method = cfg$boundary_method,
-    multi_k = cfg$multi_k_search
+    multi_k = cfg$multi_k_search,
+    overlap_codons = cfg$overlap_codons
   )
 )
 tiles <- assembly_plan$tiles
@@ -185,6 +186,20 @@ cli::cli_alert_info(paste0(
   ", barcode_length=", cfg$barcode_length,
   ", prefix_length=", cfg$barcode_prefix_length
 ))
+# Compute junction context for barcode filtering (BUG-2: enzyme sites at barcode boundaries)
+# Oligo structure: ...BsmBI_fwd_oh3 + barcode + BsaI_rev_oh4...
+# Use last 6 nt of left element and first 6 nt of right element (enough for any 7-nt site)
+bsmbi_fwd_oh3_seq <- orient_enzyme_site("BsmBI", oh3, "forward")
+bsai_rev_oh4_seq <- orient_enzyme_site("BsaI", oh4, "reverse")
+junction_left_context <- substring(bsmbi_fwd_oh3_seq,
+                                    nchar(bsmbi_fwd_oh3_seq) - 5L,
+                                    nchar(bsmbi_fwd_oh3_seq))
+junction_right_context <- substring(bsai_rev_oh4_seq, 1L, 6L)
+cli::cli_alert_info(paste0(
+  "Junction context for barcode filtering: left='", junction_left_context,
+  "', right='", junction_right_context, "'"
+))
+
 barcode_result <- design_barcodes(
   n_variants          = nrow(variants),
   barcode_length      = cfg$barcode_length,
@@ -192,7 +207,9 @@ barcode_result <- design_barcodes(
   prefix_length       = cfg$barcode_prefix_length,
   gc_range            = cfg$barcode_gc_range,
   max_homopolymer     = cfg$barcode_max_homopolymer,
-  barcodes_per_variant = cfg$barcodes_per_variant
+  barcodes_per_variant = cfg$barcodes_per_variant,
+  junction_left_context = junction_left_context,
+  junction_right_context = junction_right_context
 )
 barcodes <- barcode_result$barcodes
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]

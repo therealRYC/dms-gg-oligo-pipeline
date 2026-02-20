@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-18 — Add progress logging to prefix generation, barcode generation, and validation
+# Last updated: 2026-02-20 — Add junction-context barcode filtering (BUG-2)
 # 07_barcode_design.R — Programmed barcodes with unified hierarchical prefix-suffix design
 # DMS Golden Gate Oligo Pipeline
 #
@@ -139,6 +139,8 @@ auto_size_barcode_length <- function(n_variants, prefix_length, barcodes_per_var
 #' @param gc_range Numeric vector c(min, max) for GC content
 #' @param max_homopolymer Maximum homopolymer run length (default 4)
 #' @param barcodes_per_variant Number of barcodes per variant (default 10)
+#' @param junction_left_context Left junction context for barcode filtering (default "")
+#' @param junction_right_context Right junction context for barcode filtering (default "")
 #' @return List with barcodes, barcode_assignments, barcode_length, prefix_length,
 #'   effective_hamming, min_hamming_dist
 design_barcodes <- function(n_variants,
@@ -147,7 +149,9 @@ design_barcodes <- function(n_variants,
                             prefix_length = DEFAULT_PREFIX_LENGTH,
                             gc_range = DEFAULT_GC_RANGE,
                             max_homopolymer = DEFAULT_MAX_HOMOPOLYMER,
-                            barcodes_per_variant = DEFAULT_BARCODES_PER_VARIANT) {
+                            barcodes_per_variant = DEFAULT_BARCODES_PER_VARIANT,
+                            junction_left_context = "",
+                            junction_right_context = "") {
 
   n_total <- n_variants * barcodes_per_variant
 
@@ -204,7 +208,9 @@ design_barcodes <- function(n_variants,
   # 4. For each prefix, generate barcodes_per_variant random filtered suffixes
   cli::cli_alert("Generating barcodes (random suffixes per prefix)...")
   barcodes <- generate_barcodes_per_prefix(
-    prefixes, suffix_length, barcodes_per_variant, gc_range, max_homopolymer
+    prefixes, suffix_length, barcodes_per_variant, gc_range, max_homopolymer,
+    junction_left_context = junction_left_context,
+    junction_right_context = junction_right_context
   )
 
   # 5. Validate prefix distances (fast: only unique prefixes)
@@ -438,8 +444,8 @@ generate_prefixes_random_greedy <- function(k, min_hamming, n_needed,
 #' Generate barcodes by assigning random filtered suffixes to each prefix
 #'
 #' For each variant's prefix, generates random suffix candidates, combines
-#' them into full barcodes, filters for enzyme sites/homopolymers/GC, then
-#' selects barcodes_per_variant results.
+#' them into full barcodes, filters for enzyme sites/homopolymers/GC and
+#' junction context, then selects barcodes_per_variant results.
 #'
 #' @param prefixes Character vector of unique prefix sequences (one per variant)
 #' @param suffix_length Length of suffix portion
@@ -447,11 +453,15 @@ generate_prefixes_random_greedy <- function(k, min_hamming, n_needed,
 #' @param gc_range GC content range c(min, max)
 #' @param max_homopolymer Maximum homopolymer run allowed
 #' @param oversample Oversampling multiplier for suffix candidates (default 10)
+#' @param junction_left_context Left junction context for enzyme site check (default "")
+#' @param junction_right_context Right junction context for enzyme site check (default "")
 #' @return Character vector of barcodes (length = n_variants * barcodes_per_variant)
 generate_barcodes_per_prefix <- function(prefixes, suffix_length,
                                           barcodes_per_variant,
                                           gc_range, max_homopolymer,
-                                          oversample = 10L) {
+                                          oversample = 10L,
+                                          junction_left_context = "",
+                                          junction_right_context = "") {
   n_variants <- length(prefixes)
   n_total <- n_variants * barcodes_per_variant
   barcodes <- character(n_total)
@@ -482,6 +492,7 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
     # Combine with prefix for full-barcode filtering
     full_bcs <- paste0(prefix, suffixes)
     full_bcs <- filter_sequences_fast(full_bcs, max_homopolymer)
+    full_bcs <- filter_barcode_junctions(full_bcs, junction_left_context, junction_right_context)
 
     # GC filter
     if (length(full_bcs) > 0) {
@@ -499,6 +510,7 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
       suffixes2 <- unique(suffixes2)
       full_bcs2 <- paste0(prefix, suffixes2)
       full_bcs2 <- filter_sequences_fast(full_bcs2, max_homopolymer)
+      full_bcs2 <- filter_barcode_junctions(full_bcs2, junction_left_context, junction_right_context)
       if (length(full_bcs2) > 0) {
         gc_counts2 <- nchar(gsub("[AT]", "", full_bcs2))
         gc_vals2 <- gc_counts2 / nchar(full_bcs2)
@@ -543,6 +555,33 @@ filter_sequences_fast <- function(seqs, max_homopolymer = 4L) {
   homo_pattern <- paste0("([ACGT])\\1{", max_homopolymer, ",}")
   bad <- bad | grepl(homo_pattern, seqs)
   seqs[!bad]
+}
+
+#' Filter barcodes that create enzyme sites at junction boundaries
+#'
+#' Checks whether the context `left_context + barcode + right_context` contains
+#' any enzyme recognition site (BsaI, BsmBI, PaqCI on either strand). This
+#' catches sites that span the barcode-to-enzyme-site junction and would not
+#' be detected by checking the barcode sequence in isolation.
+#'
+#' @param barcodes Character vector of barcode sequences
+#' @param left_context String: the last few nt of the element left of the barcode
+#'   (e.g., last 6 nt of BsmBI_fwd_oh3 site). Use "" if no context.
+#' @param right_context String: the first few nt of the element right of the barcode
+#'   (e.g., first 7 nt of BsaI_rev_oh4 site). Use "" if no context.
+#' @return Filtered character vector of barcodes (those NOT creating junction sites)
+filter_barcode_junctions <- function(barcodes, left_context = "", right_context = "") {
+  if (length(barcodes) == 0L) return(barcodes)
+  if (nchar(left_context) == 0L && nchar(right_context) == 0L) return(barcodes)
+
+  junction_seqs <- paste0(left_context, barcodes, right_context)
+  bad <- rep(FALSE, length(barcodes))
+  for (enz_name in names(ENZYMES)) {
+    enz <- ENZYMES[[enz_name]]
+    bad <- bad | grepl(enz$recog, junction_seqs, fixed = TRUE) |
+                  grepl(enz$recog_rc, junction_seqs, fixed = TRUE)
+  }
+  barcodes[!bad]
 }
 
 #' Generate all DNA k-mers

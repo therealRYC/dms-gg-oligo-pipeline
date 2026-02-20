@@ -1,3 +1,5 @@
+# Created: 2025-02-01
+# Last updated: 2026-02-20 — Add tile overlap and smart variant-to-tile assignment (BUG-1)
 # 05_tiling.R — Partition gene into tiles for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -6,7 +8,7 @@
 #
 # oh1 and oh2 are WT gene flanks (invariant even on mutant oligos).
 # Codons overlapping oh1/oh2 are NOT mutated by that tile — they're covered
-# by the adjacent tile's mutable interior.
+# by the adjacent tile's mutable interior (via tile overlap).
 
 #' Compute the maximum mutable region size in nucleotides
 #'
@@ -62,33 +64,31 @@ compute_max_tile_size <- function(max_oligo_length = 300L,
 #'
 #' Each tile consists of:
 #'   oh1 (4nt WT flank) + mutable_codons + oh2 (4nt WT flank)
-#' The mutable regions are contiguous, non-overlapping, on codon boundaries.
-#' oh1 = 4 nt of WT gene immediately upstream of the mutable region.
-#' oh2 = 4 nt of WT gene immediately downstream of the mutable region.
 #'
-#' Codon 1 (Met/ATG) is excluded from the mutation library because it
-#' overlaps the leading tile's oh1 boundary.
+#' Adjacent tiles overlap by `overlap_codons` so that codons near tile
+#' boundaries (which fall in oh1/oh2 of one tile) are in the mutable interior
+#' of the adjacent tile.
 #'
 #' @param cds Character string of coding DNA sequence
 #' @param mutable_size_nt Max mutable region size in nucleotides (from compute_max_tile_size)
+#' @param overlap_codons Number of codons to overlap between adjacent tiles (default 4)
 #' @return Data frame with columns:
-#'   tile_id, start_codon, end_codon (mutable region boundaries, 1-based),
-#'   start_nt, end_nt (mutable region nt positions),
+#'   tile_id, start_codon, end_codon (tile boundaries, 1-based),
+#'   start_nt, end_nt (tile nt positions),
 #'   oh1_seq, oh2_seq (4-nt WT flanking sequences),
 #'   tile_seq (full tile = oh1 + mutable + oh2)
-partition_tiles <- function(cds, mutable_size_nt) {
+partition_tiles <- function(cds, mutable_size_nt, overlap_codons = 4L) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
 
   mutable_codons <- mutable_size_nt %/% 3L
 
-  # Determine mutable region boundaries (in codon positions)
-  # First mutable codon is codon 2 (codon 1 = Met is in oh1 of first tile)
-  # Actually the mutable region starts at codon 1 for the purposes of partitioning,
+  # Effective step between tile starts: reduced by overlap so adjacent tiles share codons.
+  # Each tile is still mutable_codons wide, but starts are closer together.
+  effective_step <- mutable_codons - overlap_codons
+  if (effective_step < 1L) effective_step <- 1L
 
-  # but codon 1 (ATG) won't be mutated because it overlaps oh1.
-  # We partition the ENTIRE gene into mutable chunks.
-  tile_starts <- seq(1L, n_codons, by = mutable_codons)
+  tile_starts <- seq(1L, n_codons, by = effective_step)
   n_tiles <- length(tile_starts)
 
   tiles <- data.frame(
@@ -106,25 +106,14 @@ partition_tiles <- function(cds, mutable_size_nt) {
   for (i in seq_len(n_tiles)) {
     sc <- tile_starts[i]
     ec <- min(sc + mutable_codons - 1L, n_codons)
-    sn <- (sc - 1L) * 3L + 1L  # start nt of mutable region
-    en <- ec * 3L              # end nt of mutable region
+    sn <- (sc - 1L) * 3L + 1L  # start nt of tile
+    en <- ec * 3L              # end nt of tile
 
-    # oh1: 4 nt of WT upstream of mutable region
-    # For tile 1: oh1 comes from the very beginning of gene (nt 1-4)
-    #   but the mutable region also starts at nt 1, so oh1 overlaps the first
-    #   codon+1nt. The oligo carries oh1 as a separate flank before the mutable.
-    # Actually: oh1 is the 4-nt overhang at the 5' boundary of this tile.
-    # For the first tile, oh1 = first 4 nt of gene = "ATG" + 1st nt of codon 2.
-    # The mutable region on the oligo starts AFTER oh1.
-    oh1_start <- sn
-    oh1_end   <- sn + 3L  # 4 nt
-    oh1_seq   <- substring(cds, oh1_start, oh1_end)
+    # oh1: first 4 nt of this tile (WT gene at tile's 5' boundary)
+    oh1_seq <- substring(cds, sn, sn + 3L)
 
-    # oh2: 4 nt of WT downstream of mutable region's boundary
-    # These are the last 4 nt of the tile's footprint on the gene
-    oh2_start <- en - 3L
-    oh2_end   <- en
-    oh2_seq   <- substring(cds, oh2_start, oh2_end)
+    # oh2: last 4 nt of this tile (WT gene at tile's 3' boundary)
+    oh2_seq <- substring(cds, en - 3L, en)
 
     # Full tile sequence (for reference, from WT gene)
     tile_seq <- substring(cds, sn, en)
@@ -141,32 +130,86 @@ partition_tiles <- function(cds, mutable_size_nt) {
 
   cli::cli_alert_success(paste0(
     "Gene partitioned into ", n_tiles, " tile(s) covering ",
-    n_codons, " codons (mutable region: ", mutable_codons, " codons/tile)"
+    n_codons, " codons (", mutable_codons, " codons/tile, ",
+    overlap_codons, " codons overlap)"
   ))
 
   tiles
 }
 
-#' Assign each variant to its tile based on mutable region boundaries
+#' Assign each variant to the best tile for its mutation
 #'
-#' Variants whose position falls in a tile's oh1 or oh2 flank are covered
-#' by the adjacent tile's mutable interior. Codon 1 (start Met) is excluded
-#' because it always falls in the first tile's oh1 flank.
+#' With overlapping tiles, a codon position may fall in multiple tiles.
+#' This function prefers the tile where the codon is fully in the mutable
+#' interior (not overlapping with oh1 or oh2). For gene-edge codons that
+#' can only be in one tile and partially overlap oh1/oh2, the variant is
+#' still assigned but flagged with an `overhang_note`.
 #'
 #' @param variants Data frame from design_mutations()
-#' @param tiles Data frame from partition_tiles()
-#' @return variants data frame with added tile_id column
+#' @param tiles Data frame from partition_tiles() or search_tile_boundaries_dp()
+#' @return variants data frame with added tile_id and overhang_note columns
 assign_variants_to_tiles <- function(variants, tiles) {
-  variants$tile_id <- NA_integer_
+  # Build a lookup: for each codon position, find the best tile
+  positions <- sort(unique(variants$position))
+  max_pos <- max(positions)
+  pos_tile <- integer(max_pos)
+  pos_note <- character(max_pos)
 
-  for (i in seq_len(nrow(tiles))) {
-    mask <- variants$position >= tiles$start_codon[i] &
-            variants$position <= tiles$end_codon[i]
-    variants$tile_id[mask] <- tiles$tile_id[i]
+  for (pos in positions) {
+    codon_start_nt <- (pos - 1L) * 3L + 1L
+    codon_end_nt <- pos * 3L
+
+    best_tile <- NA_integer_
+    best_quality <- -1L  # 2 = fully interior, 1 = partially in oh region
+
+    for (t in seq_len(nrow(tiles))) {
+      tile_start <- tiles$start_nt[t]
+      tile_end <- tiles$end_nt[t]
+
+      # Is this codon within this tile?
+      if (codon_start_nt >= tile_start && codon_end_nt <= tile_end) {
+        # Local positions within the tile
+        local_start <- codon_start_nt - tile_start + 1L
+        local_end <- codon_end_nt - tile_start + 1L
+        tile_len <- tile_end - tile_start + 1L
+
+        # Fully in mutable interior: past oh1 (4 nt) and before oh2 (last 4 nt)
+        if (local_start >= 5L && local_end <= tile_len - 4L) {
+          quality <- 2L
+        } else {
+          quality <- 1L
+        }
+
+        if (quality > best_quality) {
+          best_quality <- quality
+          best_tile <- tiles$tile_id[t]
+        }
+      }
+    }
+
+    pos_tile[pos] <- best_tile
+    if (!is.na(best_tile) && best_quality == 1L) {
+      pos_note[pos] <- "partial_oh_overlap"
+    }
   }
 
+  # Apply lookup to all variants (vectorized)
+  variants$tile_id <- pos_tile[variants$position]
+  variants$overhang_note <- pos_note[variants$position]
+  variants$overhang_note[variants$overhang_note == ""] <- NA_character_
+
   if (any(is.na(variants$tile_id))) {
-    stop("Some variants were not assigned to any tile!")
+    unassigned <- unique(variants$position[is.na(variants$tile_id)])
+    stop("Some variants were not assigned to any tile! Positions: ",
+         paste(unassigned, collapse = ", "))
+  }
+
+  n_flagged <- sum(!is.na(variants$overhang_note))
+  if (n_flagged > 0) {
+    cli::cli_alert_warning(paste0(
+      n_flagged, " variant(s) at gene edges have partial oh1/oh2 overlap. ",
+      "These mutations may not fully assemble as intended."
+    ))
   }
 
   variants

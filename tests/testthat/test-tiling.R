@@ -15,7 +15,7 @@ test_that("compute_max_tile_size returns positive multiple of 3", {
   expect_true(tile_size <= 300)
 })
 
-test_that("partition_tiles covers entire gene", {
+test_that("partition_tiles covers entire gene with overlap", {
   # Domesticate test gene first
   cu <- builtin_human_codon_usage()
   scan_result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
@@ -32,10 +32,18 @@ test_that("partition_tiles covers entire gene", {
   expect_equal(tiles$start_nt[1], 1)
   # Last tile ends at gene length
   expect_equal(tiles$end_nt[nrow(tiles)], nchar(cds))
-  # No gaps between tiles
+  # Adjacent tiles overlap (with default overlap_codons=4, tiles share boundary codons)
   for (i in seq_len(nrow(tiles) - 1)) {
-    expect_equal(tiles$end_nt[i] + 1, tiles$start_nt[i + 1])
+    # Next tile starts before or at current tile's end (overlap region)
+    expect_true(tiles$start_nt[i + 1] <= tiles$end_nt[i],
+                info = paste("Tiles", i, "and", i + 1, "should overlap"))
   }
+  # Every nt is covered by at least one tile
+  covered <- rep(FALSE, nchar(cds))
+  for (i in seq_len(nrow(tiles))) {
+    covered[tiles$start_nt[i]:tiles$end_nt[i]] <- TRUE
+  }
+  expect_true(all(covered))
 })
 
 test_that("partition_tiles includes oh1 and oh2 sequences", {
@@ -103,7 +111,7 @@ test_that("compute_superblock_boundaries returns boundaries for long genes", {
   expect_true(all(nchar(boundaries$junction_oh) == 4))
 })
 
-test_that("partition_tiles covers long gene completely", {
+test_that("partition_tiles covers long gene completely with overlap", {
   cds <- TEST_LONG_GENE_SEQ
   tile_size <- compute_max_tile_size(300, 12)
   tiles <- partition_tiles(cds, tile_size)
@@ -112,10 +120,17 @@ test_that("partition_tiles covers long gene completely", {
   expect_equal(tiles$start_nt[1], 1)
   # Last tile ends at gene length
   expect_equal(tiles$end_nt[nrow(tiles)], nchar(cds))
-  # No gaps
+  # Adjacent tiles overlap
   for (i in seq_len(nrow(tiles) - 1)) {
-    expect_equal(tiles$end_nt[i] + 1, tiles$start_nt[i + 1])
+    expect_true(tiles$start_nt[i + 1] <= tiles$end_nt[i],
+                info = paste("Tiles", i, "and", i + 1, "should overlap"))
   }
-  # Should have multiple tiles (2100/243 ~ 8.6)
+  # Every nt is covered
+  covered <- rep(FALSE, nchar(cds))
+  for (i in seq_len(nrow(tiles))) {
+    covered[tiles$start_nt[i]:tiles$end_nt[i]] <- TRUE
+  }
+  expect_true(all(covered))
+  # Should have multiple tiles (2100 nt / 77 effective codons per step ~ 9+ tiles)
   expect_true(nrow(tiles) >= 8)
 })

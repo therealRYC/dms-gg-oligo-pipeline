@@ -6,10 +6,9 @@ test_that("design_mutations generates correct number of variants", {
   cu <- builtin_human_codon_usage()
   variants <- design_mutations(cds, cu)
 
-  # 4 codons * 20 mutations each = 80 variants
-  # Position 4 is * (stop), which has 20 non-* targets (all 20 AA)
-  # Positions 1-3 are M, A, E: each gets 19 AA + 1 stop = 20
-  expect_equal(nrow(variants), 4 * 20)
+  # Mutable positions: codons 2 to (n_codons - 1) = codons 2-3 (skip Met@1, stop@4)
+  # 2 mutable codons * 20 mutations each = 40 variants
+  expect_equal(nrow(variants), 2 * 20)
 })
 
 test_that("design_mutations produces correct variant IDs", {
@@ -17,10 +16,12 @@ test_that("design_mutations produces correct variant IDs", {
   cu <- builtin_human_codon_usage()
   variants <- design_mutations(cds, cu)
 
-  # Check variant IDs follow pattern: wt_aa + position + mut_aa
-  expect_true("M1A" %in% variants$variant_id)
-  expect_true("M1*" %in% variants$variant_id)
+  # Only codon 2 (A) is mutable — codon 1 (Met) and codon 3 (stop) are skipped
+  expect_equal(nrow(variants), 1 * 20)
   expect_true("A2G" %in% variants$variant_id)
+  # Met (codon 1) and stop (codon 3) should NOT be in variants
+  expect_false("M1A" %in% variants$variant_id)
+  expect_false("M1*" %in% variants$variant_id)
 })
 
 test_that("mutations use preferred human codons", {

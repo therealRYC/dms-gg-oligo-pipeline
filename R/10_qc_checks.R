@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Fix variant_count check for barcodes_per_variant > 1
+# Last updated: 2026-02-20 — Fix variant_count for skipped Met/stop; add junction enzyme site check
 # 10_qc_checks.R — Comprehensive QC validation for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 
@@ -47,13 +47,28 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
                     " nt (limit: ", max_block_length, ")")
   )
 
-  # 3. Enzyme site check (informational — oligos intentionally contain sites)
+  # 3. Barcode junction enzyme site check (BUG-2 safety net)
+  # Oligo structure: ...BsmBI_fwd_oh3 + barcode + BsaI_rev_oh4...
+  # Check that no enzyme sites span the barcode-context junctions
+  bsmbi_fwd_oh3_seq <- orient_enzyme_site("BsmBI", oh3, "forward")
+  bsai_rev_oh4_seq <- orient_enzyme_site("BsaI", oh4, "reverse")
+  junc_left <- substring(bsmbi_fwd_oh3_seq,
+                          nchar(bsmbi_fwd_oh3_seq) - 5L, nchar(bsmbi_fwd_oh3_seq))
+  junc_right <- substring(bsai_rev_oh4_seq, 1L, 6L)
+  junction_seqs <- paste0(junc_left, barcodes, junc_right)
+  n_junction_sites <- 0L
+  for (enz_name in names(ENZYMES)) {
+    enz <- ENZYMES[[enz_name]]
+    n_junction_sites <- n_junction_sites +
+      sum(grepl(enz$recog, junction_seqs, fixed = TRUE) |
+          grepl(enz$recog_rc, junction_seqs, fixed = TRUE))
+  }
   checks[[3]] <- qc_check(
-    name   = "oligo_enzyme_sites",
-    desc   = "Oligo sequences checked for enzyme sites",
-    pass   = TRUE,
-    detail = paste0("Note: Oligos contain intentional BsaI/BsmBI sites for cloning. ",
-                    "Internal site check done during mutation design.")
+    name   = "barcode_junction_sites",
+    desc   = "No enzyme sites at barcode-context junctions",
+    pass   = n_junction_sites == 0L,
+    detail = paste0(n_junction_sites, " barcode(s) with junction enzyme sites",
+                    " (left='", junc_left, "', right='", junc_right, "')")
   )
 
   # 4. Barcode uniqueness
@@ -78,16 +93,18 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
   )
 
   # 6. Variant count (use unique variant_id to handle barcodes_per_variant > 1)
+  # Mutable positions = codons 2 through n_codons-1 (skip codon 1=Met and last=stop)
   expected_per_pos <- 20L  # 19 AA subs + 1 stop
   n_codons <- gene_len %/% 3L
-  expected_total <- n_codons * expected_per_pos
+  n_mutable <- n_codons - 2L  # exclude codon 1 (Met) and codon n_codons (stop)
+  expected_total <- n_mutable * expected_per_pos
   n_unique_variants <- length(unique(variants$variant_id))
   checks[[6]] <- qc_check(
     name   = "variant_count",
     desc   = "Expected number of variants generated",
     pass   = n_unique_variants == expected_total,
     detail = paste0(n_unique_variants, " unique variants (expected: ", expected_total,
-                    " = ", n_codons, " positions x ", expected_per_pos, " mutations)")
+                    " = ", n_mutable, " mutable positions x ", expected_per_pos, " mutations)")
   )
 
   # 7. Each variant differs by exactly one codon from WT

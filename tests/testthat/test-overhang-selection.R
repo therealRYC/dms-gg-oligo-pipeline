@@ -305,9 +305,10 @@ test_that("search_tile_boundaries_dp returns valid tiles for short gene", {
   expect_true(nrow(tiles) >= 1)
   expect_equal(tiles$start_nt[1], 1)
   expect_equal(tiles$end_nt[nrow(tiles)], nchar(cds))
-  # No gaps
+  # Adjacent tiles overlap (default overlap_codons=4)
   for (i in seq_len(nrow(tiles) - 1)) {
-    expect_equal(tiles$end_nt[i] + 1, tiles$start_nt[i + 1])
+    expect_true(tiles$start_nt[i + 1] <= tiles$end_nt[i],
+                info = paste("DP tiles", i, "and", i + 1, "should overlap"))
   }
   # 4-nt overhangs
   expect_true(all(nchar(tiles$oh1_seq) == 4))

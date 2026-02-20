@@ -24,6 +24,11 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Python
+.venv/
+__pycache__/
+*.pyc
+
 # Secrets
 .env
 *.key
