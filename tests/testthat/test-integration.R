@@ -1,6 +1,6 @@
 # test-integration.R — Full pipeline integration test (3-enzyme architecture)
 # Updated to use plan_assembly() for dynamic tile boundary search + overhang selection
-# Updated: 2026-02-20 — Add _sequences.fasta, gene_cds config, expanded variant QC tests
+# Updated: 2026-02-20 — Add junction context to design_barcodes, filter gene-edge variants (BUG-6/7)
 
 test_that("full pipeline runs on short test gene (3-enzyme)", {
   # Write test FASTA
@@ -81,6 +81,14 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   tile_overhangs <- extract_tile_overhangs(tiles)
   variants <- assign_variants_to_tiles(variants, tiles)
 
+  # Filter gene-edge variants with partial oh overlap (BUG-6)
+  skipped_mask <- !is.na(variants$overhang_note) & variants$overhang_note == "partial_oh_overlap"
+  skipped_variants <- variants[skipped_mask, ]
+  skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+  variants <- variants[!skipped_mask, ]
+  # Skipped count should be small (< 5% of total)
+  expect_true(nrow(skipped_variants) < (nrow(variants) + nrow(skipped_variants)) * 0.05)
+
   # Verify assembly plan
   expect_true(is.list(assembly_plan))
   expect_true(!is.null(assembly_plan$tiles))
@@ -99,13 +107,22 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   # Short gene shouldn't need superblock splits
   expect_equal(nrow(assembly_plan$superblock_splits), 0)
 
-  # Step 7: Design barcodes
+  # Step 7: Design barcodes (with junction context — BUG-7 fix)
+  bsmbi_fwd_oh3_seq <- orient_enzyme_site("BsmBI", oh3, "forward")
+  bsai_rev_oh4_seq <- orient_enzyme_site("BsaI", oh4, "reverse")
+  junction_left_context <- substring(bsmbi_fwd_oh3_seq,
+                                      nchar(bsmbi_fwd_oh3_seq) - 5L,
+                                      nchar(bsmbi_fwd_oh3_seq))
+  junction_right_context <- substring(bsai_rev_oh4_seq, 1L, 6L)
+
   barcode_result <- design_barcodes(
     n_variants = nrow(variants),
     barcode_length = cfg$barcode_length,
     min_hamming = cfg$min_hamming_distance,
     prefix_length = cfg$barcode_prefix_length,
-    barcodes_per_variant = cfg$barcodes_per_variant
+    barcodes_per_variant = cfg$barcodes_per_variant,
+    junction_left_context = junction_left_context,
+    junction_right_context = junction_right_context
   )
   barcodes <- barcode_result$barcodes
   expect_equal(length(barcodes), nrow(variants))
@@ -147,7 +164,7 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   # Per-reaction fidelity check should be in the QC report
   expect_true("reaction_fidelity" %in% qc_result$qc_report$check_name)
 
-  # Step 11: Write outputs (with sequence FASTA)
+  # Step 11: Write outputs (with sequence FASTA + skipped variants)
   variants$barcode_idx <- 1L
   original_cds <- gene$original_cds %||% gene$cds
   output_paths <- write_outputs(
@@ -158,7 +175,8 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
     original_cds = original_cds,
     domesticated_cds = gene$cds,
     protein = gene$protein,
-    gene_description = gene$gene_description %||% gene$gene_name
+    gene_description = gene$gene_description %||% gene$gene_name,
+    skipped_variants = skipped_variants
   )
 
   # Check all output files exist
@@ -171,6 +189,14 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   expect_true(file.exists(output_paths$oligo_pool_fasta))
   expect_true(file.exists(output_paths$geneblock_order_fasta))
   expect_true(file.exists(output_paths$sequences_fasta))
+
+  # Verify skipped variants output (should exist since short gene has edge codons)
+  if (nrow(skipped_variants) > 0) {
+    expect_true(file.exists(output_paths$skipped_variants_csv))
+    skipped_csv <- readr::read_csv(output_paths$skipped_variants_csv, show_col_types = FALSE)
+    expect_equal(nrow(skipped_csv), nrow(skipped_variants))
+    expect_true("skip_reason" %in% names(skipped_csv))
+  }
 
   # Verify sequences FASTA content
   seq_lines <- readLines(output_paths$sequences_fasta)
@@ -264,6 +290,13 @@ test_that("full pipeline runs on long test gene with superblocking", {
   tile_overhangs <- extract_tile_overhangs(tiles)
   variants <- assign_variants_to_tiles(variants, tiles)
 
+  # Filter gene-edge variants with partial oh overlap (BUG-6)
+  skipped_mask <- !is.na(variants$overhang_note) & variants$overhang_note == "partial_oh_overlap"
+  skipped_variants <- variants[skipped_mask, ]
+  skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+  variants <- variants[!skipped_mask, ]
+  expect_true(nrow(skipped_variants) < (nrow(variants) + nrow(skipped_variants)) * 0.05)
+
   # Verify assembly plan for long gene
   expect_true(nrow(tiles) >= 8)  # 2100/243 ~ 8.6 → at least 9 tiles
   expect_true(all(!is.na(variants$tile_id)))
@@ -282,13 +315,22 @@ test_that("full pipeline runs on long test gene with superblocking", {
   # Per-reaction fidelity should be computed
   expect_true(nrow(assembly_plan$reaction_fidelity) > 0)
 
-  # Step 7: Design barcodes
+  # Step 7: Design barcodes (with junction context — BUG-7 fix)
+  bsmbi_fwd_oh3_seq <- orient_enzyme_site("BsmBI", oh3, "forward")
+  bsai_rev_oh4_seq <- orient_enzyme_site("BsaI", oh4, "reverse")
+  junction_left_context <- substring(bsmbi_fwd_oh3_seq,
+                                      nchar(bsmbi_fwd_oh3_seq) - 5L,
+                                      nchar(bsmbi_fwd_oh3_seq))
+  junction_right_context <- substring(bsai_rev_oh4_seq, 1L, 6L)
+
   barcode_result <- design_barcodes(
     n_variants = nrow(variants),
     barcode_length = cfg$barcode_length,
     min_hamming = cfg$min_hamming_distance,
     prefix_length = cfg$barcode_prefix_length,
-    barcodes_per_variant = cfg$barcodes_per_variant
+    barcodes_per_variant = cfg$barcodes_per_variant,
+    junction_left_context = junction_left_context,
+    junction_right_context = junction_right_context
   )
   barcodes <- barcode_result$barcodes
   expect_equal(length(barcodes), nrow(variants))
@@ -328,7 +370,7 @@ test_that("full pipeline runs on long test gene with superblocking", {
   )
   expect_true(is.logical(qc_result$qc_pass))
 
-  # Step 11: Write outputs (with sequence FASTA)
+  # Step 11: Write outputs (with sequence FASTA + skipped variants)
   variants$barcode_idx <- 1L
   output_paths <- write_outputs(
     oligos = oligos, geneblock_result = geneblock_result,
@@ -338,7 +380,8 @@ test_that("full pipeline runs on long test gene with superblocking", {
     original_cds = gene$cds,
     domesticated_cds = gene$cds,
     protein = gene$protein,
-    gene_description = gene$gene_description %||% gene$gene_name
+    gene_description = gene$gene_description %||% gene$gene_name,
+    skipped_variants = skipped_variants
   )
 
   # Check all output files exist
@@ -441,6 +484,13 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   tile_overhangs <- extract_tile_overhangs(tiles)
   variants <- assign_variants_to_tiles(variants, tiles)
 
+  # Filter gene-edge variants with partial oh overlap (BUG-6)
+  skipped_mask <- !is.na(variants$overhang_note) & variants$overhang_note == "partial_oh_overlap"
+  skipped_variants <- variants[skipped_mask, ]
+  skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+  variants <- variants[!skipped_mask, ]
+  expect_true(nrow(skipped_variants) < (nrow(variants) + nrow(skipped_variants)) * 0.05)
+
   expect_true(nrow(tiles) >= 38,
               info = "9294 nt / 243 nt per tile ~ 39 tiles")
   expect_true(all(!is.na(variants$tile_id)))
@@ -454,13 +504,22 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   # Per-reaction fidelity should be computed
   expect_true(nrow(assembly_plan$reaction_fidelity) > 0)
 
-  # Step 7: Design barcodes
+  # Step 7: Design barcodes (with junction context — BUG-7 fix)
+  bsmbi_fwd_oh3_seq <- orient_enzyme_site("BsmBI", oh3, "forward")
+  bsai_rev_oh4_seq <- orient_enzyme_site("BsaI", oh4, "reverse")
+  junction_left_context <- substring(bsmbi_fwd_oh3_seq,
+                                      nchar(bsmbi_fwd_oh3_seq) - 5L,
+                                      nchar(bsmbi_fwd_oh3_seq))
+  junction_right_context <- substring(bsai_rev_oh4_seq, 1L, 6L)
+
   barcode_result <- design_barcodes(
     n_variants = nrow(variants),
     barcode_length = cfg$barcode_length,
     min_hamming = cfg$min_hamming_distance,
     prefix_length = cfg$barcode_prefix_length,
-    barcodes_per_variant = cfg$barcodes_per_variant
+    barcodes_per_variant = cfg$barcodes_per_variant,
+    junction_left_context = junction_left_context,
+    junction_right_context = junction_right_context
   )
   barcodes <- barcode_result$barcodes
   expect_equal(length(barcodes), nrow(variants))
@@ -501,7 +560,7 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   )
   expect_true(is.logical(qc_result$qc_pass))
 
-  # Step 11: Write outputs (with sequence FASTA)
+  # Step 11: Write outputs (with sequence FASTA + skipped variants)
   variants$barcode_idx <- 1L
   output_paths <- write_outputs(
     oligos = oligos, geneblock_result = geneblock_result,
@@ -511,7 +570,8 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
     original_cds = gene$original_cds %||% gene$cds,
     domesticated_cds = gene$cds,
     protein = gene$protein,
-    gene_description = gene$gene_description %||% gene$gene_name
+    gene_description = gene$gene_description %||% gene$gene_name,
+    skipped_variants = skipped_variants
   )
 
   # Check all output files exist

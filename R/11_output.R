@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Add _sequences.fasta output with original/domesticated CDS and protein
+# Last updated: 2026-02-20 — Add _skipped_variants.csv output for gene-edge variants (BUG-6)
 # 11_output.R — Write CSV/FASTA outputs for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 
@@ -18,12 +18,14 @@
 #' @param protein Protein sequence (optional)
 #' @param gene_description Full gene description for FASTA headers (optional)
 #' @param gene_fasta Path to source FASTA file (optional, for provenance)
+#' @param skipped_variants Data frame of variants skipped due to gene-edge overlap (optional)
 write_outputs <- function(oligos, geneblock_result, variants, barcodes,
                           qc_result, output_dir, gene_name = "gene",
                           min_hamming_dist = NULL,
                           original_cds = NULL, domesticated_cds = NULL,
                           protein = NULL, gene_description = NULL,
-                          gene_fasta = NULL) {
+                          gene_fasta = NULL,
+                          skipped_variants = NULL) {
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
   }
@@ -112,6 +114,26 @@ write_outputs <- function(oligos, geneblock_result, variants, barcodes,
     cli::cli_alert_success(paste0("Wrote sequences FASTA: ", seq_fasta_path))
   }
 
+  # 10. Skipped variants CSV (gene-edge variants with partial oh overlap)
+  skipped_path <- NULL
+  if (!is.null(skipped_variants) && nrow(skipped_variants) > 0) {
+    skipped_path <- file.path(output_dir, paste0(gene_name, "_skipped_variants.csv"))
+    skipped_out <- data.frame(
+      variant_id  = skipped_variants$variant_id,
+      position    = skipped_variants$position,
+      wt_aa       = skipped_variants$wt_aa,
+      mut_aa      = skipped_variants$mut_aa,
+      wt_codon    = skipped_variants$wt_codon,
+      mut_codon   = skipped_variants$mut_codon,
+      tile_id     = skipped_variants$tile_id,
+      skip_reason = skipped_variants$skip_reason,
+      stringsAsFactors = FALSE
+    )
+    readr::write_csv(skipped_out, skipped_path)
+    cli::cli_alert_success(paste0("Wrote skipped variants: ", skipped_path,
+                                   " (", nrow(skipped_out), " variants)"))
+  }
+
   invisible(list(
     oligo_pool_csv        = oligo_path,
     geneblock_order_csv   = block_path,
@@ -121,7 +143,8 @@ write_outputs <- function(oligos, geneblock_result, variants, barcodes,
     qc_report_csv         = qc_path,
     oligo_pool_fasta      = fasta_path,
     geneblock_order_fasta = block_fasta_path,
-    sequences_fasta       = seq_fasta_path
+    sequences_fasta       = seq_fasta_path,
+    skipped_variants_csv  = skipped_path
   ))
 }
 

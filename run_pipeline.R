@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Thread overlap_codons and barcode junction context through pipeline
+# Last updated: 2026-02-20 — Filter gene-edge variants (BUG-6) and pass skipped_variants to output
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -168,6 +168,20 @@ oh3 <- assembly_plan$oh3
 oh4 <- assembly_plan$oh4
 tile_overhangs <- extract_tile_overhangs(tiles)
 variants <- assign_variants_to_tiles(variants, tiles)
+
+# Filter out gene-edge variants with partial oh1/oh2 overlap (BUG-6)
+# These codons partially overlap fixed overhangs and would produce chimeric
+# assembled products — neither WT nor the intended mutation.
+skipped_mask <- !is.na(variants$overhang_note) & variants$overhang_note == "partial_oh_overlap"
+skipped_variants <- variants[skipped_mask, ]
+skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+variants <- variants[!skipped_mask, ]
+if (nrow(skipped_variants) > 0) {
+  cli::cli_alert_warning(paste0(
+    "Skipped ", nrow(skipped_variants), " gene-edge variant(s) with partial oh1/oh2 overlap"
+  ))
+}
+
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["6_assembly_plan"]] <- step_elapsed
 
@@ -346,7 +360,8 @@ output_paths <- write_outputs(
   domesticated_cds = gene$cds,
   protein          = gene$protein,
   gene_description = gene$gene_description,
-  gene_fasta       = cfg$gene_fasta
+  gene_fasta       = cfg$gene_fasta,
+  skipped_variants = skipped_variants
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["11_output"]] <- step_elapsed
@@ -377,7 +392,8 @@ pipeline_elapsed <- (proc.time() - pipeline_start)[["elapsed"]]
 cli::cli_h1("Pipeline Complete")
 cli::cli_alert_success(paste0("Gene: ", gene$gene_name))
 cli::cli_alert_success(paste0("Architecture: 3-enzyme (BsaI + BsmBI + PaqCI)"))
-cli::cli_alert_success(paste0("Variants: ", nrow(variants), " (unique mutations)"))
+cli::cli_alert_success(paste0("Variants: ", nrow(variants), " (unique mutations)",
+  if (nrow(skipped_variants) > 0) paste0(", ", nrow(skipped_variants), " skipped (gene-edge overlap)") else ""))
 cli::cli_alert_success(paste0("Oligos: ", nrow(oligos),
   if (cfg$barcodes_per_variant > 1L) paste0(" (", cfg$barcodes_per_variant, " barcodes/variant)") else ""))
 cli::cli_alert_success(paste0("Gene blocks: ", nrow(geneblock_result$blocks)))
