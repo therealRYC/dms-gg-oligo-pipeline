@@ -1,8 +1,13 @@
 # DMS Golden Gate Oligo Pipeline — Configuration Template
 # Copy this file to your project directory and edit as needed.
 
-# --- Required ---
+# --- Gene Input (one of gene_fasta or gene_cds is required) ---
 gene_fasta: "path/to/gene.fasta"          # Path to FASTA file with coding sequence
+# gene_cds: "ATGGCT...TAA"               # Alternative: CDS string directly (ACGT only, divisible by 3)
+
+# --- Gene Name (optional) ---
+# gene_name: "GRIN2A"                     # Short name for output files. If omitted, auto-extracted
+                                           # from the first token of the FASTA header.
 
 # --- PolIII Promoter ---
 # Sequence of the PolIII promoter (e.g., U6 with internal T7) placed between

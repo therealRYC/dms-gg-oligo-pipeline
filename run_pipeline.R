@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-02-18 — Add per-step timing output for pipeline performance diagnostics
+# Last updated: 2026-02-20 — Add gene_cds input, gene_name override, sequence FASTA output, fix variant/oligo counts
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -68,7 +68,15 @@ cli::cli_alert_success("Configuration loaded and validated. [{round(step_elapsed
 # Step 2: Read and validate gene
 cli::cli_h2("Step 2: Reading gene")
 step_start <- proc.time()
-gene <- read_gene(cfg$gene_fasta)
+if (!is.null(cfg$gene_cds) && nzchar(cfg$gene_cds)) {
+  gene <- read_gene_from_string(cfg$gene_cds, cfg$gene_name %||% "gene")
+} else {
+  gene <- read_gene(cfg$gene_fasta)
+}
+# Apply gene_name override from config (if provided and gene came from FASTA)
+if (!is.null(cfg$gene_name) && nzchar(cfg$gene_name)) {
+  gene$gene_name <- cfg$gene_name
+}
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["2_gene_input"]] <- step_elapsed
 cli::cli_alert_success(paste0(
@@ -90,6 +98,9 @@ cli::cli_alert_success("Codon usage table loaded. [{round(step_elapsed, 1)}s]")
 cli::cli_h2("Step 4: Scanning for enzyme sites (BsaI, BsmBI, PaqCI)")
 step_start <- proc.time()
 scan_result <- scan_enzyme_sites(gene$cds, cfg$polIII_promoter, codon_usage)
+
+# Save original CDS before domestication for traceability
+gene$original_cds <- gene$cds
 
 if (cfg$auto_domesticate && nrow(scan_result$domestication) > 0) {
   cli::cli_alert("Applying domestication (with iterative BsaI/BsmBI resolution)...")
@@ -272,7 +283,12 @@ output_paths <- write_outputs(
   qc_result        = qc_result,
   output_dir       = cfg$output_dir,
   gene_name        = gene$gene_name,
-  min_hamming_dist = barcode_result$min_hamming_dist
+  min_hamming_dist = barcode_result$min_hamming_dist,
+  original_cds     = gene$original_cds,
+  domesticated_cds = gene$cds,
+  protein          = gene$protein,
+  gene_description = gene$gene_description,
+  gene_fasta       = cfg$gene_fasta
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["11_output"]] <- step_elapsed
@@ -303,8 +319,9 @@ pipeline_elapsed <- (proc.time() - pipeline_start)[["elapsed"]]
 cli::cli_h1("Pipeline Complete")
 cli::cli_alert_success(paste0("Gene: ", gene$gene_name))
 cli::cli_alert_success(paste0("Architecture: 3-enzyme (BsaI + BsmBI + PaqCI)"))
-cli::cli_alert_success(paste0("Variants: ", nrow(variants)))
-cli::cli_alert_success(paste0("Oligos: ", nrow(oligos)))
+cli::cli_alert_success(paste0("Variants: ", nrow(variants), " (unique mutations)"))
+cli::cli_alert_success(paste0("Oligos: ", nrow(oligos),
+  if (cfg$barcodes_per_variant > 1L) paste0(" (", cfg$barcodes_per_variant, " barcodes/variant)") else ""))
 cli::cli_alert_success(paste0("Gene blocks: ", nrow(geneblock_result$blocks)))
 cli::cli_alert_success(paste0("Tiles: ", nrow(tiles)))
 cli::cli_alert_success(paste0("Fixed overhangs: oh3=", oh3, ", oh4=", oh4))
