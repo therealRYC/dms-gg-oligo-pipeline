@@ -1,5 +1,5 @@
 # Created: 2026-02-20
-# Last updated: 2026-02-20 — Add overhang conflict detection, junction site reporting
+# Last updated: 2026-02-20 — Fix reverse-site overhang extraction (was RC'd, should be top-strand direct)
 #!/usr/bin/env python3
 """
 validate_gga.py — In silico Golden Gate Assembly validation.
@@ -292,28 +292,28 @@ def find_enzyme_sites(seq: str, enzyme_name: str) -> list[dict]:
             })
 
     # Reverse sites: top strand has RC(oh + spacer + RECOG)
-    # = RC(oh) + RC(spacer) + RC(RECOG) = RC(oh) + spacer_rc + recog_rc
-    # The overhang (in pipeline convention) is the ORIGINAL oh, not what
-    # appears on the top strand. We recover it by taking RC of the top-strand
-    # overhang region.
+    # The top strand reads: ...oh...spacer...RC(RECOG)
+    # The overhang at this junction is the 4-nt top-strand sequence (5'→3')
+    # that forms the single-stranded overhang after cutting. This is the
+    # SAME convention as forward sites: the top-strand sequence IS the
+    # overhang. No RC needed — both forward and reverse sites at the same
+    # junction must report the identical 4-nt string for ligation to match.
     for m in re.finditer(recog_rc, seq):
         pos = m.start()
         # Working backwards from recog_rc start:
         #   recog_rc is at [pos : pos+len(recog)]
         #   spacer is at [pos - spacer : pos]
-        #   RC(oh) is at [pos - spacer - oh_len : pos - spacer]
-        rc_oh_end = pos - spacer
-        rc_oh_start = rc_oh_end - oh_len
-        if rc_oh_start >= 0:
-            rc_oh = seq[rc_oh_start:rc_oh_end]
-            oh = reverse_complement(rc_oh)
+        #   oh is at [pos - spacer - oh_len : pos - spacer]
+        oh_end = pos - spacer
+        oh_start = oh_end - oh_len
+        if oh_start >= 0:
+            oh = seq[oh_start:oh_end]
             sites.append({
                 "orientation": "reverse",
                 "recog_start": pos,
                 "overhang": oh,
-                # Body ends just before RC(oh) starts
-                # (the oh region is part of the body on this side)
-                "body_edge": rc_oh_end,
+                # Body ends at oh_end (the oh region is part of the body)
+                "body_edge": oh_end,
             })
 
     return sorted(sites, key=lambda s: s["recog_start"])

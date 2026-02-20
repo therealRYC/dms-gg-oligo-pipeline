@@ -79,7 +79,7 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 
 ## Outputs
 
-The pipeline writes 9 files to the output directory (all prefixed with the gene name):
+The pipeline writes up to 11 files to the output directory (all prefixed with the gene name):
 
 | File | Description |
 |------|-------------|
@@ -91,6 +91,8 @@ The pipeline writes 9 files to the output directory (all prefixed with the gene 
 | `<gene>_qc_report.csv` | QC check results (pass/fail, details) |
 | `<gene>_oligo_pool.fasta` | Oligo pool in FASTA format (for Twist ordering) |
 | `<gene>_geneblock_order.fasta` | Gene blocks in FASTA format |
+| `<gene>_sequences.fasta` | Original CDS, domesticated CDS, and protein sequence |
+| `<gene>_skipped_variants.csv` | Gene-edge variants excluded due to partial overhang overlap (if any) |
 | `<gene>_assembly_report.md` | Wetlab-compatible Markdown report with per-tile assembly guides |
 
 ## Pipeline Steps
@@ -105,7 +107,8 @@ The pipeline writes 9 files to the output directory (all prefixed with the gene 
 8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles)
 9. **Gene block design** (`09_wt_geneblock_design.R`) -- WT gene blocks with correct flanking enzyme sites; superblock splitting for fragments >1800 bp
 10. **QC** (`10_qc_checks.R`) -- Validates oligo lengths, enzyme site absence, barcode uniqueness, tile coverage, gene block sizes
-11. **Output** (`11_output.R`) -- Write CSV and FASTA files
+10b. **In-silico GG simulation** (`13_gg_simulator.R`, optional) -- Simulates BsaI + BsmBI digestion and ligation for sampled oligos; verifies assembled products match expected sequences
+11. **Output** (`11_output.R`) -- Write CSV and FASTA files (including skipped gene-edge variants)
 12. **Report** (`12_report.R`) -- Generate wetlab-compatible Markdown assembly report with per-tile guides
 
 ## Key Design Decisions
@@ -140,17 +143,19 @@ dms-gg-oligo-pipeline/
 │   ├── 09_wt_geneblock_design.R# WT gene block + superblock design
 │   ├── 10_qc_checks.R         # Comprehensive QC validation
 │   ├── 11_output.R            # CSV/FASTA output writing
-│   └── 12_report.R            # Wetlab-compatible Markdown assembly report
+│   ├── 12_report.R            # Wetlab-compatible Markdown assembly report
+│   └── 13_gg_simulator.R      # In-silico Golden Gate assembly simulator
 ├── data/
 │   ├── human_codon_usage.rds   # Kazusa human codon usage table
 │   ├── neb_overhang_fidelity/  # Potapov 2018 ligation fidelity matrices (BsaI, BsmBI)
 │   ├── GRIN2A_NM_000833_CDS.fasta
 │   ├── SLC6A1_NM_003042_CDS.fasta
 │   └── AKAP11_NM_016248_CDS.fasta
-├── scripts/                    # Helper scripts for generating test gene FASTA files
-│   ├── generate_grin2a_cds.R
-│   ├── generate_slc6a1_cds.R
-│   └── generate_akap11_cds.R
+├── scripts/                    # Helper scripts
+│   ├── generate_grin2a_cds.R   # Generate GRIN2A test FASTA
+│   ├── generate_slc6a1_cds.R   # Generate SLC6A1 test FASTA
+│   ├── generate_akap11_cds.R   # Generate AKAP11 test FASTA
+│   └── validate_gga.py         # Python cross-validator for GG assembly correctness
 ├── tests/testthat/             # Unit + integration tests
 ├── DESCRIPTION                 # R package metadata
 └── CLAUDE.md                   # Detailed project context and design rationale
