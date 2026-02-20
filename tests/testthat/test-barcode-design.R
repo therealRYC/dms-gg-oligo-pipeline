@@ -41,6 +41,46 @@ test_that("barcode filters enforce enzyme site exclusion", {
   expect_false(passes_barcode_filters("CGTCTCAACAGT", c(0.0, 1.0), 12))
 })
 
+# ============================================================================
+# Junction filtering
+# ============================================================================
+
+test_that("filter_barcode_junctions removes barcodes creating junction enzyme sites", {
+  # BsmBI recognition = CGTCTC. If left context ends with "CGTCT" and barcode starts with "C",
+  # the junction creates CGTCTC.
+  barcodes <- c("CACGTACGTACG", "TACGTACGTACG", "GACGTACGTACG")  # first starts with C
+  left_context <- "CGTCT"  # + "C" from barcode → CGTCTC = BsmBI
+  result <- filter_barcode_junctions(barcodes, left_context = left_context, right_context = "")
+  expect_false("CACGTACGTACG" %in% result)
+  expect_true("TACGTACGTACG" %in% result)
+  expect_true("GACGTACGTACG" %in% result)
+})
+
+test_that("filter_barcode_junctions passes all when no context", {
+  barcodes <- c("ACGTACGTACGT", "TGCATGCATGCA")
+  result <- filter_barcode_junctions(barcodes, left_context = "", right_context = "")
+  expect_equal(length(result), 2)
+})
+
+test_that("filter_barcode_junctions checks right context too", {
+  # BsaI recognition = GGTCTC. If barcode ends with "GGTCT" and right_context starts with "C",
+  # the junction creates GGTCTC = BsaI.
+  barcodes <- c("ACGTACGGTCTC", "ACGTACGTACGT")
+  # Actually the site would need to span: barcode ending + context start
+  # Barcode ending in "GGTCT" + context "C..." → GGTCTC at junction
+  barcodes2 <- c("ACGTACGGTCT", "ACGTACGTACG")  # 11 nt each
+  right_context <- "CAGTCA"
+  result <- filter_barcode_junctions(barcodes2, left_context = "", right_context = right_context)
+  # First barcode + right = "ACGTACGGTCTCAGTCA" contains GGTCTC → rejected
+  expect_false("ACGTACGGTCT" %in% result)
+  expect_true("ACGTACGTACG" %in% result)
+})
+
+test_that("filter_barcode_junctions handles empty input", {
+  result <- filter_barcode_junctions(character(0), left_context = "ACGT", right_context = "TGCA")
+  expect_equal(length(result), 0)
+})
+
 test_that("greedy prefix generation works", {
   prefixes <- generate_prefixes_greedy(6, 3, 5)
   expect_true(length(prefixes) >= 5)

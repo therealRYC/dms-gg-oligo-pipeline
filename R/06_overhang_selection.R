@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-18 — Derive oh3 from PolIII promoter 3' end (PerturbView architecture)
+# Last updated: 2026-02-20 — Add tile overlap support in DP boundary search (BUG-1)
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -733,7 +733,8 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
                                        bsai_matrix = NULL,
                                        multi_k = TRUE,
                                        k_range = NULL,
-                                       search_window_K = NULL) {
+                                       search_window_K = NULL,
+                                       overlap_codons = 4L) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
 
@@ -752,6 +753,19 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
 
   max_codons <- max_mutable_nt %/% 3L
   min_codons <- min_mutable_nt %/% 3L
+
+  # Effective max codons for DP constraint: reduced by overlap so that when
+  # tiles are extended by overlap_codons, total tile size <= max_codons.
+  effective_max_codons <- max_codons - overlap_codons
+  if (effective_max_codons < min_codons) {
+    # Overlap is too large for the tile budget; fall back to no overlap
+    cli::cli_alert_warning(paste0(
+      "overlap_codons (", overlap_codons, ") too large for tile budget. ",
+      "Falling back to overlap_codons=0."
+    ))
+    overlap_codons <- 0L
+    effective_max_codons <- max_codons
+  }
 
   # Single-tile gene: no boundaries to search
   if (n_codons <= max_codons) {
@@ -781,11 +795,11 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
   # Precompute scores for all boundary positions
   precomp <- precompute_boundary_scores(cds, hf_set, oh_fidelity, bsai_matrix)
 
-  # Determine K range to search
-  K_ideal <- ceiling(n_codons / max_codons) - 1L
+  # Determine K range to search (use effective_max_codons for boundary spacing)
+  K_ideal <- ceiling(n_codons / effective_max_codons) - 1L
   if (is.null(k_range)) {
     if (multi_k) {
-      K_min <- max(1L, ceiling(n_codons / max_codons) - 1L)
+      K_min <- max(1L, ceiling(n_codons / effective_max_codons) - 1L)
       K_max <- floor(n_codons / min_codons) - 1L
       k_range <- seq(max(K_min, K_ideal - 2L), min(K_max, K_ideal + 2L))
       k_range <- k_range[k_range >= 1L]
@@ -807,7 +821,7 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
 
   dp_start <- proc.time()
   for (K in k_range) {
-    result <- dp_solve_k(K, n_codons, min_codons, max_codons,
+    result <- dp_solve_k(K, n_codons, min_codons, effective_max_codons,
                           precomp$score, precomp$valid)
     if (!is.null(result)) {
       avg <- result$total_score / K
@@ -864,8 +878,16 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
   )
 
   for (i in seq_len(n_tiles)) {
-    sc <- boundary_positions[i] + 1L
-    ec <- boundary_positions[i + 1L]
+    # Core boundaries from DP
+    core_sc <- boundary_positions[i] + 1L
+    core_ec <- boundary_positions[i + 1L]
+
+    # Extend tile by overlap_codons on the right (into next tile's territory)
+    # First tile starts at codon 1 (no left extension needed since there's no previous tile)
+    # Last tile is capped at n_codons
+    sc <- core_sc
+    ec <- min(n_codons, core_ec + overlap_codons)
+
     sn <- (sc - 1L) * 3L + 1L
     en <- ec * 3L
 
@@ -1462,6 +1484,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   search_window_K <- config$search_window_K %||% 15L
   boundary_method <- config$boundary_method %||% "dp"
   multi_k <- config$multi_k %||% TRUE
+  overlap_codons <- config$overlap_codons %||% 4L
   min_mutable_nt <- config$min_mutable_nt
   if (is.null(min_mutable_nt)) {
     min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
@@ -1484,7 +1507,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       hf_set = hf_set,
       oh_fidelity = oh_fidelity,
       bsai_matrix = bsai_matrix,
-      multi_k = multi_k
+      multi_k = multi_k,
+      overlap_codons = overlap_codons
     )
   } else {
     cli::cli_h3("Searching tile boundaries for HF overhangs (greedy)")

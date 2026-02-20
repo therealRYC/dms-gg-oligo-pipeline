@@ -1,11 +1,19 @@
+# Created: 2025-02-01
+# Last updated: 2026-02-20 — Skip codon 1 (Met) and last codon (stop) from mutation library (BUG-4, BUG-5)
 # 04_mutation_design.R — Generate all single-AA substitutions + stops
 # DMS Golden Gate Oligo Pipeline
 
 #' Generate all single amino acid substitutions + stop codons for a gene
 #'
-#' For each position in the protein, generates 19 missense mutations (all AAs
-#' except WT) plus 1 nonsense mutation (stop), using the most preferred human
-#' codon for each target amino acid.
+#' For each mutable position in the protein, generates 19 missense mutations
+#' (all AAs except WT) plus 1 nonsense mutation (stop), using the most
+#' preferred human codon for each target amino acid.
+#'
+#' Positions 1 (start Met) and n_codons (stop codon) are EXCLUDED because:
+#' - Codon 1 (Met/ATG) always falls in the first tile's oh1 overhang,
+#'   so its mutation is silently overridden during assembly.
+#' - The last codon (stop) always falls in the last tile's oh2 overhang,
+#'   and there is no downstream tile to cover it.
 #'
 #' @param cds Character string of coding DNA sequence (domesticated)
 #' @param codon_usage Data frame from load_codon_usage()
@@ -16,8 +24,12 @@ design_mutations <- function(cds, codon_usage) {
   preferred <- get_preferred_codons(codon_usage)
   n_codons <- length(codons)
 
+  # Skip codon 1 (start Met) and codon n_codons (stop) — see docstring
+  mutable_positions <- 2L:(n_codons - 1L)
+  n_mutable <- length(mutable_positions)
+
   # Pre-allocate
-  n_variants <- n_codons * 20L  # 19 AA + 1 stop per position
+  n_variants <- n_mutable * 20L  # 19 AA + 1 stop per position
   results <- data.frame(
     variant_id = character(n_variants),
     position   = integer(n_variants),
@@ -29,11 +41,11 @@ design_mutations <- function(cds, codon_usage) {
   )
 
   idx <- 1L
-  for (pos in seq_len(n_codons)) {
+  for (pos in mutable_positions) {
     wt_codon <- codons[pos]
     wt_aa <- translate_codon(wt_codon)
 
-    # Skip if WT is already a stop codon (shouldn't happen in validated CDS interior)
+    # All 20 target AAs (19 substitutions + 1 stop) except WT identity
     target_aas <- AA_ALL[AA_ALL != wt_aa]
 
     for (mut_aa in target_aas) {
@@ -53,7 +65,9 @@ design_mutations <- function(cds, codon_usage) {
   results <- results[seq_len(idx - 1L), , drop = FALSE]
 
   cli::cli_alert_success(paste0(
-    "Designed ", nrow(results), " variants across ", n_codons, " positions."
+    "Designed ", nrow(results), " variants across ", n_mutable,
+    " mutable positions (codons 2-", n_codons - 1L,
+    "; skipped codon 1=Met and codon ", n_codons, "=stop)."
   ))
 
   results
