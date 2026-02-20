@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Add gene_name and gene_cds config options; mutual exclusivity with gene_fasta
+# Last updated: 2026-02-21 — Add simulate_assembly and simulation_samples_per_tile config options
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -42,6 +42,8 @@ load_config <- function(config_path) {
     multi_k_search           = TRUE,
     barcodes_per_variant     = 10L,
     auto_domesticate         = TRUE,
+    simulate_assembly        = FALSE,
+    simulation_samples_per_tile = 1L,
     output_dir               = "output"
   )
 
@@ -69,6 +71,8 @@ load_config <- function(config_path) {
   cfg$boundary_method       <- as.character(cfg$boundary_method)
   cfg$multi_k_search        <- as.logical(cfg$multi_k_search)
   cfg$barcodes_per_variant  <- as.integer(cfg$barcodes_per_variant)
+  cfg$simulate_assembly     <- as.logical(cfg$simulate_assembly)
+  cfg$simulation_samples_per_tile <- as.integer(cfg$simulation_samples_per_tile)
 
   # --- Validate oh3 and oh4 ---
   # These are fixed BsmBI/BsaI overhangs used in the 3-enzyme assembly

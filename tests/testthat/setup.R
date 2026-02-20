@@ -24,6 +24,7 @@ source(file.path(pipeline_dir, "R", "08_oligo_assembly.R"))
 source(file.path(pipeline_dir, "R", "09_wt_geneblock_design.R"))
 source(file.path(pipeline_dir, "R", "10_qc_checks.R"))
 source(file.path(pipeline_dir, "R", "11_output.R"))
+source(file.path(pipeline_dir, "R", "13_gg_simulator.R"))
 
 # --- Test fixtures ---
 # A short synthetic test gene (100 codons = 300 nt)
