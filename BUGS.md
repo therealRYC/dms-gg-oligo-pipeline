@@ -1,5 +1,5 @@
 # Created: 2026-02-20
-# Last updated: 2026-02-21 — Add F11 (superblock junction bugs) and F12 (barcode suffix sampling)
+# Last updated: 2026-02-22 — Add BUG-003 (boundary codon rescue) to open bugs with fix plan
 
 # Bug Inventory — DMS GG Oligo Pipeline
 
@@ -78,7 +78,27 @@
 
 ## Open Bugs
 
-(None currently open.)
+### BUG-003: Boundary codon mutations blanket-skipped (partial fix possible)
+- **File:** `run_pipeline.R:177-188`, `R/04_mutation_design.R`, `R/05_tiling.R:176-180`
+- **Status:** DEFERRED — workaround in place (F9 blanket skip), partial fix planned
+- **What:** Codons at gene edges (position 2 and position n-1) partially overlap the fixed WT-derived overhangs (oh1 and oh2). Currently all ~40 mutations at these positions are blanket-skipped, even though many are assemblable.
+- **Root cause:** BsaI generates 4-nt overhangs, codons are 3 nt. The 4/3 misalignment means:
+  - Codon 2 (nt 4-6): first nucleotide (nt 4) sits inside oh1 (nt 1-4)
+  - Codon n-1: third nucleotide (wobble position) sits inside oh2 (last 4 nt of tile)
+  - The overlap is always exactly **1 nucleotide**
+- **Why many are recoverable:** If the mutant codon preserves the single overlapping nucleotide, assembly works correctly. The oligo assembly code (line 91: `mutable_regions <- substring(mutant_tiles, 5L, t_len - 4L)`) strips oh1/oh2 as fixed overhangs. When the mutant codon's overlapping nt matches WT, the assembled product is the correct mutant.
+- **Planned fix — `rescue_boundary_variants()`:**
+  1. For each `partial_oh_overlap` variant, identify the constrained codon position (pos 1 for oh1, pos 3 for oh2) and the required WT nucleotide
+  2. Check if the preferred mutant codon already satisfies the constraint — if so, rescue it directly
+  3. If not, search all codons for the target AA ranked by human usage frequency, filtering to those that preserve the constrained nt AND don't create enzyme sites
+  4. If a compatible codon exists: use it (mark as `oh_rescued` with `codon_note`)
+  5. If no compatible codon exists (e.g., Trp=TGG when first nt must be G): mark as `oh_incompatible` and skip
+- **Expected recovery:**
+  - Codon 2 (first-position constraint): ~5-7 of 20 mutations (~30%). Limited because only AAs in the same genetic code "column" share a first nucleotide (e.g., first nt = G → only Val, Ala, Asp, Glu, Gly reachable)
+  - Codon n-1 (wobble-position constraint): ~13-15 of 20 mutations (~70%). High recovery because wobble position is highly degenerate (most AAs have codons ending in any given nt)
+  - **Total: ~19 of 40 variants recovered (~48%)** with zero architectural changes
+- **Files to modify:** `R/04_mutation_design.R` (new function), `run_pipeline.R` (call site), `R/11_output.R` (output columns), `tests/testthat/test-mutation-design.R` (tests)
+- **Current workaround (F9):** All 40 variants blanket-skipped and written to `_skipped_variants.csv`. Safe but loses coverage at 2 positions per gene.
 
 ## Verified NOT Bugs
 
