@@ -1,5 +1,6 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Add junction-context barcode filtering (BUG-2)
+# Last updated: 2026-02-22 — Replace greedy prefix generation with GF(4) linear code + DNABarcodes lexicode;
+#   vectorize suffix generation; skip validation for algebraically-guaranteed codes
 # 07_barcode_design.R — Programmed barcodes with unified hierarchical prefix-suffix design
 # DMS Golden Gate Oligo Pipeline
 #
@@ -11,6 +12,11 @@
 #   - Suffixes are random, filtered only for: enzyme sites, homopolymers, GC (no pairwise d)
 #   - Cross-variant pairs: d(full) >= d(prefix) >= min_hamming
 #   - Within-variant pairs: d(full) = d(suffix) = random (OK — same variant)
+#
+# Prefix generation strategy (ordered by priority):
+#   1. GF(4) shortened Hamming code (d <= 3): deterministic, maximum capacity, O(n) per codeword
+#   2. DNABarcodes lexicode (any d): Conway heuristic first, Ashlock fallback for larger sets
+#   3. Error: impossible parameters
 
 # ============================================================================
 # Capacity estimation helpers
@@ -132,6 +138,10 @@ auto_size_barcode_length <- function(n_variants, prefix_length, barcodes_per_var
 #' - Cross-variant distance >= min_hamming (guaranteed by prefix)
 #' - Within-variant distance = random (acceptable — same variant)
 #'
+#' Prefix generation strategy:
+#' - d <= 3: GF(4) shortened Hamming code (deterministic, maximum capacity)
+#' - d >= 4: DNABarcodes lexicode (Conway heuristic, Ashlock fallback)
+#'
 #' @param n_variants Number of variants needing barcodes
 #' @param barcode_length Total barcode length (integer or "auto")
 #' @param min_hamming Minimum Hamming distance between variant prefixes (default 3)
@@ -142,7 +152,7 @@ auto_size_barcode_length <- function(n_variants, prefix_length, barcodes_per_var
 #' @param junction_left_context Left junction context for barcode filtering (default "")
 #' @param junction_right_context Right junction context for barcode filtering (default "")
 #' @return List with barcodes, barcode_assignments, barcode_length, prefix_length,
-#'   effective_hamming, min_hamming_dist
+#'   effective_hamming, min_hamming_dist, code_type
 design_barcodes <- function(n_variants,
                             barcode_length = DEFAULT_BARCODE_LENGTH,
                             min_hamming = DEFAULT_MIN_HAMMING,
@@ -185,31 +195,14 @@ design_barcodes <- function(n_variants,
     n_variants, prefix_length, min_hamming, min_hamming_floor = DEFAULT_MIN_HAMMING_FLOOR
   )
 
-  # 3. Generate n_variants unique prefixes
+  # 3. Generate n_variants unique prefixes via algebraic code or lexicode
   cli::cli_alert("Generating {n_variants} unique prefixes (hard Hamming >= {effective_hamming})...")
-  if (prefix_length <= 10L) {
-    prefixes <- generate_prefixes(prefix_length, effective_hamming, n_variants)
-  } else {
-    prefixes <- generate_prefixes_random_greedy(
-      prefix_length, effective_hamming, n_variants
-    )
-    # Post-filter for enzyme sites/homopolymers
-    prefixes <- filter_sequences_fast(prefixes, max_homopolymer)
-  }
-
-  # Filter prefixes that create enzyme sites at junction boundaries.
-  # A prefix like "CCTG..." with left context "...ACA" creates PaqCI site "CACCTGC"
-  # spanning the junction — no suffix can fix this, so remove the prefix entirely.
-  if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
-    n_before <- length(prefixes)
-    prefixes <- filter_barcode_junctions(prefixes, junction_left_context, junction_right_context)
-    n_removed <- n_before - length(prefixes)
-    if (n_removed > 0) {
-      cli::cli_alert_info(paste0(
-        "Removed ", n_removed, " prefixes with enzyme sites at junction boundaries."
-      ))
-    }
-  }
+  prefix_result <- generate_prefixes(
+    prefix_length, effective_hamming, n_variants, max_homopolymer,
+    junction_left_context, junction_right_context
+  )
+  prefixes <- prefix_result$prefixes
+  code_type <- prefix_result$code_type
 
   if (length(prefixes) < n_variants) {
     stop("Could only generate ", length(prefixes), " unique prefixes, need ", n_variants,
@@ -217,9 +210,11 @@ design_barcodes <- function(n_variants,
   }
   prefixes <- prefixes[seq_len(n_variants)]
 
-  cli::cli_alert_info(paste0("Generated ", length(prefixes), " unique prefixes."))
+  cli::cli_alert_info(paste0(
+    "Generated ", length(prefixes), " unique prefixes (method=", code_type, ")."
+  ))
 
-  # 4. For each prefix, generate barcodes_per_variant random filtered suffixes
+  # 4. Generate barcodes: vectorized batch suffix generation
   cli::cli_alert("Generating barcodes (random suffixes per prefix)...")
   barcodes <- generate_barcodes_per_prefix(
     prefixes, suffix_length, barcodes_per_variant, gc_range, max_homopolymer,
@@ -227,12 +222,20 @@ design_barcodes <- function(n_variants,
     junction_right_context = junction_right_context
   )
 
-  # 5. Validate prefix distances (fast: only unique prefixes)
-  validate_prefix_distances(prefixes, effective_hamming)
+  # 5. Validate prefix distances — skip for algebraically-guaranteed codes
+  if (code_type %in% c("linear", "lexicode")) {
+    cli::cli_alert_success(paste0(
+      "Skipping prefix distance validation (d >= ", effective_hamming,
+      " guaranteed by ", code_type, " construction)."
+    ))
+  } else {
+    validate_prefix_distances(prefixes, effective_hamming)
+  }
 
   cli::cli_alert_success(paste0(
     "Generated ", n_total, " barcodes",
-    " (mode=unified hierarchical, length=", barcode_length, ")"
+    " (mode=unified hierarchical, length=", barcode_length,
+    ", prefix_method=", code_type, ")"
   ))
 
   # 6. Compute per-barcode nearest-neighbor Hamming distance
@@ -261,295 +264,350 @@ design_barcodes <- function(n_variants,
     min_hamming_dist    = min_hamming_dist,
     barcode_length      = barcode_length,
     prefix_length       = prefix_length,
-    effective_hamming   = effective_hamming
+    effective_hamming   = effective_hamming,
+    code_type           = code_type
   )
 }
 
 # ============================================================================
-# Prefix generation
+# Prefix generation — unified entry point
 # ============================================================================
 
-#' Generate prefix sequences with guaranteed Hamming distance
+#' Generate prefix sequences with guaranteed minimum Hamming distance
 #'
-#' For prefix_length <= 10, enumerates all 4^k k-mers and greedily selects.
-#' For larger prefix_length, use generate_prefixes_random_greedy() instead.
+#' Strategy:
+#'   1. d <= 3: GF(4) shortened Hamming code (deterministic, max capacity)
+#'   2. d >= 4 (and k <= 14): DNABarcodes Conway lexicode, then Ashlock fallback
+#'   3. Error if nothing works
 #'
-#' @param k Prefix length
-#' @param min_hamming Minimum Hamming distance
-#' @param n_needed Approximate number of prefixes needed
-#' @return Character vector of prefix sequences
-generate_prefixes <- function(k, min_hamming, n_needed) {
-  prefixes <- generate_prefixes_greedy(k, min_hamming, n_needed)
-
-  # Filter out prefixes with enzyme sites or extreme composition
-  prefixes <- filter_sequences_fast(prefixes, DEFAULT_MAX_HOMOPOLYMER)
-
-  if (length(prefixes) == 0) {
-    stop("No valid prefixes generated. Try different parameters.")
-  }
-
-  prefixes
-}
-
-#' Greedy prefix generation via full enumeration (for k <= 10)
-#'
-#' Enumerates all 4^k k-mers, shuffles, pre-filters, then greedily selects
-#' prefixes with mutual Hamming distance >= min_hamming.
+#' Biological filtering (enzyme sites, homopolymers, junction context) is applied
+#' to prefixes after generation. This is safe: removing codewords from a code
+#' with minimum distance d preserves d >= d_code for all remaining pairs.
 #'
 #' @param k Prefix length
 #' @param min_hamming Minimum Hamming distance
-#' @param n_needed Number needed
-#' @return Character vector of prefixes
-generate_prefixes_greedy <- function(k, min_hamming, n_needed) {
-  all_kmers <- generate_all_kmers(k)
-  # Shuffle for randomness
-  all_kmers <- sample(all_kmers)
-  # Pre-filter enzyme sites and homopolymers (vectorized)
-  all_kmers <- filter_sequences_fast(all_kmers, DEFAULT_MAX_HOMOPOLYMER)
+#' @param n_needed Number of prefixes needed (after filtering)
+#' @param max_homopolymer Maximum homopolymer run (default 4)
+#' @param junction_left_context Left junction context (default "")
+#' @param junction_right_context Right junction context (default "")
+#' @return List with: prefixes (character vector), code_type ("linear" or "lexicode")
+generate_prefixes <- function(k, min_hamming, n_needed,
+                               max_homopolymer = DEFAULT_MAX_HOMOPOLYMER,
+                               junction_left_context = "",
+                               junction_right_context = "") {
+  code_type <- NULL
+  prefixes <- NULL
 
-  # Pre-compute integer matrix for all candidates
-  n_cand <- length(all_kmers)
-  cand_mat <- matrix(unlist(lapply(all_kmers, utf8ToInt)),
-                     nrow = k, ncol = n_cand)
+  # --- Path 1: GF(4) Hamming code for d <= 3 ---
+  if (min_hamming <= 3L) {
+    result <- tryCatch({
+      generate_prefixes_linear(k, n_needed)
+    }, error = function(e) {
+      cli::cli_alert_warning("GF(4) linear code failed: {e$message}")
+      NULL
+    })
 
-  target <- n_needed * 2L  # Get extra margin
-  selected <- character(0)
-  sel_mat <- matrix(integer(0), nrow = k, ncol = 0)
+    if (!is.null(result)) {
+      prefixes <- result$prefixes
+      code_type <- "linear"
 
-  for (i in seq_len(n_cand)) {
-    q_int <- cand_mat[, i]
-    if (ncol(sel_mat) == 0) {
-      selected <- all_kmers[i]
-      sel_mat <- matrix(q_int, nrow = k, ncol = 1)
-      next
-    }
-    dists <- as.integer(colSums(sel_mat != q_int))
-    if (all(dists >= min_hamming)) {
-      selected <- c(selected, all_kmers[i])
-      sel_mat <- cbind(sel_mat, q_int)
-    }
-    if (length(selected) >= target) break
-  }
-  selected
-}
+      # Stage 1 prefix filtering: enzyme sites, homopolymers
+      prefixes <- filter_sequences_fast(prefixes, max_homopolymer)
 
-#' Greedy prefix generation excluding known prefixes (for expanding prefix pool)
-#'
-#' @param k Prefix length
-#' @param min_hamming Minimum Hamming distance
-#' @param n_needed Number of additional prefixes needed
-#' @param existing_prefixes Prefixes already in use
-#' @return Character vector of new prefixes
-generate_prefixes_greedy_excluding <- function(k, min_hamming, n_needed, existing_prefixes) {
-  all_kmers <- generate_all_kmers(k)
-  all_kmers <- setdiff(all_kmers, existing_prefixes)
-  all_kmers <- sample(all_kmers)
-
-  # Pre-filter for enzyme sites and homopolymers (vectorized)
-  all_kmers <- filter_sequences_fast(all_kmers, DEFAULT_MAX_HOMOPOLYMER)
-
-  n_cand <- length(all_kmers)
-  if (n_cand == 0) return(character(0))
-
-  # Convert all candidates to integer matrix (k x n_cand)
-  cand_mat <- matrix(unlist(lapply(all_kmers, utf8ToInt)),
-                     nrow = k, ncol = n_cand)
-
-  # Compute minimum distance to existing prefixes for each candidate
-  min_dist <- rep(as.integer(k), n_cand)
-  for (ep in existing_prefixes) {
-    ref <- utf8ToInt(ep)
-    dists <- as.integer(colSums(cand_mat != ref))
-    min_dist <- pmin(min_dist, dists)
-  }
-
-  # Only keep candidates with min_dist >= min_hamming to existing set
-  valid <- which(min_dist >= min_hamming)
-  if (length(valid) == 0) return(character(0))
-
-  # Greedy selection from valid candidates
-  new_selected <- character(0)
-  sel_ints <- list()
-
-  for (idx in valid) {
-    q_int <- cand_mat[, idx]
-
-    ok <- TRUE
-    for (s_int in sel_ints) {
-      if (sum(q_int != s_int) < min_hamming) {
-        ok <- FALSE
-        break
+      # Stage 1 prefix filtering: junction context
+      if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
+        n_before <- length(prefixes)
+        prefixes <- filter_barcode_junctions(
+          prefixes, junction_left_context, junction_right_context
+        )
+        n_removed <- n_before - length(prefixes)
+        if (n_removed > 0) {
+          cli::cli_alert_info(paste0(
+            "Removed ", n_removed, " prefixes with enzyme sites at junction boundaries."
+          ))
+        }
       }
+
+      if (length(prefixes) >= n_needed) {
+        cli::cli_alert_success(paste0(
+          "GF(4) linear code: ", length(prefixes),
+          " prefixes after filtering (need ", n_needed, ")"
+        ))
+        return(list(prefixes = prefixes, code_type = code_type))
+      }
+
+      cli::cli_alert_warning(paste0(
+        "GF(4) linear code: only ", length(prefixes),
+        " prefixes after filtering (need ", n_needed, "). Trying DNABarcodes..."
+      ))
     }
-    if (ok) {
-      new_selected <- c(new_selected, all_kmers[idx])
-      sel_ints[[length(sel_ints) + 1L]] <- q_int
-    }
-    if (length(new_selected) >= n_needed) break
   }
 
-  new_selected
+  # --- Path 2: DNABarcodes lexicode (any d, k <= ~14) ---
+  for (heuristic in c("conway", "ashlock")) {
+    result <- tryCatch({
+      generate_prefixes_lexicode(k, min_hamming, n_needed, heuristic = heuristic)
+    }, error = function(e) {
+      cli::cli_alert_warning("DNABarcodes ({heuristic}) failed: {e$message}")
+      NULL
+    })
+
+    if (!is.null(result)) {
+      prefixes <- result$prefixes
+      code_type <- "lexicode"
+
+      # Stage 1 prefix filtering
+      prefixes <- filter_sequences_fast(prefixes, max_homopolymer)
+      if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
+        n_before <- length(prefixes)
+        prefixes <- filter_barcode_junctions(
+          prefixes, junction_left_context, junction_right_context
+        )
+        n_removed <- n_before - length(prefixes)
+        if (n_removed > 0) {
+          cli::cli_alert_info(paste0(
+            "Removed ", n_removed, " prefixes with enzyme sites at junction boundaries."
+          ))
+        }
+      }
+
+      if (length(prefixes) >= n_needed) {
+        cli::cli_alert_success(paste0(
+          "DNABarcodes (", heuristic, "): ", length(prefixes),
+          " prefixes after filtering (need ", n_needed, ")"
+        ))
+        return(list(prefixes = prefixes, code_type = code_type))
+      }
+
+      cli::cli_alert_warning(paste0(
+        "DNABarcodes (", heuristic, "): only ", length(prefixes),
+        " prefixes after filtering (need ", n_needed, ").",
+        if (heuristic == "conway") " Trying Ashlock..." else ""
+      ))
+    }
+  }
+
+  # --- Path 3: Error ---
+  n_got <- if (!is.null(prefixes)) length(prefixes) else 0L
+  stop("Cannot generate ", n_needed, " prefixes of length ", k,
+       " with min_hamming >= ", min_hamming, " after biological filtering",
+       " (best attempt: ", n_got, " prefixes).\n",
+       "  Suggestions: increase prefix_length, decrease min_hamming_distance,\n",
+       "  or relax GC/homopolymer constraints.")
 }
 
-#' Random greedy prefix generation (for prefix_length > 10)
+#' Generate prefixes using DNABarcodes lexicode
 #'
-#' For large prefix spaces (4^k > 1M), enumerating all k-mers is infeasible.
-#' Instead: random sample → filter → greedy select with vectorized distance.
+#' Wraps DNABarcodes::create.dnabarcodes() to generate a high-quality prefix set.
 #'
 #' @param k Prefix length
 #' @param min_hamming Minimum Hamming distance
 #' @param n_needed Number of prefixes needed
-#' @param n_sample Number of random candidates to sample (default 500000)
-#' @return Character vector of prefixes with mutual d >= min_hamming
-generate_prefixes_random_greedy <- function(k, min_hamming, n_needed,
-                                             n_sample = 500000L) {
-  bases <- c("A", "C", "G", "T")
-  cli::cli_alert_info("Generating {n_sample} random {k}-mer candidates...")
-  rand_mat <- matrix(sample(bases, k * n_sample, replace = TRUE),
-                     nrow = k, ncol = n_sample)
-  candidates <- apply(rand_mat, 2, paste0, collapse = "")
-  candidates <- unique(candidates)
-  candidates <- filter_sequences_fast(candidates, DEFAULT_MAX_HOMOPOLYMER)
-  candidates <- sample(candidates)
-
-  # Pre-allocate
-  n_cand <- length(candidates)
-  target <- min(n_needed * 2L, n_cand)
-  cli::cli_alert_info("Greedy selection from {n_cand} filtered candidates (target={target})...")
-  greedy_start <- proc.time()
-
-  cand_mat <- matrix(unlist(lapply(candidates, utf8ToInt)), nrow = k, ncol = n_cand)
-  selected <- character(target)
-  sel_mat <- matrix(0L, nrow = k, ncol = target)
-  n_sel <- 0L
-  last_report <- 0L
-
-  for (i in seq_len(n_cand)) {
-    q_int <- cand_mat[, i]
-    if (n_sel == 0L) {
-      n_sel <- 1L
-      selected[1L] <- candidates[i]
-      sel_mat[, 1L] <- q_int
-      next
-    }
-    dists <- as.integer(colSums(sel_mat[, seq_len(n_sel), drop = FALSE] != q_int))
-    if (all(dists >= min_hamming)) {
-      n_sel <- n_sel + 1L
-      selected[n_sel] <- candidates[i]
-      sel_mat[, n_sel] <- q_int
-    }
-    # Progress report every 10K selected prefixes
-    if (n_sel >= last_report + 10000L) {
-      cli::cli_alert("  ...selected {n_sel}/{target} prefixes ({i}/{n_cand} candidates scanned)")
-      last_report <- n_sel
-    }
-    if (n_sel >= target) break
+#' @param heuristic "conway" (fast, deterministic) or "ashlock" (slower, larger sets)
+#' @return List with: prefixes (character vector), code_type ("lexicode")
+generate_prefixes_lexicode <- function(k, min_hamming, n_needed,
+                                        heuristic = "conway") {
+  if (!requireNamespace("DNABarcodes", quietly = TRUE)) {
+    stop("DNABarcodes package not available")
   }
 
-  greedy_elapsed <- (proc.time() - greedy_start)[["elapsed"]]
-  cli::cli_alert_success("Greedy prefix selection: {n_sel} prefixes in {round(greedy_elapsed, 1)}s.")
-  selected[seq_len(n_sel)]
+  cli::cli_alert_info(paste0(
+    "Generating prefixes via DNABarcodes (heuristic=", heuristic,
+    ", n=", k, ", dist=", min_hamming, ")..."
+  ))
+
+  bc_set <- DNABarcodes::create.dnabarcodes(
+    n = k,
+    dist = min_hamming,
+    metric = "hamming",
+    heuristic = heuristic,
+    filter.triplets = FALSE,
+    filter.gc = FALSE,
+    filter.self_complementary = FALSE
+  )
+
+  prefixes <- as.character(bc_set)
+
+  cli::cli_alert_info(paste0(
+    "DNABarcodes (", heuristic, ") generated ", length(prefixes), " prefixes."
+  ))
+
+  list(prefixes = prefixes, code_type = "lexicode")
 }
 
 # ============================================================================
-# Barcode generation (per-prefix random suffixes)
+# Barcode generation (vectorized batch suffix generation)
 # ============================================================================
 
 #' Generate barcodes by assigning random filtered suffixes to each prefix
 #'
-#' For each variant's prefix, generates random suffix candidates, combines
-#' them into full barcodes, filters for enzyme sites/homopolymers/GC and
-#' junction context, then selects barcodes_per_variant results.
+#' Uses a two-pass vectorized approach:
+#'   Pass 1: Generate all suffix candidates in one batch, paste with prefixes,
+#'           apply all filters once (enzyme sites, homopolymers, GC, junction context)
+#'   Pass 2: Per-variant retry for any variants that didn't get enough barcodes
 #'
 #' @param prefixes Character vector of unique prefix sequences (one per variant)
 #' @param suffix_length Length of suffix portion
 #' @param barcodes_per_variant Number of barcodes per variant
 #' @param gc_range GC content range c(min, max)
 #' @param max_homopolymer Maximum homopolymer run allowed
-#' @param oversample Oversampling multiplier for suffix candidates (default 10)
+#' @param oversample_factor Oversampling multiplier per variant (default 20)
 #' @param junction_left_context Left junction context for enzyme site check (default "")
 #' @param junction_right_context Right junction context for enzyme site check (default "")
 #' @return Character vector of barcodes (length = n_variants * barcodes_per_variant)
 generate_barcodes_per_prefix <- function(prefixes, suffix_length,
                                           barcodes_per_variant,
                                           gc_range, max_homopolymer,
-                                          oversample = 10L,
+                                          oversample_factor = 20L,
                                           junction_left_context = "",
                                           junction_right_context = "") {
   n_variants <- length(prefixes)
   n_total <- n_variants * barcodes_per_variant
-  barcodes <- character(n_total)
 
   # If suffix_length == 0, each prefix IS a barcode (only for bpv=1)
   if (suffix_length == 0L) {
     return(prefixes)
   }
 
-  bases <- c("A", "C", "G", "T")
-  # Ensure enough candidates even when barcodes_per_variant is small (e.g., 1).
-  # With suffix_length=8 there are 65K possible suffixes; sampling only 10 misses valid ones.
-  n_suffix_candidates <- max(barcodes_per_variant * oversample, 500L)
   bc_start <- proc.time()
-  last_report <- 0L
+  bases <- c("A", "C", "G", "T")
+
+  # --- Pass 1: Vectorized batch generation ---
+  n_suf_per_variant <- max(barcodes_per_variant * oversample_factor, 500L)
+  n_total_candidates <- n_variants * n_suf_per_variant
+
+  cli::cli_alert_info(paste0(
+    "Batch suffix generation: ", n_variants, " variants x ",
+    n_suf_per_variant, " candidates = ",
+    format(n_total_candidates, big.mark = ","), " total"
+  ))
+
+  # Generate all random suffixes at once
+  all_suffixes <- apply(
+    matrix(sample(bases, suffix_length * n_total_candidates, replace = TRUE),
+           nrow = suffix_length, ncol = n_total_candidates),
+    2, paste0, collapse = ""
+  )
+
+  # Pair each suffix with its corresponding prefix
+  variant_ids <- rep(seq_len(n_variants), each = n_suf_per_variant)
+  all_prefixes_rep <- rep(prefixes, each = n_suf_per_variant)
+  all_barcodes <- paste0(all_prefixes_rep, all_suffixes)
+
+  # Apply all filters in one vectorized pass
+  keep <- filter_barcodes_batch(
+    all_barcodes, max_homopolymer, gc_range,
+    junction_left_context, junction_right_context
+  )
+  valid_barcodes <- all_barcodes[keep]
+  valid_variant_ids <- variant_ids[keep]
+
+  # Split by variant and select barcodes_per_variant per group
+  barcodes <- character(n_total)
+  needs_retry <- integer(0)
 
   for (v in seq_len(n_variants)) {
-    prefix <- prefixes[v]
-    # Progress report every 5000 variants
-    if (v >= last_report + 5000L) {
-      cli::cli_alert("  ...generating barcodes for variant {v}/{n_variants}")
-      last_report <- v
+    v_bcs <- valid_barcodes[valid_variant_ids == v]
+    v_bcs <- unique(v_bcs)
+    if (length(v_bcs) >= barcodes_per_variant) {
+      idx_start <- (v - 1L) * barcodes_per_variant + 1L
+      idx_end <- v * barcodes_per_variant
+      barcodes[idx_start:idx_end] <- v_bcs[seq_len(barcodes_per_variant)]
+    } else {
+      needs_retry <- c(needs_retry, v)
     }
-    # Generate random suffix candidates
-    suf_mat <- matrix(sample(bases, suffix_length * n_suffix_candidates, replace = TRUE),
-                      nrow = suffix_length, ncol = n_suffix_candidates)
-    suffixes <- apply(suf_mat, 2, paste0, collapse = "")
-    suffixes <- unique(suffixes)
+  }
 
-    # Combine with prefix for full-barcode filtering
-    full_bcs <- paste0(prefix, suffixes)
-    full_bcs <- filter_sequences_fast(full_bcs, max_homopolymer)
-    full_bcs <- filter_barcode_junctions(full_bcs, junction_left_context, junction_right_context)
+  # --- Pass 2: Per-variant retry for failures ---
+  if (length(needs_retry) > 0) {
+    cli::cli_alert_info(paste0(
+      "Retrying suffix generation for ", length(needs_retry), " variants..."
+    ))
+    n_retry_suf <- max(barcodes_per_variant * oversample_factor * 10L, 5000L)
 
-    # GC filter
-    if (length(full_bcs) > 0) {
-      gc_counts <- nchar(gsub("[AT]", "", full_bcs))
-      gc_vals <- gc_counts / nchar(full_bcs)
-      full_bcs <- full_bcs[gc_vals >= gc_range[1] & gc_vals <= gc_range[2]]
-    }
+    for (v in needs_retry) {
+      prefix <- prefixes[v]
+      retry_suffixes <- apply(
+        matrix(sample(bases, suffix_length * n_retry_suf, replace = TRUE),
+               nrow = suffix_length, ncol = n_retry_suf),
+        2, paste0, collapse = ""
+      )
+      retry_bcs <- paste0(prefix, unique(retry_suffixes))
+      retry_keep <- filter_barcodes_batch(
+        retry_bcs, max_homopolymer, gc_range,
+        junction_left_context, junction_right_context
+      )
+      retry_valid <- unique(retry_bcs[retry_keep])
 
-    if (length(full_bcs) < barcodes_per_variant) {
-      # Retry with much larger sample
-      n_retry <- max(barcodes_per_variant * oversample * 10L, 5000L)
-      suf_mat2 <- matrix(sample(bases, suffix_length * n_retry, replace = TRUE),
-                         nrow = suffix_length, ncol = n_retry)
-      suffixes2 <- apply(suf_mat2, 2, paste0, collapse = "")
-      suffixes2 <- unique(suffixes2)
-      full_bcs2 <- paste0(prefix, suffixes2)
-      full_bcs2 <- filter_sequences_fast(full_bcs2, max_homopolymer)
-      full_bcs2 <- filter_barcode_junctions(full_bcs2, junction_left_context, junction_right_context)
-      if (length(full_bcs2) > 0) {
-        gc_counts2 <- nchar(gsub("[AT]", "", full_bcs2))
-        gc_vals2 <- gc_counts2 / nchar(full_bcs2)
-        full_bcs2 <- full_bcs2[gc_vals2 >= gc_range[1] & gc_vals2 <= gc_range[2]]
+      # Combine with any from pass 1
+      existing <- valid_barcodes[valid_variant_ids == v]
+      all_valid <- unique(c(existing, retry_valid))
+
+      if (length(all_valid) < barcodes_per_variant) {
+        stop("Insufficient valid suffixes for prefix ", prefix,
+             ". Got ", length(all_valid), ", need ", barcodes_per_variant,
+             ". Try increasing barcode_length.")
       }
-      # Combine with first attempt (dedup)
-      full_bcs <- unique(c(full_bcs, full_bcs2))
-    }
 
-    if (length(full_bcs) < barcodes_per_variant) {
-      stop("Insufficient valid suffixes for prefix ", prefix,
-           ". Got ", length(full_bcs), ", need ", barcodes_per_variant,
-           ". Try increasing barcode_length.")
+      idx_start <- (v - 1L) * barcodes_per_variant + 1L
+      idx_end <- v * barcodes_per_variant
+      barcodes[idx_start:idx_end] <- all_valid[seq_len(barcodes_per_variant)]
     }
-
-    idx_start <- (v - 1L) * barcodes_per_variant + 1L
-    idx_end <- v * barcodes_per_variant
-    barcodes[idx_start:idx_end] <- full_bcs[seq_len(barcodes_per_variant)]
   }
 
   bc_elapsed <- (proc.time() - bc_start)[["elapsed"]]
-  cli::cli_alert_success("Barcode generation: {n_total} barcodes for {n_variants} variants in {round(bc_elapsed, 1)}s.")
+  cli::cli_alert_success(paste0(
+    "Barcode generation: ", n_total, " barcodes for ", n_variants,
+    " variants in ", round(bc_elapsed, 1), "s."
+  ))
   barcodes
+}
+
+#' Vectorized batch filter for full barcodes
+#'
+#' Applies all biological filters in a single pass over the entire candidate vector:
+#' enzyme sites, homopolymers, GC content, and junction context.
+#'
+#' @param barcodes Character vector of barcode sequences
+#' @param max_homopolymer Maximum homopolymer run
+#' @param gc_range GC content range c(min, max)
+#' @param junction_left_context Left context for junction check
+#' @param junction_right_context Right context for junction check
+#' @return Logical vector (TRUE = passes all filters)
+filter_barcodes_batch <- function(barcodes, max_homopolymer, gc_range,
+                                   junction_left_context = "",
+                                   junction_right_context = "") {
+  n <- length(barcodes)
+  if (n == 0L) return(logical(0))
+
+  # Enzyme site filter (on barcode alone)
+  bad <- rep(FALSE, n)
+  for (enz_name in names(ENZYMES)) {
+    enz <- ENZYMES[[enz_name]]
+    bad <- bad | grepl(enz$recog, barcodes, fixed = TRUE) |
+                  grepl(enz$recog_rc, barcodes, fixed = TRUE)
+  }
+
+  # Homopolymer filter
+  homo_pattern <- paste0("([ACGT])\\1{", max_homopolymer, ",}")
+  bad <- bad | grepl(homo_pattern, barcodes)
+
+  # GC filter
+  gc_counts <- nchar(gsub("[AT]", "", barcodes))
+  gc_vals <- gc_counts / nchar(barcodes)
+  bad <- bad | gc_vals < gc_range[1] | gc_vals > gc_range[2]
+
+  # Junction context filter (enzyme sites spanning barcode-flanking junction)
+  if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
+    junction_seqs <- paste0(junction_left_context, barcodes, junction_right_context)
+    for (enz_name in names(ENZYMES)) {
+      enz <- ENZYMES[[enz_name]]
+      bad <- bad | grepl(enz$recog, junction_seqs, fixed = TRUE) |
+                    grepl(enz$recog_rc, junction_seqs, fixed = TRUE)
+    }
+  }
+
+  !bad
 }
 
 # ============================================================================
