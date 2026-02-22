@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Add overlap_codons config for tile boundary mutation coverage (BUG-1)
+# Last updated: 2026-02-21 — Add codon_table_path config parameter for custom codon usage tables
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -42,6 +42,7 @@ load_config <- function(config_path) {
     multi_k_search           = TRUE,
     barcodes_per_variant     = 10L,
     overlap_codons           = 4L,
+    codon_table_path         = NULL,
     auto_domesticate         = TRUE,
     simulate_assembly        = FALSE,
     simulation_samples_per_tile = 1L,
@@ -118,6 +119,20 @@ validate_config <- function(cfg) {
       errors <- c(errors, "gene_name must be non-empty if provided")
     } else if (grepl('[/\\\\:*?"<>|]', cfg$gene_name)) {
       errors <- c(errors, "gene_name contains filesystem-unsafe characters (/\\:*?\"<>|)")
+    }
+  }
+
+  # codon_table_path: optional custom codon usage table
+  if (!is.null(cfg$codon_table_path) && nzchar(cfg$codon_table_path)) {
+    if (!file.exists(cfg$codon_table_path)) {
+      errors <- c(errors, paste("codon_table_path file not found:", cfg$codon_table_path))
+    } else {
+      ext <- tolower(tools::file_ext(cfg$codon_table_path))
+      if (!ext %in% c("csv", "rds")) {
+        errors <- c(errors, paste0(
+          "codon_table_path must be a .csv or .rds file, got: .", ext
+        ))
+      }
     }
   }
 

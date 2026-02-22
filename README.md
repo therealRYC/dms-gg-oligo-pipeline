@@ -146,7 +146,7 @@ dms-gg-oligo-pipeline/
 │   ├── 12_report.R            # Wetlab-compatible Markdown assembly report
 │   └── 13_gg_simulator.R      # In-silico Golden Gate assembly simulator
 ├── data/
-│   ├── human_codon_usage.rds   # Kazusa human codon usage table
+│   ├── human_codon_usage.rds   # CoCoPUTs human codon usage table (Alexaki et al. 2019)
 │   ├── neb_overhang_fidelity/  # Potapov 2018 ligation fidelity matrices (BsaI, BsmBI)
 │   ├── GRIN2A_NM_000833_CDS.fasta
 │   ├── SLC6A1_NM_003042_CDS.fasta
