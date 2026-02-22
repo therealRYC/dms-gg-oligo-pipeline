@@ -7,7 +7,11 @@
 # Fidelity = M[X][RC(X)] / sum(M[X][*]) — correct Watson-Crick pairing
 # (NOT diagonal M[X][X], which is only correct for palindromes).
 
-# --- Human Codon Usage (Kazusa) ---
+# --- Human Codon Usage (CoCoPUTs) ---
+# Source: CoCoPUTs (Alexaki et al. 2019, J Mol Biol 431:2434-2441)
+# https://dnahive.fda.gov/dna.cgi?cmd=codon_usage&id=537&mode=cocoputs
+# Homo sapiens, GCF_000001405.39 (GRCh38.p13), 119,196 CDS, 77,461,688 codons
+# Downloaded: 2026-02-21
 source("R/03_codon_table.R")
 codon_usage <- builtin_human_codon_usage()
 saveRDS(codon_usage, "data/human_codon_usage.rds")

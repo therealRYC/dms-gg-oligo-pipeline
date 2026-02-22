@@ -1,15 +1,32 @@
+# Created: 2025-02-01
+# Last updated: 2026-02-21 — Switch from Kazusa to CoCoPUTs codon usage data; add CSV support and validation
 # 03_codon_table.R — Human codon usage table, preferred codon lookup
 # DMS Golden Gate Oligo Pipeline
 
 #' Load human codon usage table
 #'
-#' Returns a data frame with columns: codon, aa, frequency
-#' Default uses bundled Kazusa human codon usage data.
-#' @param custom_path Optional path to a custom codon usage RDS file
-#' @return Data frame with codon usage frequencies
+#' Returns a data frame with columns: codon, aa, frequency.
+#' Default uses bundled CoCoPUTs human codon usage data (Alexaki et al. 2019).
+#' Supports custom tables in RDS or CSV format.
+#'
+#' @param custom_path Optional path to a custom codon usage file (.rds or .csv).
+#'   CSV files must have columns: codon, aa, frequency (64 rows, one per codon).
+#' @return Data frame with codon usage frequencies (per thousand)
 load_codon_usage <- function(custom_path = NULL) {
   if (!is.null(custom_path)) {
-    return(readRDS(custom_path))
+    ext <- tolower(tools::file_ext(custom_path))
+    if (ext == "csv") {
+      tbl <- read.csv(custom_path, stringsAsFactors = FALSE)
+      validate_codon_table(tbl, source = custom_path)
+      return(tbl)
+    } else if (ext == "rds") {
+      tbl <- readRDS(custom_path)
+      validate_codon_table(tbl, source = custom_path)
+      return(tbl)
+    } else {
+      stop("Unsupported codon table format: '.", ext,
+           "'. Use .csv or .rds (got: ", custom_path, ")")
+    }
   }
 
   # Use bundled human codon usage
@@ -25,6 +42,75 @@ load_codon_usage <- function(custom_path = NULL) {
   }
 
   readRDS(data_path)
+}
+
+#' Validate a codon usage table
+#'
+#' Checks that a data frame has the expected structure for use as a codon usage
+#' table: 3 required columns (codon, aa, frequency), 64 rows, valid 3-nt ACGT
+#' codons, and non-negative numeric frequencies.
+#'
+#' @param tbl Data frame to validate
+#' @param source Optional string describing where the table came from (for error messages)
+#' @return Invisible NULL; stops with informative error on validation failure
+validate_codon_table <- function(tbl, source = "codon table") {
+  errors <- character(0)
+
+  # Check required columns
+  required_cols <- c("codon", "aa", "frequency")
+  missing_cols <- setdiff(required_cols, names(tbl))
+  if (length(missing_cols) > 0) {
+    errors <- c(errors, paste0(
+      "Missing required columns: ", paste(missing_cols, collapse = ", "),
+      ". Expected: codon, aa, frequency"
+    ))
+  }
+
+  # If columns are missing, we can't check further
+
+  if (length(errors) > 0) {
+    stop("Invalid ", source, ":\n  - ", paste(errors, collapse = "\n  - "))
+  }
+
+  # Check row count
+  if (nrow(tbl) != 64) {
+    errors <- c(errors, paste0(
+      "Expected 64 rows (one per codon), got ", nrow(tbl)
+    ))
+  }
+
+  # Check codons are valid 3-nt ACGT strings
+  bad_codons <- tbl$codon[!grepl("^[ACGT]{3}$", toupper(tbl$codon))]
+  if (length(bad_codons) > 0) {
+    errors <- c(errors, paste0(
+      "Invalid codons (must be 3-nt ACGT): ",
+      paste(head(bad_codons, 5), collapse = ", "),
+      if (length(bad_codons) > 5) paste0(" (and ", length(bad_codons) - 5, " more)")
+    ))
+  }
+
+  # Check for duplicate codons
+  dup_codons <- tbl$codon[duplicated(toupper(tbl$codon))]
+  if (length(dup_codons) > 0) {
+    errors <- c(errors, paste0(
+      "Duplicate codons: ", paste(unique(dup_codons), collapse = ", ")
+    ))
+  }
+
+  # Check frequencies are non-negative numeric
+  if (!is.numeric(tbl$frequency)) {
+    errors <- c(errors, "frequency column must be numeric")
+  } else if (any(tbl$frequency < 0, na.rm = TRUE)) {
+    errors <- c(errors, "frequency values must be non-negative")
+  } else if (any(is.na(tbl$frequency))) {
+    errors <- c(errors, "frequency column contains NA values")
+  }
+
+  if (length(errors) > 0) {
+    stop("Invalid ", source, ":\n  - ", paste(errors, collapse = "\n  - "))
+  }
+
+  invisible(NULL)
 }
 
 #' Get the preferred (most frequent) human codon for each amino acid
@@ -61,11 +147,23 @@ get_ranked_codons <- function(aa, codon_usage) {
   subset_df$codon
 }
 
-#' Built-in human codon usage table (Kazusa, Homo sapiens)
-#' Frequencies per thousand codons
+#' Built-in human codon usage table (CoCoPUTs, Homo sapiens)
+#'
+#' Frequencies per thousand codons, aggregated from the CoCoPUTs database
+#' (Codon and Codon-Pair Usage Tables). This is the modern replacement for the
+#' Kazusa codon usage database (last updated 2007).
+#'
+#' Source: CoCoPUTs (Alexaki et al. 2019, J Mol Biol 431:2434-2441)
+#'   - https://dnahive.fda.gov/dna.cgi?cmd=codon_usage&id=537&mode=cocoputs
+#'   - Organism: Homo sapiens (taxid 9606)
+#'   - Assembly: GCF_000001405.39 (GRCh38.p13)
+#'   - 119,196 CDS entries, 77,461,688 total codons
+#'   - Downloaded: 2026-02-21
+#'
 #' @return Data frame with columns: codon, aa, frequency
 builtin_human_codon_usage <- function() {
-  # Kazusa Human codon usage (per thousand)
+  # CoCoPUTs Human codon usage (per thousand)
+  # Aggregated from per-CDS counts in o537-Human_CDS.tsv
   data.frame(
     codon = c(
       "TTT","TTC","TTA","TTG","CTT","CTC","CTA","CTG",
@@ -102,21 +200,21 @@ builtin_human_codon_usage <- function() {
       "G","G","G","G"
     ),
     frequency = c(
-      17.6, 20.3, 7.7, 12.9, 13.2, 19.6, 7.2, 39.6,
-      16.0, 20.8, 7.5, 22.0,
-      11.0, 14.5, 7.1, 28.1,
-      15.2, 17.7, 12.2, 4.4, 12.1, 19.5,
-      17.5, 19.8, 16.9, 6.9,
-      13.1, 18.9, 15.1, 6.1,
-      18.4, 27.7, 15.8, 7.4,
-      12.2, 15.3,
-      1.0, 0.8, 1.6,
-      10.9, 15.1, 12.3, 34.2,
-      17.0, 19.1, 24.4, 31.9,
-      21.8, 25.1, 29.0, 39.6,
-      10.6, 12.6, 13.2,
-      4.5, 10.4, 6.2, 11.4, 12.2, 12.0,
-      10.8, 22.2, 16.5, 16.5
+      17.20, 17.53,  8.83, 13.47, 14.16, 17.82,  7.49, 36.06,  # F, L
+      16.58, 18.69,  8.18, 21.46,                                # I, M
+      11.79, 13.44,  7.70, 25.76,                                # V
+      16.92, 17.29, 14.19,  4.06, 14.04, 19.64,                  # S
+      19.11, 18.88, 18.75,  6.16,                                # P
+      14.29, 17.76, 16.56,  5.60,                                # T
+      18.86, 25.66, 17.05,  5.96,                                # A
+      12.15, 13.47,                                              # Y
+       0.44,  0.35,  0.80,                                       # *
+      11.91, 14.63, 14.18, 35.30,                                # H, Q
+      18.51, 18.28, 27.77, 31.79,                                # N, K
+      24.07, 24.25, 33.87, 39.42,                                # D, E
+      10.49, 10.84, 11.67,                                       # C, W
+       4.56,  8.71,  6.41, 10.63, 13.40, 12.19,                  # R
+      10.80, 19.75, 17.17, 15.27                                 # G
     ),
     stringsAsFactors = FALSE
   )

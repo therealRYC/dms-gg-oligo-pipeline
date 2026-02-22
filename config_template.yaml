@@ -14,6 +14,13 @@ gene_fasta: "path/to/gene.fasta"          # Path to FASTA file with coding seque
 # the gene and barcode. This drives barcode transcription.
 polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGATAATTAGAATTAATTTGACTGTAAACACAAAGATATTAGTACAAAATACGTGACGTAGAAAGTAATAATTTCTTGGGTAGTTTGCAGTTTTTAATACGACTCACTATAGGGACTATCATATGCTTACCGTAACTTGAAAGTATTTCGATTTCTTGGCTTTATATATCTTGTGGAAAGGACGAAACACCG"
 
+# --- Codon Usage Table (optional) ---
+# By default, the pipeline uses the built-in CoCoPUTs human codon usage table
+# (Alexaki et al. 2019, 119K CDS, GRCh38.p13). To use a custom table, provide
+# a path to a .csv or .rds file with columns: codon, aa, frequency
+# (64 rows, one per codon, frequencies per thousand).
+# codon_table_path: "path/to/custom_codon_usage.csv"
+
 # --- Oligo Synthesis ---
 max_oligo_length: 300                      # Twist oligo pool max (nt)
 max_geneblock_length: 1800                 # Gene fragment synthesis max (nt)

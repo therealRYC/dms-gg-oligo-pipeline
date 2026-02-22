@@ -100,7 +100,7 @@ dms-gg-oligo-pipeline/
 │   └── constants.R             # Enzyme defs, synthesis limits, AA alphabet
 ├── data/
 │   ├── neb_overhang_fidelity/  # Pre-bundled NEB Ligase Fidelity matrices (RDS)
-│   └── human_codon_usage.rds   # Kazusa human codon usage table
+│   └── human_codon_usage.rds   # CoCoPUTs human codon usage table (Alexaki et al. 2019)
 ├── tests/testthat/             # Unit + integration tests
 ├── DESCRIPTION                 # R package metadata
 └── .gitignore
@@ -230,6 +230,7 @@ dms-gg-oligo-pipeline/
 - **VaLiAnT**: Oligo library design for SGE/DMS
 - **dms_variants** (jbloomlab): Barcode variant analysis package
 - **DNABarcodes** (Bioconductor): Barcode set generation with error-correction properties
+- **CoCoPUTs** (Alexaki et al. 2019, J Mol Biol): Updated codon usage tables from FDA/GWU (replaces Kazusa)
 - **NEB Ligase Fidelity Viewer**: Source for overhang fidelity data (Potapov et al. 2018)
 - **Enrich2** (FowlerLab): Statistical framework for DMS data analysis
 

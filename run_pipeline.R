@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Filter gene-edge variants (BUG-6) and pass skipped_variants to output
+# Last updated: 2026-02-21 — Thread codon_table_path config through step 3
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -89,11 +89,16 @@ cli::cli_alert_success(paste0(
 # Step 3: Load codon usage
 cli::cli_h2("Step 3: Loading codon usage table")
 step_start <- proc.time()
-codon_usage <- load_codon_usage()
+codon_usage <- load_codon_usage(cfg$codon_table_path)
 preferred_codons <- get_preferred_codons(codon_usage)
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["3_codon_usage"]] <- step_elapsed
-cli::cli_alert_success("Codon usage table loaded. [{round(step_elapsed, 1)}s]")
+codon_source <- if (!is.null(cfg$codon_table_path) && nzchar(cfg$codon_table_path)) {
+  paste0("custom (", cfg$codon_table_path, ")")
+} else {
+  "built-in CoCoPUTs (Homo sapiens, GRCh38.p13)"
+}
+cli::cli_alert_success("Codon usage table loaded: {codon_source} [{round(step_elapsed, 1)}s]")
 
 # Step 4: Scan and domesticate enzyme sites (BsaI + BsmBI + PaqCI)
 cli::cli_h2("Step 4: Scanning for enzyme sites (BsaI, BsmBI, PaqCI)")
