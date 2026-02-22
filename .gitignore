@@ -13,6 +13,9 @@ figures/
 *.html
 260*/
 
+# Raw data downloads (processed versions in .rds are tracked)
+data/o537-Human_CDS.tsv
+
 # Claude Code
 .claude/
 
