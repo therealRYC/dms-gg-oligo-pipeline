@@ -153,6 +153,7 @@ dms-gg-oligo-pipeline/
 │   └── AKAP11_NM_016248_CDS.fasta
 ├── examples/                   # Example pipeline configs
 │   └── *.yaml                  # GRIN2A overhang verification configs
+├── Plans/                      # Design notes and planning docs (project history)
 ├── scripts/                    # Helper scripts
 │   ├── generate_grin2a_cds.R   # Generate GRIN2A test FASTA
 │   ├── generate_slc6a1_cds.R   # Generate SLC6A1 test FASTA
