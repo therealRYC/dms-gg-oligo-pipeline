@@ -99,3 +99,48 @@ Safe because removing codewords from a code with minimum distance d preserves d 
 | BK-trees | Marginal benefit | **Not implemented** — vectorized approach is competitive at current scale |
 | De Bruijn graphs | No | **Not applicable** — solves substring orthogonality, not Hamming distance |
 | BCH codes (d>3) | Possible but complex | **Not implemented** — DNABarcodes handles d>3 adequately |
+
+---
+
+# Plan: PolIII Terminator Filter for Barcodes
+
+**Status: PENDING**
+
+## Problem
+
+RNA Polymerase III terminates transcription at runs of ≥4 consecutive thymidines on the non-template strand (`TTTT` in the sense/coding direction). Since the barcode is transcribed by a PolIII promoter (U6), any `TTTT` in the barcode will cause premature transcription termination, yielding a truncated barcode RNA.
+
+The current homopolymer filter uses `max_homopolymer = 4`, which generates the regex `([ACGT])\1{4,}` — this catches runs of **5+** identical bases. `TTTT` (4 Ts) passes through undetected.
+
+This is distinct from the general homopolymer aesthetic concern — it's a functional requirement for PolIII-transcribed barcodes.
+
+Note: `06_overhang_selection.R` already defines `HOMOPOLYMER_4NT <- c("AAAA", "CCCC", "GGGG", "TTTT")` for overhang selection, showing awareness of this issue, but the barcode filter doesn't use it.
+
+## Implementation
+
+### Step 1: Add PolIII terminator constant to `constants.R`
+- Add `POLIII_TERM_SEQ <- "TTTT"` with comment explaining the biological rationale (PolIII termination signal)
+
+### Step 2: Update `filter_barcodes_batch()` in `07_barcode_design.R`
+- Add parameter `filter_poliii_term = TRUE`
+- When TRUE: `bad <- bad | grepl(POLIII_TERM_SEQ, barcodes, fixed = TRUE)`
+- Place after the homopolymer check (logically related)
+
+### Step 3: Update `filter_sequences_fast()` in `07_barcode_design.R`
+- Add same PolIII terminator check so prefixes are also filtered
+- Ensures no prefix contains `TTTT`
+
+### Step 4: Thread parameter through calling functions
+- `generate_barcodes_per_prefix()`: add `filter_poliii_term` param, pass to `filter_barcodes_batch()`
+- `design_barcodes()`: add `filter_poliii_term` param, pass through
+- Default TRUE since the pipeline always uses PolIII for barcode transcription
+
+### Step 5: Update `10_qc_checks.R`
+- Add QC check: no barcode contains `TTTT`
+
+### Step 6: Update tests
+- Test that barcodes containing `TTTT` are rejected
+- Test that `TTTA`, `ATTT` etc. pass (only runs of 4+ Ts are blocked)
+
+### Impact analysis
+For an 8-nt suffix, ~3.1% of random candidates will contain `TTTT`. With 500 candidates per variant (oversample_factor=20), this is negligible — plenty will still pass. For 12-nt prefixes, the GF(4) code has 262,144 codewords; filtering out ~6-8% with `TTTT` still leaves >240K, far exceeding the ~30K needed for GRIN2A.
