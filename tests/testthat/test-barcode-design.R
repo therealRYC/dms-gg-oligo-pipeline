@@ -1,4 +1,5 @@
-# test-barcode-design.R — Tests for 07_barcode_design.R (unified hierarchical mode)
+# test-barcode-design.R — Tests for 07_barcode_design.R and 07b_linear_codes.R
+# Updated: 2026-02-22 — GF(4) linear codes + DNABarcodes lexicode prefix generation
 
 # ============================================================================
 # Core helpers
@@ -81,16 +82,277 @@ test_that("filter_barcode_junctions handles empty input", {
   expect_equal(length(result), 0)
 })
 
-test_that("greedy prefix generation works", {
-  prefixes <- generate_prefixes_greedy(6, 3, 5)
-  expect_true(length(prefixes) >= 5)
+# ============================================================================
+# GF(4) linear code module (07b_linear_codes.R)
+# ============================================================================
 
-  # All pairs should have Hamming distance >= 3
-  for (i in seq_len(length(prefixes) - 1)) {
-    for (j in (i + 1):length(prefixes)) {
-      expect_gte(hamming_distance(prefixes[i], prefixes[j]), 3)
+test_that("GF(4) addition is correct (XOR)", {
+  expect_equal(gf4_add(0L, 0L), 0L)
+  expect_equal(gf4_add(1L, 1L), 0L)
+  expect_equal(gf4_add(2L, 3L), 1L)
+  expect_equal(gf4_add(1L, 2L), 3L)
+})
+
+test_that("GF(4) multiplication table is correct", {
+  # 0 * anything = 0
+  for (x in 0:3) expect_equal(gf4_mul(0L, x), 0L)
+  # 1 * anything = itself
+  for (x in 0:3) expect_equal(gf4_mul(1L, x), x)
+  # alpha * alpha = alpha + 1 = 3
+  expect_equal(gf4_mul(2L, 2L), 3L)
+  # alpha * (alpha+1) = 1
+  expect_equal(gf4_mul(2L, 3L), 1L)
+  # (alpha+1) * (alpha+1) = alpha = 2
+  expect_equal(gf4_mul(3L, 3L), 2L)
+})
+
+test_that("GF(4) dot product works", {
+  # Simple: [1, 0] . [2, 3] = 1*2 + 0*3 = 2
+  expect_equal(gf4_dot(c(1L, 0L), c(2L, 3L)), 2L)
+  # [1, 1] . [1, 1] = 1 + 1 = 0 (GF(4) addition)
+  expect_equal(gf4_dot(c(1L, 1L), c(1L, 1L)), 0L)
+})
+
+test_that("Hamming parity check matrix has correct dimensions", {
+  # Ham_4(2): n = (16-1)/3 = 5, m = 2
+  H2 <- gf4_hamming_parity_check(2)
+  expect_equal(nrow(H2), 2)
+  expect_equal(ncol(H2), 5)
+
+  # Ham_4(3): n = (64-1)/3 = 21, m = 3
+  H3 <- gf4_hamming_parity_check(3)
+  expect_equal(nrow(H3), 3)
+  expect_equal(ncol(H3), 21)
+})
+
+test_that("Generator matrix has correct dimensions and G*H^T = 0", {
+  H <- gf4_hamming_parity_check(2)
+  G <- gf4_generator_from_parity(H)
+  # [5, 3, 3]_4: G is 3 x 5
+  expect_equal(nrow(G), 3)
+  expect_equal(ncol(G), 5)
+
+  # Verify G * H^T = 0 (all codewords are in null space of H)
+  # For each row of G, compute H * row^T and check it's zero
+  for (i in seq_len(nrow(G))) {
+    for (j in seq_len(nrow(H))) {
+      dot <- gf4_dot(G[i, ], H[j, ])
+      expect_equal(dot, 0L,
+        info = paste("G row", i, "* H row", j, "should be 0"))
     }
   }
+})
+
+test_that("Enumerated codewords have correct count and minimum distance >= 3", {
+  H <- gf4_hamming_parity_check(2)
+  G <- gf4_generator_from_parity(H)
+  codewords <- gf4_enumerate_codewords(G)
+
+  # [5, 3, 3]_4 should have 4^3 = 64 codewords
+  expect_equal(length(codewords), 64)
+  expect_true(all(nchar(codewords) == 5))
+
+  # All codewords should be unique
+  expect_equal(length(unique(codewords)), 64)
+
+  # Check minimum Hamming distance >= 3 (spot-check first 20 pairs)
+  n_check <- min(length(codewords), 20)
+  for (i in seq_len(n_check - 1)) {
+    for (j in (i + 1):n_check) {
+      d <- hamming_distance(codewords[i], codewords[j])
+      expect_gte(d, 3L,
+        info = paste("Distance between", codewords[i], "and", codewords[j]))
+    }
+  }
+})
+
+test_that("generate_prefixes_linear produces valid d>=3 prefixes for k=8", {
+  result <- generate_prefixes_linear(prefix_length = 8, n_needed = 50)
+
+  expect_true(is.list(result))
+  expect_equal(result$code_type, "linear")
+  expect_true(length(result$prefixes) >= 50)
+  expect_true(all(nchar(result$prefixes) == 8))
+
+  # Code params should be [8, 5, 3]_4
+  expect_equal(result$code_params$n, 8)
+  expect_equal(result$code_params$k, 5)
+  expect_equal(result$code_params$d, 3L)
+  expect_equal(result$code_params$capacity, 4^5)
+
+  # Spot-check Hamming distances
+  prefixes <- result$prefixes
+  n_check <- min(length(prefixes), 30)
+  for (i in seq_len(n_check - 1)) {
+    for (j in (i + 1):n_check) {
+      expect_gte(hamming_distance(prefixes[i], prefixes[j]), 3L)
+    }
+  }
+})
+
+test_that("generate_prefixes_linear produces valid prefixes for k=12", {
+  result <- generate_prefixes_linear(prefix_length = 12, n_needed = 100)
+
+  expect_true(length(result$prefixes) >= 100)
+  expect_true(all(nchar(result$prefixes) == 12))
+
+  # Code params should be [12, 9, >=3]_4
+  expect_equal(result$code_params$n, 12)
+  expect_equal(result$code_params$k, 9)
+
+  # Spot-check distances
+  prefixes <- result$prefixes
+  n_check <- min(length(prefixes), 30)
+  for (i in seq_len(n_check - 1)) {
+    for (j in (i + 1):n_check) {
+      expect_gte(hamming_distance(prefixes[i], prefixes[j]), 3L)
+    }
+  }
+})
+
+test_that("gf4_sample_codewords produces unique codewords with d >= 3", {
+  H <- gf4_hamming_parity_check(3)  # [21, 18, 3]_4
+  G <- gf4_generator_from_parity(H)
+
+  # Sample 100 codewords from the massive [21, 18, 3]_4 code
+  codewords <- gf4_sample_codewords(G, 100)
+  expect_equal(length(codewords), 100)
+  expect_true(all(nchar(codewords) == 21))
+  expect_equal(length(unique(codewords)), 100)
+
+  # All pairs should have d >= 3
+  for (i in 1:10) {
+    for (j in (i + 1):11) {
+      expect_gte(hamming_distance(codewords[i], codewords[j]), 3L)
+    }
+  }
+})
+
+# ============================================================================
+# Prefix generation — unified flow
+# ============================================================================
+
+test_that("generate_prefixes returns list with linear code for d=3", {
+  result <- generate_prefixes(k = 8, min_hamming = 3, n_needed = 10)
+
+  expect_true(is.list(result))
+  expect_true(result$code_type %in% c("linear", "lexicode"))
+  expect_gte(length(result$prefixes), 10)
+  expect_true(all(nchar(result$prefixes) == 8))
+
+  # All prefix pairs should have d >= 3
+  prefixes <- result$prefixes[1:10]
+  for (i in seq_len(9)) {
+    for (j in (i + 1):10) {
+      expect_gte(hamming_distance(prefixes[i], prefixes[j]), 3L)
+    }
+  }
+})
+
+test_that("generate_prefixes uses DNABarcodes for d >= 4", {
+  # d=4 should fall through to DNABarcodes since linear code only supports d=3
+  result <- generate_prefixes(k = 8, min_hamming = 4, n_needed = 5)
+
+  expect_true(is.list(result))
+  expect_equal(result$code_type, "lexicode")
+  expect_gte(length(result$prefixes), 5)
+
+  # All prefix pairs should have d >= 4
+  prefixes <- result$prefixes[1:5]
+  for (i in seq_len(4)) {
+    for (j in (i + 1):5) {
+      expect_gte(hamming_distance(prefixes[i], prefixes[j]), 4L)
+    }
+  }
+})
+
+test_that("generate_prefixes with prefix_length=12 produces valid results", {
+  result <- generate_prefixes(k = 12, min_hamming = 3, n_needed = 50)
+
+  expect_gte(length(result$prefixes), 50)
+  expect_true(all(nchar(result$prefixes) == 12))
+
+  # Spot-check distances on first 20
+  n_check <- min(length(result$prefixes), 20)
+  for (i in seq_len(n_check - 1)) {
+    for (j in (i + 1):n_check) {
+      expect_gte(hamming_distance(result$prefixes[i], result$prefixes[j]), 3L)
+    }
+  }
+})
+
+test_that("generate_prefixes filters out enzyme sites from prefix pool", {
+  result <- generate_prefixes(k = 8, min_hamming = 3, n_needed = 10)
+  # No prefix should contain BsmBI (CGTCTC), BsaI (GGTCTC), or PaqCI (CACCTGC)
+  for (p in result$prefixes) {
+    expect_false(grepl("CGTCTC", p, fixed = TRUE) || grepl("GAGACG", p, fixed = TRUE))
+    expect_false(grepl("GGTCTC", p, fixed = TRUE) || grepl("GAGACC", p, fixed = TRUE))
+  }
+})
+
+# ============================================================================
+# Batch filter
+# ============================================================================
+
+test_that("filter_barcodes_batch correctly applies all filters", {
+  barcodes <- c(
+    "ACGTACGTACGT",   # Good: 50% GC, no sites, no homopolymers
+    "CGTCTCAACAGT",   # Bad: contains BsmBI site CGTCTC
+    "AAAAACGTACGT",   # Bad: homopolymer AAAAA
+    "AAAAAAAAAAAA",   # Bad: 0% GC + homopolymer
+    "ACACACACGTGT"    # Good: 50% GC
+  )
+  keep <- filter_barcodes_batch(barcodes, max_homopolymer = 4, gc_range = c(0.25, 0.75))
+  expect_true(keep[1])   # good
+  expect_false(keep[2])  # enzyme site
+  expect_false(keep[3])  # homopolymer
+  expect_false(keep[4])  # GC + homopolymer
+  expect_true(keep[5])   # good
+})
+
+test_that("filter_barcodes_batch checks junction context", {
+  barcodes <- c("CACGTACGTACG", "TACGTACGTACG")
+  left_context <- "CGTCT"  # + "C" from first barcode → CGTCTC = BsmBI
+  keep <- filter_barcodes_batch(
+    barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
+    junction_left_context = left_context
+  )
+  expect_false(keep[1])  # creates junction enzyme site
+  expect_true(keep[2])   # clean
+})
+
+test_that("filter_barcodes_batch rejects barcodes with PolIII terminator (TTTT)", {
+  barcodes <- c(
+    "ACGTACGTACGT",   # Good: no TTTT
+    "ACTTTTACGTAC",   # Bad: contains TTTT
+    "TTTTACGTACGT",   # Bad: TTTT at start
+    "ACGTACGTTTTT",   # Bad: TTTT at end (plus TTTTT)
+    "ACGATTTCGTAC"    # Good: only TTT (3 Ts), not 4
+  )
+  keep <- filter_barcodes_batch(barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
+                                filter_poliii_term = TRUE)
+  expect_true(keep[1])    # no TTTT
+  expect_false(keep[2])   # TTTT
+  expect_false(keep[3])   # TTTT
+  expect_false(keep[4])   # TTTT (also homopolymer)
+  expect_true(keep[5])    # only TTT
+})
+
+test_that("filter_barcodes_batch allows TTTT when filter_poliii_term = FALSE", {
+  barcodes <- c("ACTTTTACGTAC", "ACGTACGTACGT")
+  keep <- filter_barcodes_batch(barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
+                                filter_poliii_term = FALSE)
+  expect_true(keep[1])   # TTTT allowed when filter disabled
+  expect_true(keep[2])
+})
+
+test_that("filter_sequences_fast rejects sequences with PolIII terminator", {
+  seqs <- c("ACGTACGTACGT", "ACTTTTACGTAC", "ACGATTTCGTAC")
+  result <- filter_sequences_fast(seqs, max_homopolymer = 4, filter_poliii_term = TRUE)
+  expect_equal(length(result), 2L)
+  expect_false("ACTTTTACGTAC" %in% result)
+  expect_true("ACGTACGTACGT" %in% result)
+  expect_true("ACGATTTCGTAC" %in% result)
 })
 
 # ============================================================================
@@ -165,24 +427,6 @@ test_that("auto_size_barcode_length errors on impossible request", {
 })
 
 # ============================================================================
-# Random greedy prefix generation (for prefix_length > 10)
-# ============================================================================
-
-test_that("generate_prefixes_random_greedy produces valid prefixes for k=12", {
-  prefixes <- generate_prefixes_random_greedy(k = 12, min_hamming = 3, n_needed = 50,
-                                                n_sample = 10000L)
-  expect_gte(length(prefixes), 50)
-
-  # Spot-check: first 20 pairs should have d >= 3
-  n_check <- min(length(prefixes), 20)
-  for (i in seq_len(n_check - 1)) {
-    for (j in (i + 1):n_check) {
-      expect_gte(hamming_distance(prefixes[i], prefixes[j]), 3)
-    }
-  }
-})
-
-# ============================================================================
 # Per-prefix barcode generation
 # ============================================================================
 
@@ -237,6 +481,8 @@ test_that("design_barcodes returns correct structure", {
   expect_equal(result$prefix_length, 8)
   expect_true(!is.null(result$effective_hamming))
   expect_gte(result$effective_hamming, 2L)
+  # New: code_type should be present
+  expect_true(result$code_type %in% c("linear", "lexicode"))
 })
 
 test_that("design_barcodes prefix Hamming distance guarantee", {
@@ -314,8 +560,7 @@ test_that("design_barcodes with barcodes_per_variant=10 shares prefixes within v
   expect_equal(length(variant_prefixes), 5)
 })
 
-test_that("design_barcodes with prefix_length=12 produces fast valid results", {
-  # This tests the generate_prefixes_random_greedy path
+test_that("design_barcodes with prefix_length=12 uses GF(4) linear code", {
   result <- design_barcodes(
     n_variants = 20,
     barcode_length = 20,
@@ -329,6 +574,7 @@ test_that("design_barcodes with prefix_length=12 produces fast valid results", {
   expect_equal(length(result$barcodes), 20)
   expect_true(all(nchar(result$barcodes) == 20))
   expect_equal(result$prefix_length, 12)
+  expect_equal(result$code_type, "linear")
 
   # Verify prefix distances
   prefixes <- unique(substring(result$barcodes, 1, 12))

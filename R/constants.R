@@ -95,6 +95,11 @@ DEFAULT_GC_RANGE         <- c(0.25, 0.75)
 DEFAULT_MAX_HOMOPOLYMER  <- 4L
 DEFAULT_MIN_HAMMING_FLOOR <- 2L   # Floor for auto-adjustment when capacity is tight
 
+# --- PolIII Terminator Signal ---
+# RNA Polymerase III terminates at runs of >=4 consecutive Ts on the non-template
+# strand. Barcodes transcribed by PolIII (U6) must not contain TTTT.
+POLIII_TERM_SEQ <- "TTTT"
+
 # --- Overhang Fidelity Threshold ---
 # Based on NEB Ligase Fidelity data (Potapov et al. 2018, 37C, 18h)
 # Fidelity = M[X][RC(X)] / sum(M[X][*]) (correct Watson-Crick pairing)

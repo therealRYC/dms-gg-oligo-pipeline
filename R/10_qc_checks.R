@@ -209,6 +209,16 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
     )
   }
 
+  # 14. PolIII terminator signal in barcodes (TTTT causes premature termination)
+  n_poliii_term <- sum(grepl(POLIII_TERM_SEQ, barcodes, fixed = TRUE))
+  checks[[length(checks) + 1L]] <- qc_check(
+    name   = "barcode_poliii_term",
+    desc   = "No barcodes contain PolIII terminator signal (TTTT)",
+    pass   = n_poliii_term == 0L,
+    detail = paste0(n_poliii_term, " / ", length(barcodes),
+                    " barcode(s) contain TTTT")
+  )
+
   # Compile report
   report <- do.call(rbind, checks)
   rownames(report) <- NULL
