@@ -22,7 +22,7 @@ Every oligo in the pool has the same universal structure regardless of tile posi
 ```
 5'--[BsaI>>]--oh1--[mutable region]--[<<BsmBI]--[BsmBI>>]--barcode--[<<BsaI]--3'
      7 nt     4 nt    variable          11 nt      11 nt    20 nt    11 nt
-                                                          (= 56 nt overhead)
+                                                          (= 64 nt overhead)
 ```
 
 ## Quick Start (Command Line)
@@ -117,9 +117,9 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 
 **Tile boundary optimization**: A dynamic programming optimizer searches all valid codon-boundary positions to find tile placements where gene-derived overhangs have high ligation fidelity (Potapov et al. 2018 NEB data). Supports multi-K search across different tile counts.
 
-**Barcode design**: Unified hierarchical prefix-suffix mode -- each variant gets a unique high-Hamming-distance prefix (12 nt), extended with filtered random suffixes to the full barcode length (20 nt). Cross-variant Hamming distance is guaranteed by the prefix; within-variant replicates differ only in their suffix. Configurable `barcodes_per_variant` (default 10) for experimental replication.
+**Barcode design**: Unified hierarchical prefix-suffix mode -- each variant gets a unique high-Hamming-distance prefix (12 nt), extended with filtered random suffixes to the full barcode length (20 nt). Cross-variant Hamming distance is guaranteed by the prefix; within-variant replicates differ only in their suffix. Configurable `barcodes_per_variant` (default 10) for experimental replication. Prefixes that create enzyme sites at junction boundaries are automatically filtered.
 
-**Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split at positions with high-fidelity BsmBI overhangs.
+**Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split at positions with high-fidelity overhangs (BsaI for 5' WT blocks, BsmBI for 3' WT blocks).
 
 ## Repository Structure
 
@@ -151,6 +151,8 @@ dms-gg-oligo-pipeline/
 │   ├── GRIN2A_NM_000833_CDS.fasta
 │   ├── SLC6A1_NM_003042_CDS.fasta
 │   └── AKAP11_NM_016248_CDS.fasta
+├── examples/                   # Example pipeline configs
+│   └── *.yaml                  # GRIN2A overhang verification configs
 ├── scripts/                    # Helper scripts
 │   ├── generate_grin2a_cds.R   # Generate GRIN2A test FASTA
 │   ├── generate_slc6a1_cds.R   # Generate SLC6A1 test FASTA

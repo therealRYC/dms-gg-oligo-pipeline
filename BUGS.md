@@ -1,5 +1,5 @@
 # Created: 2026-02-20
-# Last updated: 2026-02-20 — Move BUG-6 to F9, BUG-7 to F10 (both fixed)
+# Last updated: 2026-02-21 — Add F11 (superblock junction bugs) and F12 (barcode suffix sampling)
 
 # Bug Inventory — DMS GG Oligo Pipeline
 
@@ -59,6 +59,22 @@
 - **Fixed in:** this session (worktree `260220-test-run-after-gga-checker-and-debugging`)
 - **What:** All 3 integration tests called `design_barcodes()` without `junction_left_context`/`junction_right_context`, so barcode junction enzyme-site filtering was skipped. ~2 variants per run got barcodes creating BsmBI sites at the oh3-barcode junction.
 - **Fix:** Compute junction contexts (matching `run_pipeline.R` logic) and pass them to `design_barcodes()` in all integration tests.
+
+### F11: Superblock junction bugs — BsaI oh_5 mismatch + 4-nt duplication (BUG-001)
+- **File:** `R/09_wt_geneblock_design.R`
+- **Fixed in:** PR #18 (commit `76a0329`)
+- **What:** Three related bugs in superblock splitting caused assembly failures on all tiles with superblocked gene blocks:
+  1. BsaI sub-blocks after the first used wrong oh_5 (gene position instead of junction overhang) → ligation failure
+  2. BsaI non-final sub-blocks included trailing junction OH, duplicated by next sub-block → 4-nt insertion
+  3. BsmBI non-final sub-blocks had same trailing OH duplication → 4-nt insertion
+- **Fix:** Use junction overhang for oh_5 on non-first BsaI sub-blocks; trim trailing 4 nt (`sub_end - 4L`) from non-final sub-blocks in both BsaI and BsmBI loops.
+- **Verified:** 66/66 tiles pass assembly simulation + product verification (GRIN2A, 22 tiles, 47 blocks).
+
+### F12: Barcode suffix sampling too small when barcodes_per_variant=1
+- **File:** `R/07_barcode_design.R`
+- **Fixed in:** PR #18 (commit `76a0329`)
+- **What:** When `barcodes_per_variant=1`, suffix candidate count was `1 * 10 = 10`, far too few to find valid suffixes in the 65K search space (suffix_length=8). Also, prefixes creating enzyme sites at junction boundaries were not filtered.
+- **Fix:** Minimum 500 initial candidates (5000 on retry); added `filter_barcode_junctions()` call on prefixes to remove those creating enzyme sites at oh3-barcode or barcode-oh4 junctions (48 removed for GRIN2A).
 
 ## Open Bugs
 
