@@ -161,7 +161,8 @@ design_barcodes <- function(n_variants,
                             max_homopolymer = DEFAULT_MAX_HOMOPOLYMER,
                             barcodes_per_variant = DEFAULT_BARCODES_PER_VARIANT,
                             junction_left_context = "",
-                            junction_right_context = "") {
+                            junction_right_context = "",
+                            filter_poliii_term = TRUE) {
 
   n_total <- n_variants * barcodes_per_variant
 
@@ -199,7 +200,8 @@ design_barcodes <- function(n_variants,
   cli::cli_alert("Generating {n_variants} unique prefixes (hard Hamming >= {effective_hamming})...")
   prefix_result <- generate_prefixes(
     prefix_length, effective_hamming, n_variants, max_homopolymer,
-    junction_left_context, junction_right_context
+    junction_left_context, junction_right_context,
+    filter_poliii_term = filter_poliii_term
   )
   prefixes <- prefix_result$prefixes
   code_type <- prefix_result$code_type
@@ -219,7 +221,8 @@ design_barcodes <- function(n_variants,
   barcodes <- generate_barcodes_per_prefix(
     prefixes, suffix_length, barcodes_per_variant, gc_range, max_homopolymer,
     junction_left_context = junction_left_context,
-    junction_right_context = junction_right_context
+    junction_right_context = junction_right_context,
+    filter_poliii_term = filter_poliii_term
   )
 
   # 5. Validate prefix distances — skip for algebraically-guaranteed codes
@@ -294,7 +297,8 @@ design_barcodes <- function(n_variants,
 generate_prefixes <- function(k, min_hamming, n_needed,
                                max_homopolymer = DEFAULT_MAX_HOMOPOLYMER,
                                junction_left_context = "",
-                               junction_right_context = "") {
+                               junction_right_context = "",
+                               filter_poliii_term = TRUE) {
   code_type <- NULL
   prefixes <- NULL
 
@@ -311,8 +315,9 @@ generate_prefixes <- function(k, min_hamming, n_needed,
       prefixes <- result$prefixes
       code_type <- "linear"
 
-      # Stage 1 prefix filtering: enzyme sites, homopolymers
-      prefixes <- filter_sequences_fast(prefixes, max_homopolymer)
+      # Stage 1 prefix filtering: enzyme sites, homopolymers, PolIII terminator
+      prefixes <- filter_sequences_fast(prefixes, max_homopolymer,
+                                        filter_poliii_term = filter_poliii_term)
 
       # Stage 1 prefix filtering: junction context
       if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
@@ -357,7 +362,8 @@ generate_prefixes <- function(k, min_hamming, n_needed,
       code_type <- "lexicode"
 
       # Stage 1 prefix filtering
-      prefixes <- filter_sequences_fast(prefixes, max_homopolymer)
+      prefixes <- filter_sequences_fast(prefixes, max_homopolymer,
+                                        filter_poliii_term = filter_poliii_term)
       if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
         n_before <- length(prefixes)
         prefixes <- filter_barcode_junctions(
@@ -460,7 +466,8 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
                                           gc_range, max_homopolymer,
                                           oversample_factor = 20L,
                                           junction_left_context = "",
-                                          junction_right_context = "") {
+                                          junction_right_context = "",
+                                          filter_poliii_term = TRUE) {
   n_variants <- length(prefixes)
   n_total <- n_variants * barcodes_per_variant
 
@@ -495,7 +502,8 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
   # Apply all filters in one vectorized pass
   keep <- filter_barcodes_batch(
     all_barcodes, max_homopolymer, gc_range,
-    junction_left_context, junction_right_context
+    junction_left_context, junction_right_context,
+    filter_poliii_term = filter_poliii_term
   )
   valid_barcodes <- all_barcodes[keep]
   valid_variant_ids <- variant_ids[keep]
@@ -536,7 +544,8 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
       retry_bcs <- paste0(prefix, unique(retry_suffixes))
       retry_keep <- filter_barcodes_batch(
         retry_bcs, max_homopolymer, gc_range,
-        junction_left_context, junction_right_context
+        junction_left_context, junction_right_context,
+        filter_poliii_term = filter_poliii_term
       )
       retry_valid <- unique(retry_bcs[retry_keep])
 
@@ -577,7 +586,8 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
 #' @return Logical vector (TRUE = passes all filters)
 filter_barcodes_batch <- function(barcodes, max_homopolymer, gc_range,
                                    junction_left_context = "",
-                                   junction_right_context = "") {
+                                   junction_right_context = "",
+                                   filter_poliii_term = TRUE) {
   n <- length(barcodes)
   if (n == 0L) return(logical(0))
 
@@ -592,6 +602,11 @@ filter_barcodes_batch <- function(barcodes, max_homopolymer, gc_range,
   # Homopolymer filter
   homo_pattern <- paste0("([ACGT])\\1{", max_homopolymer, ",}")
   bad <- bad | grepl(homo_pattern, barcodes)
+
+  # PolIII terminator filter (TTTT causes premature transcription termination)
+  if (filter_poliii_term) {
+    bad <- bad | grepl(POLIII_TERM_SEQ, barcodes, fixed = TRUE)
+  }
 
   # GC filter
   gc_counts <- nchar(gsub("[AT]", "", barcodes))
@@ -620,7 +635,8 @@ filter_barcodes_batch <- function(barcodes, max_homopolymer, gc_range,
 #' @param seqs Character vector of sequences
 #' @param max_homopolymer Maximum allowed homopolymer run
 #' @return Filtered character vector
-filter_sequences_fast <- function(seqs, max_homopolymer = 4L) {
+filter_sequences_fast <- function(seqs, max_homopolymer = 4L,
+                                   filter_poliii_term = TRUE) {
   bad <- rep(FALSE, length(seqs))
   for (enz_name in names(ENZYMES)) {
     enz <- ENZYMES[[enz_name]]
@@ -629,6 +645,10 @@ filter_sequences_fast <- function(seqs, max_homopolymer = 4L) {
   }
   homo_pattern <- paste0("([ACGT])\\1{", max_homopolymer, ",}")
   bad <- bad | grepl(homo_pattern, seqs)
+  # PolIII terminator filter (TTTT causes premature transcription termination)
+  if (filter_poliii_term) {
+    bad <- bad | grepl(POLIII_TERM_SEQ, seqs, fixed = TRUE)
+  }
   seqs[!bad]
 }
 

@@ -104,7 +104,7 @@ Safe because removing codewords from a code with minimum distance d preserves d 
 
 # Plan: PolIII Terminator Filter for Barcodes
 
-**Status: PENDING**
+**Status: IMPLEMENTED** (2026-02-22)
 
 ## Problem
 

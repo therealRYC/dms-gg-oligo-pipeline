@@ -321,6 +321,40 @@ test_that("filter_barcodes_batch checks junction context", {
   expect_true(keep[2])   # clean
 })
 
+test_that("filter_barcodes_batch rejects barcodes with PolIII terminator (TTTT)", {
+  barcodes <- c(
+    "ACGTACGTACGT",   # Good: no TTTT
+    "ACTTTTACGTAC",   # Bad: contains TTTT
+    "TTTTACGTACGT",   # Bad: TTTT at start
+    "ACGTACGTTTTT",   # Bad: TTTT at end (plus TTTTT)
+    "ACGATTTCGTAC"    # Good: only TTT (3 Ts), not 4
+  )
+  keep <- filter_barcodes_batch(barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
+                                filter_poliii_term = TRUE)
+  expect_true(keep[1])    # no TTTT
+  expect_false(keep[2])   # TTTT
+  expect_false(keep[3])   # TTTT
+  expect_false(keep[4])   # TTTT (also homopolymer)
+  expect_true(keep[5])    # only TTT
+})
+
+test_that("filter_barcodes_batch allows TTTT when filter_poliii_term = FALSE", {
+  barcodes <- c("ACTTTTACGTAC", "ACGTACGTACGT")
+  keep <- filter_barcodes_batch(barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
+                                filter_poliii_term = FALSE)
+  expect_true(keep[1])   # TTTT allowed when filter disabled
+  expect_true(keep[2])
+})
+
+test_that("filter_sequences_fast rejects sequences with PolIII terminator", {
+  seqs <- c("ACGTACGTACGT", "ACTTTTACGTAC", "ACGATTTCGTAC")
+  result <- filter_sequences_fast(seqs, max_homopolymer = 4, filter_poliii_term = TRUE)
+  expect_equal(length(result), 2L)
+  expect_false("ACTTTTACGTAC" %in% result)
+  expect_true("ACGTACGTACGT" %in% result)
+  expect_true("ACGATTTCGTAC" %in% result)
+})
+
 # ============================================================================
 # Capacity estimation
 # ============================================================================
