@@ -102,8 +102,9 @@ gf4_hamming_parity_check <- function(m) {
   # Generate all nonzero vectors in GF(4)^m
   # Then normalize: for each vector, divide by its leading nonzero entry
   # (i.e., multiply by the inverse of the leading entry)
-  # GF(4) inverses: inv(1)=1, inv(2)=3, inv(3)=2
-  gf4_inv <- c(NA, 1L, 3L, 2L)  # indexed by element (0 has no inverse)
+  # GF(4) inverses: inv(1)=1, inv(alpha)=alpha^2=3, inv(alpha^2)=alpha=2
+  # Indexed directly by element value: gf4_inv[1]=1, gf4_inv[2]=3, gf4_inv[3]=2
+  gf4_inv <- c(1L, 3L, 2L)
 
   columns <- matrix(0L, nrow = m, ncol = n)
   col_idx <- 0L
@@ -173,7 +174,7 @@ gf4_generator_from_parity <- function(H) {
   # Gaussian elimination over GF(4)
   H_work <- H  # copy
   pivot_cols <- integer(m)
-  gf4_inv <- c(NA, 1L, 3L, 2L)
+  gf4_inv <- c(1L, 3L, 2L)
 
   for (row in seq_len(m)) {
     # Find pivot column (first column with nonzero entry in this row or below)
@@ -453,7 +454,7 @@ generate_prefixes_linear <- function(prefix_length, n_needed) {
     # Identify pivot and non-pivot columns from H
     # Re-do the Gaussian elimination to find them (same as in generator construction)
     H_work <- H
-    gf4_inv <- c(NA, 1L, 3L, 2L)
+    gf4_inv <- c(1L, 3L, 2L)
     pivot_cols <- integer(m)
     for (row in seq_len(m)) {
       for (col in seq_len(native_n)) {

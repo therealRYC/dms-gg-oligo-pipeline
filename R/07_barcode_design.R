@@ -482,12 +482,10 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
     format(n_total_candidates, big.mark = ","), " total"
   ))
 
-  # Generate all random suffixes at once
-  all_suffixes <- apply(
-    matrix(sample(bases, suffix_length * n_total_candidates, replace = TRUE),
-           nrow = suffix_length, ncol = n_total_candidates),
-    2, paste0, collapse = ""
-  )
+  # Generate all random suffixes at once (vectorized string construction)
+  suf_mat <- matrix(sample(bases, suffix_length * n_total_candidates, replace = TRUE),
+                    nrow = n_total_candidates, ncol = suffix_length)
+  all_suffixes <- do.call(paste0, as.data.frame(suf_mat, stringsAsFactors = FALSE))
 
   # Pair each suffix with its corresponding prefix
   variant_ids <- rep(seq_len(n_variants), each = n_suf_per_variant)
@@ -506,9 +504,10 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
   barcodes <- character(n_total)
   needs_retry <- integer(0)
 
-  for (v in seq_len(n_variants)) {
-    v_bcs <- valid_barcodes[valid_variant_ids == v]
-    v_bcs <- unique(v_bcs)
+  bc_by_variant <- split(valid_barcodes, valid_variant_ids)
+  for (vname in names(bc_by_variant)) {
+    v <- as.integer(vname)
+    v_bcs <- unique(bc_by_variant[[vname]])
     if (length(v_bcs) >= barcodes_per_variant) {
       idx_start <- (v - 1L) * barcodes_per_variant + 1L
       idx_end <- v * barcodes_per_variant
@@ -517,6 +516,10 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
       needs_retry <- c(needs_retry, v)
     }
   }
+  # Variants with zero valid barcodes won't appear in bc_by_variant
+  all_variants_in_split <- as.integer(names(bc_by_variant))
+  missing_variants <- setdiff(seq_len(n_variants), all_variants_in_split)
+  needs_retry <- c(needs_retry, missing_variants)
 
   # --- Pass 2: Per-variant retry for failures ---
   if (length(needs_retry) > 0) {
@@ -527,11 +530,9 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
 
     for (v in needs_retry) {
       prefix <- prefixes[v]
-      retry_suffixes <- apply(
-        matrix(sample(bases, suffix_length * n_retry_suf, replace = TRUE),
-               nrow = suffix_length, ncol = n_retry_suf),
-        2, paste0, collapse = ""
-      )
+      retry_mat <- matrix(sample(bases, suffix_length * n_retry_suf, replace = TRUE),
+                          nrow = n_retry_suf, ncol = suffix_length)
+      retry_suffixes <- do.call(paste0, as.data.frame(retry_mat, stringsAsFactors = FALSE))
       retry_bcs <- paste0(prefix, unique(retry_suffixes))
       retry_keep <- filter_barcodes_batch(
         retry_bcs, max_homopolymer, gc_range,
