@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-21 — Fix create_bsai_block() 5' duplication: trim oh_5prime from gene_seq
+# Last updated: 2026-02-21 — Fix superblock junction bugs: BsaI oh_5 mismatch + BsaI/BsmBI 4-nt duplication
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -138,16 +138,37 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         )
         bsai_parts <- block_name
       } else {
-        # Split into superblocks at boundaries
+        # Split into superblocks at boundaries.
+        # split_nt is the last nucleotide of sub-block N;
+        # junction_oh = cds[split_nt-3 : split_nt] (last 4 nt of that sub-block).
+        # create_bsai_block() expects gene_seq to START with oh_5 (and trims it),
+        # so sub-blocks after the first must overlap by 4 nt to include the
+        # junction overhang that will be trimmed.
+        # Non-final sub-blocks must EXCLUDE the trailing junction OH from
+        # gene_seq to avoid 4-nt duplication at junctions — the junction OH
+        # is already encoded by the next sub-block's oh_5 (which becomes
+        # part of the body after digestion).
         split_points <- c(wt_5prime_start - 1L, sb_junction_nt, wt_5prime_end)
-        for (s in seq_len(length(split_points) - 1L)) {
-          sub_start <- split_points[s] + 1L
+        n_bsai_sub <- length(split_points) - 1L
+        for (s in seq_len(n_bsai_sub)) {
+          if (s == 1L) {
+            sub_start <- split_points[s] + 1L
+            oh_5 <- substring(cds, sub_start, sub_start + 3L)
+          } else {
+            # Overlap: start 4 nt earlier so gene_seq begins with junction OH
+            sub_start <- split_points[s] - 3L
+            oh_5 <- sb_junction_oh[s - 1L]
+          }
           sub_end <- split_points[s + 1L]
-          sub_seq <- substring(cds, sub_start, sub_end)
+          if (s < n_bsai_sub) {
+            # Trim trailing 4 nt (junction OH) — provided by next sub-block's oh_5
+            sub_seq <- substring(cds, sub_start, sub_end - 4L)
+          } else {
+            sub_seq <- substring(cds, sub_start, sub_end)
+          }
           block_name <- paste0("bsai_5wt_tile", tile$tile_id, "_sub", s)
 
-          oh_5 <- substring(cds, sub_start, sub_start + 3L)
-          oh_3 <- if (s < length(split_points) - 1L) {
+          oh_3 <- if (s < n_bsai_sub) {
             sb_junction_oh[s]
           } else {
             tile$oh1_seq
@@ -199,15 +220,25 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         )
         bsmbi_parts <- block_name
       } else {
-        # Split 3'WT region at pre-computed split points
+        # Split 3'WT region at pre-computed split points.
+        # split_nt is the last nucleotide of sub-block N;
+        # junction_oh = cds[split_nt-3 : split_nt] (last 4 nt of that sub-block).
+        # create_bsmbi_block() prepends oh_5 via the enzyme site (doesn't trim),
+        # so non-final sub-blocks must EXCLUDE the trailing junction OH from
+        # gene_seq to avoid 4-nt duplication at junctions — the junction OH
+        # is already encoded by the next sub-block's BsmBI_fwd(junction_oh).
         split_points <- c(wt_3prime_start - 1L, sb_3wt_region$split_nt, wt_3prime_end)
         n_sub <- length(split_points) - 1L
         for (s in seq_len(n_sub)) {
           sub_start <- split_points[s] + 1L
           sub_end <- split_points[s + 1L]
-          sub_seq <- substring(cds, sub_start, sub_end)
-          # Last sub-block gets PolIII appended
-          if (s == n_sub) sub_seq <- paste0(sub_seq, polIII_for_block)
+          if (s < n_sub) {
+            # Trim trailing 4 nt (junction OH) — provided by next sub-block's BsmBI_fwd
+            sub_seq <- substring(cds, sub_start, sub_end - 4L)
+          } else {
+            # Last sub-block: no trimming, and append PolIII
+            sub_seq <- paste0(substring(cds, sub_start, sub_end), polIII_for_block)
+          }
 
           block_name <- paste0("bsmbi_3wt_tile", tile$tile_id, "_sub", s)
           oh_5 <- if (s == 1L) tile$oh2_seq else sb_3wt_region$junction_oh[s - 1L]

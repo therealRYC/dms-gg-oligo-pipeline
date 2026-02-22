@@ -197,6 +197,20 @@ design_barcodes <- function(n_variants,
     prefixes <- filter_sequences_fast(prefixes, max_homopolymer)
   }
 
+  # Filter prefixes that create enzyme sites at junction boundaries.
+  # A prefix like "CCTG..." with left context "...ACA" creates PaqCI site "CACCTGC"
+  # spanning the junction — no suffix can fix this, so remove the prefix entirely.
+  if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
+    n_before <- length(prefixes)
+    prefixes <- filter_barcode_junctions(prefixes, junction_left_context, junction_right_context)
+    n_removed <- n_before - length(prefixes)
+    if (n_removed > 0) {
+      cli::cli_alert_info(paste0(
+        "Removed ", n_removed, " prefixes with enzyme sites at junction boundaries."
+      ))
+    }
+  }
+
   if (length(prefixes) < n_variants) {
     stop("Could only generate ", length(prefixes), " unique prefixes, need ", n_variants,
          ". Try increasing prefix_length or decreasing min_hamming_distance.")
@@ -472,7 +486,9 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
   }
 
   bases <- c("A", "C", "G", "T")
-  n_suffix_candidates <- barcodes_per_variant * oversample
+  # Ensure enough candidates even when barcodes_per_variant is small (e.g., 1).
+  # With suffix_length=8 there are 65K possible suffixes; sampling only 10 misses valid ones.
+  n_suffix_candidates <- max(barcodes_per_variant * oversample, 500L)
   bc_start <- proc.time()
   last_report <- 0L
 
@@ -503,7 +519,7 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
 
     if (length(full_bcs) < barcodes_per_variant) {
       # Retry with much larger sample
-      n_retry <- barcodes_per_variant * oversample * 10L
+      n_retry <- max(barcodes_per_variant * oversample * 10L, 5000L)
       suf_mat2 <- matrix(sample(bases, suffix_length * n_retry, replace = TRUE),
                          nrow = suffix_length, ncol = n_retry)
       suffixes2 <- apply(suf_mat2, 2, paste0, collapse = "")
