@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-21 — Fix superblock junction bugs: BsaI oh_5 mismatch + BsaI/BsmBI 4-nt duplication
+# Last updated: 2026-02-25 — Support downstream_cassette (intergene_elements + polIII) for flexible constructs
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -49,10 +49,13 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
   blocks <- list()
   manifests <- list()
 
-  # Use core_polIII (promoter minus last 5 nt) when oh3 is derived from promoter.
+  # Use core cassette (cassette minus last 5 nt) when oh3 is derived from promoter.
   # This avoids duplicating the oh3+spacer sequence that's already encoded in the
-  # BsmBI site. After ligation: ...core_polIII + oh3 + barcode (seamless junction).
-  polIII_for_block <- if (!is.null(assembly_plan) && !is.null(assembly_plan$core_polIII)) {
+  # BsmBI site. After ligation: ...core_cassette + oh3 + barcode (seamless junction).
+  # Priority: core_downstream_cassette (intergene+core_polIII) > core_polIII > polIII
+  polIII_for_block <- if (!is.null(assembly_plan) && !is.null(assembly_plan$core_downstream_cassette)) {
+    assembly_plan$core_downstream_cassette
+  } else if (!is.null(assembly_plan) && !is.null(assembly_plan$core_polIII)) {
     assembly_plan$core_polIII
   } else {
     polIII

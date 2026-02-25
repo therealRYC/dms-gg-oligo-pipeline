@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Fix variant/oligo counts, per-tile length display, use gene_description
+# Last updated: 2026-02-25 — Support intergene_elements in construct diagrams
 # 12_report.R — Wetlab-compatible Markdown assembly report
 # DMS Golden Gate Oligo Pipeline
 #
@@ -143,7 +143,7 @@ report_architecture <- function(cfg) {
     "```", "",
     "### Final Assembled Construct", "",
     "```",
-    "[PaqCI**]--[full gene with 1 mutation]--[PolIII promoter]--[barcode]--[PaqCI*]",
+    construct_diagram(cfg),
     "```", ""
   )
 }
@@ -277,7 +277,7 @@ report_fixed_overhangs <- function(assembly_plan, helper, cfg) {
                  cfg$paqci_star2 %||% "NNNN",
                  cfg$paqci_star1 %||% "NNNN"),
     Role = c("Gene start (BsaI, all tiles)",
-             "PolIII-barcode junction (BsmBI, all tiles)",
+             "Downstream cassette-barcode junction (BsmBI, all tiles)",
              "Barcode-helper junction (BsaI, all tiles)",
              "PaqCI 5' end of insert (Level 2)",
              "PaqCI 3' end of insert (Level 2)"),
@@ -569,7 +569,7 @@ report_paqci_reaction <- function(cfg) {
     paste0("- paqci_star2 (5'): `", paqci_star2, "`"),
     paste0("- paqci_star1 (3'): `", paqci_star1, "`"), "",
     "```",
-    paste0("[PaqCI** ", paqci_star2, "]--[gene+mutation]--[PolIII]--[barcode]--[PaqCI* ", paqci_star1, "]"),
+    paste0("[PaqCI** ", paqci_star2, "]--", construct_diagram_inner(cfg), "--[PaqCI* ", paqci_star1, "]"),
     "```", ""
   )
 }
@@ -757,6 +757,31 @@ format_bsmbi_overhang_map <- function(oh2, bsmbi_part_names, oh3,
   hf_flags <- c(hf_flags, isTRUE(assembly_plan$oh3_in_hf))
 
   format_overhang_map(ohs, labels, hf_flags)
+}
+
+
+# =============================================================================
+# CONSTRUCT DIAGRAM HELPERS
+# =============================================================================
+
+#' Build the inner construct diagram (gene--elements--barcode)
+#' @param cfg Config list
+#' @return Character string
+construct_diagram_inner <- function(cfg) {
+  parts <- "[gene+mutation]"
+  if (length(cfg$intergene_elements) > 0) {
+    for (elem in cfg$intergene_elements) {
+      parts <- paste0(parts, "--[", elem$name, "]")
+    }
+  }
+  paste0(parts, "--[PolIII]--[barcode]")
+}
+
+#' Build the full construct diagram with PaqCI sites
+#' @param cfg Config list
+#' @return Character string
+construct_diagram <- function(cfg) {
+  paste0("[PaqCI**]--", construct_diagram_inner(cfg), "--[PaqCI*]")
 }
 
 

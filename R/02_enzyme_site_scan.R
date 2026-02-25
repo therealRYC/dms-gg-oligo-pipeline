@@ -1,7 +1,7 @@
 # 02_enzyme_site_scan.R — Find endogenous BsaI/BsmBI/PaqCI sites, suggest silent mutations
 # DMS Golden Gate Oligo Pipeline
 
-#' Scan a gene and promoter for endogenous enzyme recognition sites
+#' Scan a gene, promoter, and intergene elements for endogenous enzyme recognition sites
 #'
 #' Scans for all three assembly enzymes (BsaI, BsmBI, PaqCI) on both strands.
 #' BsaI (GGTCTC) and BsmBI (CGTCTC) differ by only 1 nt, so fixing one can
@@ -11,17 +11,25 @@
 #' @param cds Character string of coding DNA sequence
 #' @param polIII Character string of PolIII promoter sequence
 #' @param codon_usage Data frame of codon usage (from load_codon_usage())
+#' @param intergene_elements Optional list of intergene elements (each with name, sequence).
+#'   These are scanned for enzyme sites and warnings are issued per-element.
 #' @return List with components:
 #'   - gene_sites: data frame of sites found in the gene
 #'   - promoter_sites: data frame of sites found in the promoter
+#'   - intergene_sites: data frame of sites found in intergene elements (with element_name column)
 #'   - domestication: data frame of suggested silent mutations for gene sites
-scan_enzyme_sites <- function(cds, polIII, codon_usage) {
+scan_enzyme_sites <- function(cds, polIII, codon_usage, intergene_elements = NULL) {
   gene_sites <- data.frame(
     start = integer(0), end = integer(0), strand = character(0),
     match = character(0), enzyme = character(0),
     stringsAsFactors = FALSE
   )
   promoter_sites <- gene_sites
+  intergene_sites <- data.frame(
+    start = integer(0), end = integer(0), strand = character(0),
+    match = character(0), enzyme = character(0), element_name = character(0),
+    stringsAsFactors = FALSE
+  )
 
   for (enz_name in c("BsaI", "BsmBI", "PaqCI")) {
     enz <- ENZYMES[[enz_name]]
@@ -38,6 +46,18 @@ scan_enzyme_sites <- function(cds, polIII, codon_usage) {
     if (nrow(ps) > 0) {
       ps$enzyme <- enz_name
       promoter_sites <- rbind(promoter_sites, ps)
+    }
+
+    # Scan intergene elements
+    if (!is.null(intergene_elements) && length(intergene_elements) > 0) {
+      for (elem in intergene_elements) {
+        es <- find_enzyme_sites(elem$sequence, enz$recog)
+        if (nrow(es) > 0) {
+          es$enzyme <- enz_name
+          es$element_name <- elem$name
+          intergene_sites <- rbind(intergene_sites, es)
+        }
+      }
     }
   }
 
@@ -62,6 +82,19 @@ scan_enzyme_sites <- function(cds, polIII, codon_usage) {
     ))
   }
 
+  if (nrow(intergene_sites) > 0) {
+    # Report per-element
+    for (elem_name in unique(intergene_sites$element_name)) {
+      elem_sites <- intergene_sites[intergene_sites$element_name == elem_name, ]
+      enzymes_found <- paste(unique(elem_sites$enzyme), collapse = ", ")
+      cli::cli_warn(c(
+        "!" = paste0("Enzyme recognition sites found in intergene element '", elem_name, "'."),
+        "i" = paste0("Enzymes: ", enzymes_found, " (", nrow(elem_sites), " site(s))"),
+        "i" = "These cannot be removed by silent mutation. Consider using an alternative sequence."
+      ))
+    }
+  }
+
   if (nrow(gene_sites) > 0) {
     cli::cli_alert_warning(
       paste0("Found ", nrow(gene_sites), " enzyme site(s) in gene that need domestication.")
@@ -71,9 +104,10 @@ scan_enzyme_sites <- function(cds, polIII, codon_usage) {
   }
 
   list(
-    gene_sites     = gene_sites,
-    promoter_sites = promoter_sites,
-    domestication  = domestication
+    gene_sites      = gene_sites,
+    promoter_sites  = promoter_sites,
+    intergene_sites = intergene_sites,
+    domestication   = domestication
   )
 }
 

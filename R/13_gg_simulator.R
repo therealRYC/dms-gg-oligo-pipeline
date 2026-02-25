@@ -1,5 +1,5 @@
 # Created: 2026-02-21
-# Last updated: 2026-02-21 — Initial implementation of Golden Gate assembly simulator
+# Last updated: 2026-02-25 — Support downstream_cassette (intergene + polIII) in verification
 # 13_gg_simulator.R — In-silico Golden Gate Assembly Simulator
 # DMS Golden Gate Oligo Pipeline
 #
@@ -331,8 +331,15 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
   manifests <- geneblock_result$tile_manifests
   helper_insert_seq <- geneblock_result$helper_plasmid$sequence
 
-  # Get core_polIII from assembly plan (if available)
-  core_polIII <- if (!is.null(assembly_plan)) assembly_plan$core_polIII else NULL
+  # Get core downstream cassette from assembly plan (if available).
+  # Priority: core_downstream_cassette (intergene+core_polIII) > core_polIII
+  core_polIII <- if (!is.null(assembly_plan) && !is.null(assembly_plan$core_downstream_cassette)) {
+    assembly_plan$core_downstream_cassette
+  } else if (!is.null(assembly_plan)) {
+    assembly_plan$core_polIII
+  } else {
+    NULL
+  }
 
   results <- list()
 
