@@ -1206,6 +1206,23 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
             if (sub_len > max_sub_length) break  # all earlier are farther
             if (!is.finite(dp_prev[cj])) next
 
+            # Enforce overhang uniqueness: cand_oh[ci] must not match any
+            # ancestor in the parent chain. This prevents ambiguous ligation
+            # where two superblock junction overhangs are identical.
+            oh_conflict <- FALSE
+            ancestor <- cj
+            for (kk in (k - 1L):1L) {
+              if (cand_oh[ancestor] == cand_oh[ci]) {
+                oh_conflict <- TRUE
+                break
+              }
+              if (kk > 1L) {
+                ancestor <- parent[kk, ancestor]
+                if (is.na(ancestor)) break
+              }
+            }
+            if (oh_conflict) next
+
             new_score <- dp_prev[cj] + cand_score[ci]
             if (new_score > dp_curr[ci]) {
               dp_curr[ci] <- new_score

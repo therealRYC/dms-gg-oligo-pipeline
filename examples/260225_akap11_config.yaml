@@ -15,4 +15,6 @@ paqci_star2: "AGTC"
 paqci_star1: "TCGA"
 boundary_method: "dp"
 multi_k_search: true
+simulate_assembly: true
+simulation_samples_per_tile: 3
 output_dir: "260225_AKAP11_DMS_Pipeline"

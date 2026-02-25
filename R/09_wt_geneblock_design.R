@@ -151,8 +151,25 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         # gene_seq to avoid 4-nt duplication at junctions — the junction OH
         # is already encoded by the next sub-block's oh_5 (which becomes
         # part of the body after digestion).
-        split_points <- c(wt_5prime_start - 1L, sb_junction_nt, wt_5prime_end)
+        # Filter out internal split points that create empty sub-blocks.
+        # Same approach as BsmBI: remove problematic split points upfront
+        # so adjacent sub-blocks naturally cover the full gene range.
+        internal_nt <- sb_junction_nt
+        internal_oh_bsai <- sb_junction_oh
+        keep_bsai <- logical(length(internal_nt))
+        prev_sp_bsai <- wt_5prime_start - 1L
+        for (j in seq_along(internal_nt)) {
+          if (internal_nt[j] - prev_sp_bsai >= 5L) {
+            keep_bsai[j] <- TRUE
+            prev_sp_bsai <- internal_nt[j]
+          }
+        }
+        internal_nt <- internal_nt[keep_bsai]
+        internal_oh_bsai <- internal_oh_bsai[keep_bsai]
+
+        split_points <- c(wt_5prime_start - 1L, internal_nt, wt_5prime_end)
         n_bsai_sub <- length(split_points) - 1L
+
         for (s in seq_len(n_bsai_sub)) {
           if (s == 1L) {
             sub_start <- split_points[s] + 1L
@@ -160,7 +177,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           } else {
             # Overlap: start 4 nt earlier so gene_seq begins with junction OH
             sub_start <- split_points[s] - 3L
-            oh_5 <- sb_junction_oh[s - 1L]
+            oh_5 <- internal_oh_bsai[s - 1L]
           }
           sub_end <- split_points[s + 1L]
           if (s < n_bsai_sub) {
@@ -170,12 +187,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             sub_seq <- substring(cds, sub_start, sub_end)
           }
           block_name <- paste0("bsai_5wt_tile", tile$tile_id, "_sub", s)
-
-          oh_3 <- if (s < n_bsai_sub) {
-            sb_junction_oh[s]
-          } else {
-            tile$oh1_seq
-          }
+          oh_3 <- if (s < n_bsai_sub) internal_oh_bsai[s] else tile$oh1_seq
 
           block_seq <- create_bsai_block(sub_seq, oh_5, oh_3)
 
@@ -230,8 +242,29 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         # so non-final sub-blocks must EXCLUDE the trailing junction OH from
         # gene_seq to avoid 4-nt duplication at junctions — the junction OH
         # is already encoded by the next sub-block's BsmBI_fwd(junction_oh).
-        split_points <- c(wt_3prime_start - 1L, sb_3wt_region$split_nt, wt_3prime_end)
+        # Filter out internal split points that are too close to the tile
+        # boundary (or to each other), which would create sub-blocks with
+        # zero gene content after trimming the trailing 4-nt junction OH.
+        # Instead of skipping empty sub-blocks (which loses gene content),
+        # we remove the problematic split point so the adjacent sub-block
+        # naturally covers the full range.
+        internal_splits <- sb_3wt_region$split_nt
+        internal_oh <- sb_3wt_region$junction_oh
+        keep_idx <- logical(length(internal_splits))
+        prev_sp <- wt_3prime_start - 1L
+        for (j in seq_along(internal_splits)) {
+          # Non-final sub-block needs >= 5 nt gap (1+ nt gene + 4 nt junction OH)
+          if (internal_splits[j] - prev_sp >= 5L) {
+            keep_idx[j] <- TRUE
+            prev_sp <- internal_splits[j]
+          }
+        }
+        internal_splits <- internal_splits[keep_idx]
+        internal_oh <- internal_oh[keep_idx]
+
+        split_points <- c(wt_3prime_start - 1L, internal_splits, wt_3prime_end)
         n_sub <- length(split_points) - 1L
+
         for (s in seq_len(n_sub)) {
           sub_start <- split_points[s] + 1L
           sub_end <- split_points[s + 1L]
@@ -244,8 +277,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           }
 
           block_name <- paste0("bsmbi_3wt_tile", tile$tile_id, "_sub", s)
-          oh_5 <- if (s == 1L) tile$oh2_seq else sb_3wt_region$junction_oh[s - 1L]
-          oh_3 <- if (s < n_sub) sb_3wt_region$junction_oh[s] else oh3
+          oh_5 <- if (s == 1L) tile$oh2_seq else internal_oh[s - 1L]
+          oh_3 <- if (s < n_sub) internal_oh[s] else oh3
 
           # Use oh3_spacer only when the 3' overhang is oh3 (last sub-block)
           spacer_for_sub <- if (s == n_sub) oh3_spacer else NULL
