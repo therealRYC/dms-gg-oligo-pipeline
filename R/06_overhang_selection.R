@@ -1080,10 +1080,17 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 #'   in the same GG reaction — e.g., oh3 + all oh2 values for BsmBI)
 #' @param hf_set High-fidelity overhang set
 #' @param oh_fidelity Fidelity data frame (overhang + fidelity columns)
+#' @param min_sub_length Minimum gene content per sub-block (default 0, no minimum).
+#'   When > 0, the DP rejects transitions that produce sub-blocks shorter than this.
+#' @param tile_boundary_nts Integer vector of tile boundary positions (end_nt for 3'WT,
+#'   start_nt for 5'WT). Used for soft proximity penalty: splits near a tile boundary
+#'   get a reduced score to avoid tiny sub-blocks for narrower tiles.
 #' @return Data frame with split_nt, junction_oh, junction_in_hf, junction_fidelity
 dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
                                         max_sub_length, extra_content_length = 0L,
-                                        exclude_ohs, hf_set, oh_fidelity) {
+                                        exclude_ohs, hf_set, oh_fidelity,
+                                        min_sub_length = 0L,
+                                        tile_boundary_nts = integer(0)) {
 
   gene_region_length <- region_end_nt - region_start_nt + 1L
   total_content <- gene_region_length + extra_content_length
@@ -1160,6 +1167,18 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
     cand_in_hf[ci] <- in_hf
     cand_fid[ci] <- fid
     cand_score[ci] <- 10 * in_hf + fid
+
+    # Soft penalty: prefer splits away from tile boundaries.
+    # When a global split falls just inside a narrow tile's WT region, it creates
+    # a tiny first sub-block. Penalizing near-boundary candidates makes the DP
+    # prefer positions that produce well-sized blocks for all tiles.
+    if (min_sub_length > 0L && length(tile_boundary_nts) > 0) {
+      dists <- p - tile_boundary_nts
+      near <- dists[dists > 0L & dists < min_sub_length]
+      if (length(near) > 0) {
+        cand_score[ci] <- cand_score[ci] - 5 * max(1 - near / min_sub_length)
+      }
+    }
   }
 
   # Determine minimum number of splits K
