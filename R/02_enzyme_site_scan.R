@@ -82,6 +82,13 @@ scan_enzyme_sites <- function(cds, polIII, codon_usage, intergene_elements = NUL
     ))
   }
 
+  # Scan junctions between downstream cassette components for sites that
+
+  # span the boundary (invisible when scanning each piece alone).
+  # Junctions: gene3'↔intergene_1, intergene_i↔intergene_{i+1}, last_intergene↔polIII,
+  # and gene3'↔polIII (when no intergene elements — already safe by design, but check anyway).
+  junction_sites <- scan_downstream_junctions(cds, polIII, intergene_elements)
+
   if (nrow(intergene_sites) > 0) {
     # Report per-element
     for (elem_name in unique(intergene_sites$element_name)) {
@@ -91,6 +98,17 @@ scan_enzyme_sites <- function(cds, polIII, codon_usage, intergene_elements = NUL
         "!" = paste0("Enzyme recognition sites found in intergene element '", elem_name, "'."),
         "i" = paste0("Enzymes: ", enzymes_found, " (", nrow(elem_sites), " site(s))"),
         "i" = "These cannot be removed by silent mutation. Consider using an alternative sequence."
+      ))
+    }
+  }
+
+  if (nrow(junction_sites) > 0) {
+    for (i in seq_len(nrow(junction_sites))) {
+      js <- junction_sites[i, ]
+      cli::cli_warn(c(
+        "!" = paste0("Enzyme site (", js$enzyme, ") spans junction: ", js$junction_label),
+        "i" = paste0("Junction region: ...", js$left_context, "|", js$right_context, "..."),
+        "i" = "This site is created by joining adjacent sequences and cannot be auto-domesticated."
       ))
     }
   }
@@ -107,6 +125,7 @@ scan_enzyme_sites <- function(cds, polIII, codon_usage, intergene_elements = NUL
     gene_sites      = gene_sites,
     promoter_sites  = promoter_sites,
     intergene_sites = intergene_sites,
+    junction_sites  = junction_sites,
     domestication   = domestication
   )
 }
@@ -294,4 +313,102 @@ apply_domestication <- function(cds, domestication, codon_usage = NULL,
   }
 
   cds
+}
+
+#' Scan junctions between downstream cassette components for enzyme sites
+#'
+#' An enzyme recognition site (up to 7 nt for PaqCI) could span the boundary
+#' between two adjacent sequences and be invisible when scanning each piece
+#' individually. This function checks each junction by extracting 6 nt of
+#' context from each side (sufficient for the longest site, 7 nt) and scanning
+#' the 12-nt junction region on both strands.
+#'
+#' Junctions checked (in 5'→3' construct order):
+#'   1. Gene 3' end ↔ first intergene element (or PolIII if no intergene)
+#'   2. intergene_element[i] ↔ intergene_element[i+1]
+#'   3. Last intergene element ↔ PolIII promoter 5' end
+#'
+#' @param cds Coding DNA sequence (domesticated)
+#' @param polIII PolIII promoter sequence
+#' @param intergene_elements List of intergene elements (each with name, sequence), or NULL
+#' @return Data frame with columns: junction_label, enzyme, left_context, right_context
+scan_downstream_junctions <- function(cds, polIII, intergene_elements = NULL) {
+  # Max recognition site length across all enzymes (PaqCI = 7 nt)
+  context_len <- 6L  # max_site_len - 1
+
+  results <- list()
+
+  # Build ordered list of (name, sequence) pairs for the downstream cassette
+  # Start with gene 3' end
+  pieces <- list(list(name = "gene_3prime", sequence = cds))
+  if (!is.null(intergene_elements) && length(intergene_elements) > 0) {
+    for (elem in intergene_elements) {
+      pieces[[length(pieces) + 1L]] <- elem
+    }
+  }
+  if (nzchar(polIII)) {
+    pieces[[length(pieces) + 1L]] <- list(name = "polIII", sequence = polIII)
+  }
+
+  # Check each adjacent pair
+  if (length(pieces) < 2L) return(empty_junction_df())
+
+  for (i in seq_len(length(pieces) - 1L)) {
+    left_seq  <- pieces[[i]]$sequence
+    right_seq <- pieces[[i + 1L]]$sequence
+    left_name  <- pieces[[i]]$name
+    right_name <- pieces[[i + 1L]]$name
+
+    # Extract context: last N nt of left, first N nt of right
+    left_len  <- nchar(left_seq)
+    right_len <- nchar(right_seq)
+    n_left  <- min(context_len, left_len)
+    n_right <- min(context_len, right_len)
+
+    left_context  <- substring(left_seq, left_len - n_left + 1L, left_len)
+    right_context <- substring(right_seq, 1L, n_right)
+    junction_region <- paste0(left_context, right_context)
+
+    junction_label <- paste0(left_name, " | ", right_name)
+
+    # Scan junction region for all three enzymes
+    for (enz_name in c("BsaI", "BsmBI", "PaqCI")) {
+      enz <- ENZYMES[[enz_name]]
+      sites <- find_enzyme_sites(junction_region, enz$recog)
+      if (nrow(sites) > 0) {
+        # Only report sites that actually SPAN the junction (not fully within one side)
+        for (s in seq_len(nrow(sites))) {
+          site_start <- sites$start[s]
+          site_end   <- sites$end[s]
+          # The junction boundary is at position n_left (between left_context and right_context)
+          if (site_start <= n_left && site_end > n_left) {
+            results[[length(results) + 1L]] <- data.frame(
+              junction_label = junction_label,
+              enzyme         = enz_name,
+              strand         = sites$strand[s],
+              left_context   = left_context,
+              right_context  = right_context,
+              stringsAsFactors = FALSE
+            )
+          }
+        }
+      }
+    }
+  }
+
+  if (length(results) > 0) {
+    do.call(rbind, results)
+  } else {
+    empty_junction_df()
+  }
+}
+
+#' Empty junction sites data frame
+#' @return Empty data frame with correct columns
+empty_junction_df <- function() {
+  data.frame(
+    junction_label = character(0), enzyme = character(0),
+    strand = character(0), left_context = character(0),
+    right_context = character(0), stringsAsFactors = FALSE
+  )
 }

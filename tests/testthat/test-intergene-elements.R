@@ -260,3 +260,114 @@ test_that("report construct_diagram with no intergene elements", {
   expect_true(grepl("gene+mutation", diagram, fixed = TRUE))
   expect_true(grepl("PolIII", diagram, fixed = TRUE))
 })
+
+
+# =============================================================================
+# Junction scanning tests
+# =============================================================================
+
+test_that("scan_downstream_junctions detects BsmBI site spanning junction", {
+  # Construct a junction where the left ends with "CGT" and the right starts with "CTC..."
+  # Together: ...CGT|CTC... = CGTCTC = BsmBI site
+  left_seq  <- "AAAAAAAACGT"    # ends with CGT
+  right_seq <- "CTCAAAAAAAAA"   # starts with CTC
+  # This creates CGTCTC spanning the junction
+
+  result <- scan_downstream_junctions(
+    cds = left_seq,
+    polIII = right_seq,
+    intergene_elements = NULL
+  )
+
+  expect_true(nrow(result) > 0, info = "Should detect BsmBI site spanning gene|polIII junction")
+  expect_true("BsmBI" %in% result$enzyme)
+})
+
+test_that("scan_downstream_junctions detects site at intergene boundaries", {
+  # BsaI = GGTCTC. Put GGT at end of element, CTC at start of polIII.
+  gene <- "AAAAAAAAAAAA"
+  polIII <- "CTCAAAAAAAA"
+  intergene_elem <- list(
+    name = "linker",
+    sequence = "AAAAAAAAAGGT"  # ends with GGT
+  )
+
+  result <- scan_downstream_junctions(
+    cds = gene,
+    polIII = polIII,
+    intergene_elements = list(intergene_elem)
+  )
+
+  # Should find BsaI site at linker|polIII junction (GGT|CTC = GGTCTC)
+  linker_poliii <- result[grepl("linker.*polIII", result$junction_label), ]
+  expect_true(nrow(linker_poliii) > 0,
+              info = "Should detect BsaI site spanning linker|polIII junction")
+  expect_true("BsaI" %in% linker_poliii$enzyme)
+})
+
+test_that("scan_downstream_junctions returns empty for clean junctions", {
+  gene <- "AAAAAAAAAAAA"
+  polIII <- "TTTTTTTTTTTT"
+  intergene_elem <- list(
+    name = "spacer",
+    sequence = "CCCCCCCCCCCC"
+  )
+
+  result <- scan_downstream_junctions(
+    cds = gene,
+    polIII = polIII,
+    intergene_elements = list(intergene_elem)
+  )
+
+  expect_equal(nrow(result), 0, info = "Clean junctions should have no sites")
+})
+
+test_that("scan_downstream_junctions handles no intergene elements", {
+  result <- scan_downstream_junctions(
+    cds = "AAAAAAAAAAAA",
+    polIII = "TTTTTTTTTTTT",
+    intergene_elements = NULL
+  )
+  expect_equal(nrow(result), 0)
+})
+
+test_that("scan_downstream_junctions ignores sites fully within one side", {
+  # BsmBI site (CGTCTC) entirely within the left piece — should NOT be reported as junction
+  gene_with_site <- "AAACGTCTCAAA"
+  polIII <- "TTTTTTTTTTTT"
+
+  result <- scan_downstream_junctions(
+    cds = gene_with_site,
+    polIII = polIII,
+    intergene_elements = NULL
+  )
+
+  # The site is fully within the gene, not spanning the junction
+  expect_equal(nrow(result), 0,
+               info = "Sites fully within one side should not be reported as junction sites")
+})
+
+test_that("scan_enzyme_sites returns junction_sites in result", {
+  cu <- builtin_human_codon_usage()
+  result <- scan_enzyme_sites(
+    cds = TEST_GENE_SEQ, polIII = TEST_POLIII, codon_usage = cu
+  )
+
+  expect_true("junction_sites" %in% names(result))
+  expect_true(is.data.frame(result$junction_sites))
+})
+
+test_that("scan_downstream_junctions detects PaqCI (7-nt) spanning junction", {
+  # PaqCI = CACCTGC (7 nt). Put CACC at end of left, TGC at start of right.
+  left_seq  <- "AAAAAAAACACC"
+  right_seq <- "TGCAAAAAAAAA"
+
+  result <- scan_downstream_junctions(
+    cds = left_seq,
+    polIII = right_seq,
+    intergene_elements = NULL
+  )
+
+  expect_true(nrow(result) > 0, info = "Should detect PaqCI site spanning junction")
+  expect_true("PaqCI" %in% result$enzyme)
+})

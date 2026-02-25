@@ -122,6 +122,15 @@ if (nrow(scan_result$intergene_sites) > 0) {
   )
 }
 
+# Check junctions between downstream cassette components
+if (nrow(scan_result$junction_sites) > 0) {
+  n_junctions <- nrow(scan_result$junction_sites)
+  cli::cli_alert_danger(paste0(
+    n_junctions, " enzyme site(s) span junction(s) between downstream cassette components. ",
+    "These are created by joining adjacent sequences and cannot be auto-domesticated."
+  ))
+}
+
 # Save original CDS before domestication for traceability
 gene$original_cds <- gene$cds
 
