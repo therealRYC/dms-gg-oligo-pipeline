@@ -25,11 +25,12 @@ This project builds an R pipeline (`dms-gg-oligo-pipeline`) for designing oligon
 
 ### Final Construct in Plasmid
 ```
-[Backbone]—PaqCI**—[Full gene with one mutation]—[PolIII promoter]—[Barcode]—PaqCI*—[Backbone]
+[Backbone]—PaqCI**—[Full gene with one mutation]—[intergene elements (optional)]—[PolIII promoter]—[Barcode]—PaqCI*—[Backbone]
 ```
 - The PolIII promoter (U6 with internal T7) sits between the gene and barcode.
 - This enables flexibility for LABEL-Seq, VIS-Seq, and PerturbView readouts.
 - The PolIII promoter transcribes the barcode.
+- **Intergene elements** (optional): Additional sequence elements (reporters, selection cassettes, IRES, etc.) can be placed between the gene 3' end and the PolIII promoter via the `intergene_elements` config. These are included in the BsmBI gene blocks and automatically handled by superblock splitting.
 
 ### Three Tile Types
 
@@ -119,6 +120,7 @@ dms-gg-oligo-pipeline/
 - Parse YAML config with `yaml::read_yaml()`
 - Apply defaults, validate types and ranges
 - Key params: gene FASTA path, PolIII promoter sequence, max oligo length (300), barcode length (12), min Hamming distance (3), OPS prefix length, overhang fidelity threshold
+- **Intergene elements**: optional `intergene_elements` list in config. `build_downstream_cassette()` concatenates them + PolIII into `downstream_cassette`. Default: empty (pipeline runs identically to before).
 
 ### 2. Gene Input (`01_gene_input.R`)
 - Read FASTA via `Biostrings::readDNAStringSet()`

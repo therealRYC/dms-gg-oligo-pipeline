@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-21 — Add codon_table_path config parameter for custom codon usage tables
+# Last updated: 2026-02-25 — Add intergene_elements for flexible gene constructs
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -82,8 +82,70 @@ load_config <- function(config_path) {
   if (!is.null(cfg$oh3)) cfg$oh3 <- toupper(cfg$oh3)
   if (!is.null(cfg$oh4)) cfg$oh4 <- toupper(cfg$oh4)
 
+  # --- Intergene elements: parse and build downstream cassette ---
+  cfg <- build_downstream_cassette(cfg)
+
   # --- Validation ---
   validate_config(cfg)
+
+  cfg
+}
+
+#' Parse intergene_elements and build the downstream cassette
+#'
+#' The downstream cassette is the full sequence placed between the gene 3' end
+#' and the barcode in the BsmBI gene blocks:
+#'   downstream_cassette = concat(intergene_elements) + polIII_promoter
+#'
+#' When intergene_elements is NULL or empty (the default), the cassette is just
+#' the polIII_promoter — identical to the original pipeline behavior.
+#'
+#' @param cfg Config list (must already have polIII_promoter set)
+#' @return Modified cfg with added fields:
+#'   - intergene_elements: validated list of elements (may be empty list)
+#'   - downstream_cassette: concatenated sequence string
+#'   - intergene_concat: concatenated intergene-only sequence (empty string if none)
+build_downstream_cassette <- function(cfg) {
+  # Normalize intergene_elements
+  if (is.null(cfg$intergene_elements)) {
+    cfg$intergene_elements <- list()
+  }
+
+  # Validate each element has name and sequence
+  if (length(cfg$intergene_elements) > 0) {
+    for (i in seq_along(cfg$intergene_elements)) {
+      elem <- cfg$intergene_elements[[i]]
+      if (is.null(elem$name) || !nzchar(elem$name)) {
+        stop("intergene_elements[[", i, "]] is missing a 'name' field")
+      }
+      if (is.null(elem$sequence) || !nzchar(elem$sequence)) {
+        stop("intergene_elements[[", i, "]] ('", elem$name, "') is missing a 'sequence' field")
+      }
+      # Uppercase and validate DNA
+      elem$sequence <- toupper(elem$sequence)
+      if (grepl("[^ACGT]", elem$sequence)) {
+        stop("intergene_elements[[", i, "]] ('", elem$name,
+             "') sequence contains non-ACGT characters")
+      }
+      cfg$intergene_elements[[i]] <- elem
+    }
+
+    # Build concatenated intergene sequence
+    intergene_seqs <- vapply(cfg$intergene_elements, function(e) e$sequence, character(1))
+    cfg$intergene_concat <- paste0(intergene_seqs, collapse = "")
+
+    element_names <- vapply(cfg$intergene_elements, function(e) e$name, character(1))
+    cli::cli_alert_info(paste0(
+      "Intergene elements: ", paste(element_names, collapse = " + "),
+      " (", nchar(cfg$intergene_concat), " nt total)"
+    ))
+  } else {
+    cfg$intergene_concat <- ""
+  }
+
+  # Build full downstream cassette: intergene elements + polIII promoter
+  polIII <- cfg$polIII_promoter %||% ""
+  cfg$downstream_cassette <- paste0(cfg$intergene_concat, polIII)
 
   cfg
 }

@@ -1470,12 +1470,17 @@ derive_oh3_from_promoter <- function(polIII) {
 #' @param max_block_length Max synthesis length (default 1800)
 #' @param config List with fidelity_threshold, manual_oh3, manual_oh4,
 #'   search_window_K, min_mutable_codons
+#' @param downstream_cassette Full downstream cassette sequence (intergene + polIII).
+#'   When NULL (default), uses polIII only — backward compatible.
 #' @return assembly_plan list (see plan doc Section 5.2)
 plan_assembly <- function(cds, polIII, max_mutable_nt,
                            max_block_length = MAX_GENEBLOCK_LENGTH,
-                           config = list()) {
+                           config = list(),
+                           downstream_cassette = NULL) {
   gene_len <- nchar(cds)
-  polIII_len <- nchar(polIII)
+  # For oh3 derivation, always use polIII (the last element, adjacent to barcode).
+  # For block length calculations, use the full downstream cassette length.
+  polIII_len <- if (!is.null(downstream_cassette)) nchar(downstream_cassette) else nchar(polIII)
 
   # Unpack config with defaults
   fidelity_threshold <- config$fidelity_threshold %||% DEFAULT_FIDELITY_THRESHOLD
@@ -1736,6 +1741,18 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   } else 0L
   n_neither_hf <- n_boundaries - n_both_hf - n_one_hf
 
+  # Compute core_downstream_cassette for gene block design.
+  # When oh3 is derived from the PolIII promoter's terminal 5 nt, gene blocks
+  # use the cassette with the last 5 nt trimmed (encoded by the BsmBI oh3+spacer).
+  # For backward compat: NULL when no intergene elements (existing core_polIII
+  # already handles the PolIII-only case in design_wt_geneblocks).
+  core_downstream_cassette <- if (!is.null(downstream_cassette) && !is.null(core_polIII)) {
+    # downstream_cassette = intergene + polIII; trim last 5 nt = intergene + core_polIII
+    substring(downstream_cassette, 1, nchar(downstream_cassette) - 5L)
+  } else {
+    NULL
+  }
+
   assembly_plan <- list(
     tiles = tiles,
     oh3 = oh3,
@@ -1744,6 +1761,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     oh3_in_hf = oh3_in_hf,
     oh4_in_hf = oh4_in_hf,
     core_polIII = core_polIII,     # promoter minus last 5 nt (NULL if not derived)
+    core_downstream_cassette = core_downstream_cassette,  # full cassette minus last 5 nt (NULL if not derived)
     oh3_spacer = oh3_spacer,       # terminal nt of promoter (NULL if not derived)
     superblock_splits = all_splits,
     reaction_fidelity = reaction_fidelity_df,

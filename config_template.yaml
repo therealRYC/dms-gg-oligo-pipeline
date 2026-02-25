@@ -14,6 +14,26 @@ gene_fasta: "path/to/gene.fasta"          # Path to FASTA file with coding seque
 # the gene and barcode. This drives barcode transcription.
 polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGATAATTAGAATTAATTTGACTGTAAACACAAAGATATTAGTACAAAATACGTGACGTAGAAAGTAATAATTTCTTGGGTAGTTTGCAGTTTTTAATACGACTCACTATAGGGACTATCATATGCTTACCGTAACTTGAAAGTATTTCGATTTCTTGGCTTTATATATCTTGTGGAAAGGACGAAACACCG"
 
+# --- Intergene Elements (optional) ---
+# Additional sequence elements placed between the gene 3' end and the PolIII
+# promoter. Use this to insert reporters, selection cassettes, IRES elements,
+# or other constructs that should be part of the final assembled insert.
+#
+# Each element has a name and a sequence. Elements are concatenated in order
+# and placed between the gene and PolIII promoter in the BsmBI gene blocks.
+#
+# When omitted (default), the pipeline behaves exactly as before: the PolIII
+# promoter follows directly after the gene.
+#
+# Final construct layout:
+#   [Gene] — [intergene_element_1] — [intergene_element_2] — ... — [PolIII] — [Barcode]
+#
+# intergene_elements:
+#   - name: "T2A_GFP"
+#     sequence: "GAGGGCAGAGGAAGTCTG...ACGT"
+#   - name: "IRES_puro"
+#     sequence: "CCCCTCTCCCTCCC...ACGT"
+
 # --- Codon Usage Table (optional) ---
 # By default, the pipeline uses the built-in CoCoPUTs human codon usage table
 # (Alexaki et al. 2019, 119K CDS, GRCh38.p13). To use a custom table, provide

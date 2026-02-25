@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-02-21 — Thread codon_table_path config through step 3
+# Last updated: 2026-02-25 — Support intergene_elements for flexible gene constructs
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -104,7 +104,32 @@ cli::cli_alert_success("Codon usage table loaded: {codon_source} [{round(step_el
 # Step 4: Scan and domesticate enzyme sites (BsaI + BsmBI + PaqCI)
 cli::cli_h2("Step 4: Scanning for enzyme sites (BsaI, BsmBI, PaqCI)")
 step_start <- proc.time()
-scan_result <- scan_enzyme_sites(gene$cds, cfg$polIII_promoter, codon_usage)
+scan_result <- scan_enzyme_sites(gene$cds, cfg$polIII_promoter, codon_usage,
+                                  intergene_elements = cfg$intergene_elements)
+
+# Check intergene elements for enzyme sites (can't be auto-domesticated)
+if (nrow(scan_result$intergene_sites) > 0) {
+  n_sites <- nrow(scan_result$intergene_sites)
+  elements_affected <- unique(scan_result$intergene_sites$element_name)
+  cli::cli_alert_danger(paste0(
+    n_sites, " enzyme recognition site(s) found in intergene element(s): ",
+    paste(elements_affected, collapse = ", "),
+    ". These CANNOT be silently domesticated."
+  ))
+  cli::cli_alert_danger(
+    "The pipeline will continue, but assembly may fail at these sites. ",
+    "Consider replacing the affected sequences with site-free alternatives."
+  )
+}
+
+# Check junctions between downstream cassette components
+if (nrow(scan_result$junction_sites) > 0) {
+  n_junctions <- nrow(scan_result$junction_sites)
+  cli::cli_alert_danger(paste0(
+    n_junctions, " enzyme site(s) span junction(s) between downstream cassette components. ",
+    "These are created by joining adjacent sequences and cannot be auto-domesticated."
+  ))
+}
 
 # Save original CDS before domestication for traceability
 gene$original_cds <- gene$cds
@@ -167,7 +192,8 @@ assembly_plan <- plan_assembly(
     boundary_method = cfg$boundary_method,
     multi_k = cfg$multi_k_search,
     overlap_codons = cfg$overlap_codons
-  )
+  ),
+  downstream_cassette = if (nzchar(cfg$intergene_concat)) cfg$downstream_cassette else NULL
 )
 tiles <- assembly_plan$tiles
 oh3 <- assembly_plan$oh3
@@ -269,7 +295,7 @@ cli::cli_h2("Step 9: Designing gene blocks and helper plasmid")
 step_start <- proc.time()
 geneblock_result <- design_wt_geneblocks(
   cds         = gene$cds,
-  polIII      = cfg$polIII_promoter,
+  polIII      = cfg$downstream_cassette,
   tiles       = tiles,
   oh3         = oh3,
   oh4         = oh4,
@@ -321,7 +347,7 @@ if (isTRUE(cfg$simulate_assembly)) {
     variants         = variants_expanded,
     barcodes         = barcodes,
     cds              = gene$cds,
-    polIII           = cfg$polIII_promoter,
+    polIII           = cfg$downstream_cassette,
     assembly_plan    = assembly_plan,
     samples_per_tile = cfg$simulation_samples_per_tile
   )
@@ -405,6 +431,17 @@ cli::cli_alert_success(paste0("Oligos: ", nrow(oligos),
 cli::cli_alert_success(paste0("Gene blocks: ", nrow(geneblock_result$blocks)))
 cli::cli_alert_success(paste0("Tiles: ", nrow(tiles)))
 cli::cli_alert_success(paste0("Fixed overhangs: oh3=", oh3, ", oh4=", oh4))
+if (length(cfg$intergene_elements) > 0) {
+  element_names <- vapply(cfg$intergene_elements, function(e) e$name, character(1))
+  cli::cli_alert_success(paste0(
+    "Intergene elements: ", paste(element_names, collapse = " + "),
+    " (", nchar(cfg$intergene_concat), " nt)"
+  ))
+  cli::cli_alert_success(paste0(
+    "Downstream cassette: ", nchar(cfg$downstream_cassette), " nt ",
+    "(intergene + PolIII)"
+  ))
+}
 cli::cli_alert_success(paste0(
   "Barcodes: mode=unified hierarchical",
   ", length=", barcode_result$barcode_length,
