@@ -31,6 +31,7 @@ load_config <- function(config_path) {
   defaults <- list(
     max_oligo_length         = 300L,
     max_geneblock_length     = 1800L,
+    min_geneblock_length     = 300L,
     barcode_length           = 20L,
     min_hamming_distance     = 3L,
     barcode_prefix_length    = 12L,
@@ -58,6 +59,7 @@ load_config <- function(config_path) {
   # Coerce types
   cfg$max_oligo_length      <- as.integer(cfg$max_oligo_length)
   cfg$max_geneblock_length  <- as.integer(cfg$max_geneblock_length)
+  cfg$min_geneblock_length  <- as.integer(cfg$min_geneblock_length)
   # barcode_length: handle "auto" sentinel
   if (is.character(cfg$barcode_length) && tolower(cfg$barcode_length) == "auto") {
     cfg$barcode_length <- "auto"

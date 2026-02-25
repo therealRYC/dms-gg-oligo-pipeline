@@ -43,6 +43,7 @@ ENZYMES <- list(
 # --- Synthesis Limits ---
 MAX_OLIGO_LENGTH    <- 300L    # Twist Bioscience oligo pool max
 MAX_GENEBLOCK_LENGTH <- 1800L  # Gene fragment synthesis max
+MIN_GENEBLOCK_LENGTH <- 300L   # Twist gene fragment synthesis minimum
 
 # --- Amino Acid Alphabet ---
 AA_STANDARD <- c("A","C","D","E","F","G","H","I","K","L",
