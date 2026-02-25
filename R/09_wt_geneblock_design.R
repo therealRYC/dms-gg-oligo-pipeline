@@ -41,6 +41,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                                   oh3, oh4, paqci_star2, paqci_star1,
                                   superblock_boundaries = NULL,
                                   max_block_length = MAX_GENEBLOCK_LENGTH,
+                                  min_block_length = MIN_GENEBLOCK_LENGTH,
                                   fidelity_threshold = DEFAULT_FIDELITY_THRESHOLD,
                                   assembly_plan = NULL) {
 
@@ -48,6 +49,10 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
   gene_len <- nchar(cds)
   blocks <- list()
   manifests <- list()
+  # Minimum gene content (nt) for a sub-block to be useful after adding enzyme sites.
+  # A sub-block below this threshold would produce a gene fragment too short to synthesize.
+  block_overhead <- 22L  # 2 x 11-nt enzyme sites per block
+  min_sub_content <- max(5L, min_block_length - block_overhead)
 
   # Use core cassette (cassette minus last 5 nt) when oh3 is derived from promoter.
   # This avoids duplicating the oh3+spacer sequence that's already encoded in the
@@ -159,7 +164,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         keep_bsai <- logical(length(internal_nt))
         prev_sp_bsai <- wt_5prime_start - 1L
         for (j in seq_along(internal_nt)) {
-          if (internal_nt[j] - prev_sp_bsai >= 5L) {
+          if (internal_nt[j] - prev_sp_bsai >= min_sub_content) {
             keep_bsai[j] <- TRUE
             prev_sp_bsai <- internal_nt[j]
           }
@@ -253,8 +258,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         keep_idx <- logical(length(internal_splits))
         prev_sp <- wt_3prime_start - 1L
         for (j in seq_along(internal_splits)) {
-          # Non-final sub-block needs >= 5 nt gap (1+ nt gene + 4 nt junction OH)
-          if (internal_splits[j] - prev_sp >= 5L) {
+          if (internal_splits[j] - prev_sp >= min_sub_content) {
             keep_idx[j] <- TRUE
             prev_sp <- internal_splits[j]
           }

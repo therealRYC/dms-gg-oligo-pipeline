@@ -1349,6 +1349,9 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
     vapply(c(oh3, tiles$oh2_seq), reverse_complement, character(1))
   ))
 
+  # Collect tile boundary nt positions for proximity penalty
+  tile_boundary_nts <- unique(c(tiles$start_nt, tiles$end_nt))
+
   splits_3wt <- dp_solve_superblock_splits(
     cds = cds,
     region_start_nt = earliest_3wt_start,
@@ -1357,7 +1360,9 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
     extra_content_length = polIII_len,
     exclude_ohs = exclude_3wt,
     hf_set = hf_set,
-    oh_fidelity = oh_fidelity
+    oh_fidelity = oh_fidelity,
+    min_sub_length = min_sub_length,
+    tile_boundary_nts = tile_boundary_nts
   )
 
   # --- 5'WT boundaries (BsaI reaction) ---
@@ -1380,7 +1385,9 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
       extra_content_length = 0L,
       exclude_ohs = exclude_5wt,
       hf_set = hf_set,
-      oh_fidelity = oh_fidelity
+      oh_fidelity = oh_fidelity,
+      min_sub_length = min_sub_length,
+      tile_boundary_nts = tile_boundary_nts
     )
   } else {
     splits_5wt <- data.frame(
@@ -1528,6 +1535,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   boundary_method <- config$boundary_method %||% "dp"
   multi_k <- config$multi_k %||% TRUE
   overlap_codons <- config$overlap_codons %||% 4L
+  min_geneblock_length <- config$min_geneblock_length %||% MIN_GENEBLOCK_LENGTH
   min_mutable_nt <- config$min_mutable_nt
   if (is.null(min_mutable_nt)) {
     min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
@@ -1680,7 +1688,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     polIII_len = polIII_len,
     max_sub_length = max_block_length - block_overhead,
     hf_set = hf_set, oh_fidelity = oh_fidelity,
-    oh3 = oh3, oh4 = oh4, oh_L = oh_L
+    oh3 = oh3, oh4 = oh4, oh_L = oh_L,
+    min_sub_length = min_geneblock_length
   )
 
   all_splits <- assign_global_boundaries_to_tiles(
