@@ -111,6 +111,14 @@
   - Both options produce the same physical result (more BsmBI fragments in the same reaction). Option 3 is cleaner architecturally.
 - **Current workaround:** None. Pipeline will produce oversized gene blocks if cassette is too large.
 
+### BUG-005: Tile 20 AKAP11 3'WT block oversized — global split dropped incorrectly
+- **File:** `R/06_overhang_selection.R` (`assign_global_boundaries_to_tiles`)
+- **Status:** OPEN — confirmed via trace, not yet investigated
+- **What:** For AKAP11, tile 20's 3'WT region is 1635 nt gene + 250 nt PolIII = 1885 nt (exceeds 1778 nt max_sub_length). The global 3'WT DP correctly placed a split at nt 4278, which falls within tile 20's 3'WT range (starts at 4072). But `assign_global_boundaries_to_tiles()` drops this split — likely because the leading sub-block [4072, 4278] = 207 nt falls below `min_sub_length`, without checking that dropping it produces an oversized merged block (1885 > 1778).
+- **Root cause:** The assign function's "drop undersized sub-blocks" logic doesn't have a safety check: "is the merged result oversized?" It should keep the undersized split as the lesser evil when merging would exceed max_sub_length.
+- **Related to:** BUG-004 (both stem from 3'WT region size management). The broader issue is that global splits are computed for the *largest* WT region (earliest tile), then assigned to individual tiles. Tiles near the crossover point (where the split just barely falls in range) can get sub-blocks that are too small for the global split but too large without it.
+- **Likely fix:** In `assign_global_boundaries_to_tiles()`, when a split would be dropped for min_sub_length violation, check if merging exceeds max_sub_length. If so, keep the split (or trigger a local re-split).
+
 ## Verified NOT Bugs
 
 | Claim | Status |
