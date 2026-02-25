@@ -1223,6 +1223,7 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
           for (cj in rev(seq_len(ci - 1L))) {
             sub_len <- p - candidates[cj]
             if (sub_len > max_sub_length) break  # all earlier are farther
+            if (sub_len < min_sub_length) next   # sub-block too small
             if (!is.finite(dp_prev[cj])) next
 
             # Enforce overhang uniqueness: cand_oh[ci] must not match any
@@ -1258,7 +1259,7 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
     for (ci in seq_len(n_cand)) {
       if (!is.finite(dp_prev[ci])) next
       last_sub <- (region_end_nt - candidates[ci]) + extra_content_length
-      if (last_sub <= max_sub_length && last_sub > 0L) {
+      if (last_sub >= min_sub_length && last_sub <= max_sub_length && last_sub > 0L) {
         if (dp_prev[ci] > best_score) {
           best_score <- dp_prev[ci]
           best_ci <- ci
@@ -1335,7 +1336,8 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
 compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
                                                   polIII_len, max_sub_length,
                                                   hf_set, oh_fidelity,
-                                                  oh3, oh4, oh_L) {
+                                                  oh3, oh4, oh_L,
+                                                  min_sub_length = 0L) {
 
   # --- 3'WT boundaries (BsmBI reaction) ---
   # The longest possible 3'WT region: from earliest tile end to gene end
