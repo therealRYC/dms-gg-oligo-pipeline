@@ -129,7 +129,38 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       }
 
       if (length(sb_junction_nt) == 0) {
-        # Single 5'WT block
+        # Check if single block would exceed max_block_length
+        wt_5prime_seq <- substring(cds, wt_5prime_start, wt_5prime_end)
+        tentative_len <- nchar(wt_5prime_seq) + block_overhead
+
+        if (tentative_len > max_block_length && use_precomputed_splits &&
+            !is.null(assembly_plan$hf_set_used) && !is.null(assembly_plan$oh_fidelity_used)) {
+          # No global split available — compute local split
+          cli::cli_alert_info(paste0(
+            "Tile ", tile$tile_id, ": 5'WT block oversized (",
+            tentative_len, " > ", max_block_length,
+            " nt). Computing local split."
+          ))
+          local_exclude <- unique(c(tile$oh1_seq,
+            substring(cds, wt_5prime_start, wt_5prime_start + 3L),
+            vapply(c(tile$oh1_seq, substring(cds, wt_5prime_start, wt_5prime_start + 3L)),
+                   reverse_complement, character(1))))
+          local_splits <- optimize_split_points(
+            cds = cds,
+            block_start_nt = wt_5prime_start,
+            block_end_nt = wt_5prime_end,
+            max_sub_length = max_block_length - block_overhead,
+            existing_ohs = local_exclude,
+            hf_set = assembly_plan$hf_set_used,
+            oh_fidelity = assembly_plan$oh_fidelity_used
+          )
+          sb_junction_nt <- local_splits$split_nt
+          sb_junction_oh <- local_splits$junction_oh
+        }
+      }
+
+      if (length(sb_junction_nt) == 0) {
+        # Truly a single 5'WT block
         wt_5prime_seq <- substring(cds, wt_5prime_start, wt_5prime_end)
         block_name <- paste0("bsai_5wt_tile", tile$tile_id)
 
@@ -161,16 +192,43 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         # so adjacent sub-blocks naturally cover the full gene range.
         internal_nt <- sb_junction_nt
         internal_oh_bsai <- sb_junction_oh
+        max_sub_content <- max_block_length - block_overhead
+        # Forward pass: ensure each gap from previous boundary >= min_sub_content.
+        # When a gap is too small, check if skipping would create an oversized
+        # merged sub-block. If so, keep the undersized split (lesser evil).
         keep_bsai <- logical(length(internal_nt))
         prev_sp_bsai <- wt_5prime_start - 1L
         for (j in seq_along(internal_nt)) {
-          if (internal_nt[j] - prev_sp_bsai >= min_sub_content) {
+          gap <- internal_nt[j] - prev_sp_bsai
+          if (gap >= min_sub_content) {
             keep_bsai[j] <- TRUE
             prev_sp_bsai <- internal_nt[j]
+          } else {
+            # Gap too small — check if skipping would overflow
+            next_sp <- if (j < length(internal_nt)) internal_nt[j + 1L] else wt_5prime_end
+            merged_gap <- next_sp - prev_sp_bsai
+            if (merged_gap > max_sub_content) {
+              keep_bsai[j] <- TRUE
+              prev_sp_bsai <- internal_nt[j]
+            }
           }
         }
         internal_nt <- internal_nt[keep_bsai]
         internal_oh_bsai <- internal_oh_bsai[keep_bsai]
+        # Trailing gap check: drop last split(s) if final sub-block too small
+        while (length(internal_nt) > 0) {
+          trailing_gap <- wt_5prime_end - internal_nt[length(internal_nt)]
+          if (trailing_gap >= min_sub_content) break
+          prev_boundary <- if (length(internal_nt) >= 2L) {
+            internal_nt[length(internal_nt) - 1L]
+          } else {
+            wt_5prime_start - 1L
+          }
+          merged <- wt_5prime_end - prev_boundary
+          if (merged > max_sub_content) break  # can't merge safely
+          internal_nt <- internal_nt[-length(internal_nt)]
+          internal_oh_bsai <- internal_oh_bsai[-length(internal_oh_bsai)]
+        }
 
         split_points <- c(wt_5prime_start - 1L, internal_nt, wt_5prime_end)
         n_bsai_sub <- length(split_points) - 1L
@@ -225,21 +283,55 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       }
 
       if (nrow(sb_3wt_region) == 0) {
-        # Single 3'WT + PolIII block
-        block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
-        oh_5 <- tile$oh2_seq
-        oh_3 <- oh3
-        block_seq <- create_bsmbi_block(paste0(wt_3prime_seq, polIII_for_block),
-                                         oh_5, oh_3, oh3_spacer = oh3_spacer)
+        # Check if single block would exceed max_block_length
+        full_content <- paste0(wt_3prime_seq, polIII_for_block)
+        tentative_len <- nchar(full_content) + block_overhead
 
-        blocks[[length(blocks) + 1]] <- data.frame(
-          block_name = block_name, sequence = block_seq,
-          length = nchar(block_seq), enzyme_type = "BsmBI",
-          gene_region = paste0("3wt_polIII_tile", tile$tile_id),
-          stringsAsFactors = FALSE
-        )
-        bsmbi_parts <- block_name
-      } else {
+        if (tentative_len > max_block_length && use_precomputed_splits &&
+            !is.null(assembly_plan$hf_set_used) && !is.null(assembly_plan$oh_fidelity_used)) {
+          # No global split available for this tile's 3'WT region — compute local split
+          cli::cli_alert_info(paste0(
+            "Tile ", tile$tile_id, ": 3'WT block oversized (",
+            tentative_len, " > ", max_block_length,
+            " nt). Computing local split."
+          ))
+          local_exclude <- unique(c(oh3, tile$oh2_seq,
+            vapply(c(oh3, tile$oh2_seq), reverse_complement, character(1))))
+          local_splits <- optimize_split_points(
+            cds = cds,
+            block_start_nt = wt_3prime_start,
+            block_end_nt = wt_3prime_end,
+            max_sub_length = max_block_length - block_overhead,
+            existing_ohs = local_exclude,
+            hf_set = assembly_plan$hf_set_used,
+            oh_fidelity = assembly_plan$oh_fidelity_used,
+            extra_content_length = nchar(polIII_for_block)
+          )
+          # Use local splits as if they were pre-computed (fall through to superblock loop)
+          sb_3wt_region <- local_splits
+          sb_3wt_region$tile_id <- tile$tile_id
+          sb_3wt_region$block_type <- "bsmbi_3wt"
+        }
+
+        if (nrow(sb_3wt_region) == 0) {
+          # Truly a single block (fits within max or no local split found)
+          block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
+          oh_5 <- tile$oh2_seq
+          oh_3 <- oh3
+          block_seq <- create_bsmbi_block(paste0(wt_3prime_seq, polIII_for_block),
+                                           oh_5, oh_3, oh3_spacer = oh3_spacer)
+
+          blocks[[length(blocks) + 1]] <- data.frame(
+            block_name = block_name, sequence = block_seq,
+            length = nchar(block_seq), enzyme_type = "BsmBI",
+            gene_region = paste0("3wt_polIII_tile", tile$tile_id),
+            stringsAsFactors = FALSE
+          )
+          bsmbi_parts <- block_name
+        }
+      }
+
+      if (nrow(sb_3wt_region) > 0) {
         # Split 3'WT region at pre-computed split points.
         # split_nt is the last nucleotide of sub-block N;
         # junction_oh = cds[split_nt-3 : split_nt] (last 4 nt of that sub-block).
@@ -255,16 +347,64 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         # naturally covers the full range.
         internal_splits <- sb_3wt_region$split_nt
         internal_oh <- sb_3wt_region$junction_oh
+        max_sub_content <- max_block_length - block_overhead
+        # Forward pass: ensure each gap from previous boundary >= min_sub_content.
+        # When a gap is too small, check if skipping the split would create an
+        # oversized merged sub-block. If so, keep the undersized split (lesser evil).
         keep_idx <- logical(length(internal_splits))
         prev_sp <- wt_3prime_start - 1L
         for (j in seq_along(internal_splits)) {
-          if (internal_splits[j] - prev_sp >= min_sub_content) {
+          gap <- internal_splits[j] - prev_sp
+          if (gap >= min_sub_content) {
             keep_idx[j] <- TRUE
             prev_sp <- internal_splits[j]
+          } else {
+            # Gap too small — check if skipping would overflow
+            next_sp <- if (j < length(internal_splits)) internal_splits[j + 1L] else wt_3prime_end
+            merged_gap <- next_sp - prev_sp
+            # For the last sub-block, add PolIII content
+            if (j == length(internal_splits) || (j < length(internal_splits) && !any(keep_idx[(j+1):length(internal_splits)]))) {
+              # This may become part of the last sub-block — conservative: don't add polIII here
+            }
+            if (merged_gap > max_sub_content) {
+              # Skipping would overflow — keep the undersized split
+              keep_idx[j] <- TRUE
+              prev_sp <- internal_splits[j]
+            }
+            # else: safe to skip, sub-block merges with next
           }
         }
         internal_splits <- internal_splits[keep_idx]
         internal_oh <- internal_oh[keep_idx]
+        # Leading gap check: drop first split(s) if first sub-block too small
+        while (length(internal_splits) > 0) {
+          leading_gap <- internal_splits[1L] - (wt_3prime_start - 1L)
+          if (leading_gap >= min_sub_content) break
+          next_boundary <- if (length(internal_splits) >= 2L) {
+            internal_splits[2L]
+          } else {
+            wt_3prime_end
+          }
+          merged <- next_boundary - (wt_3prime_start - 1L)
+          if (merged > max_sub_content) break  # can't merge safely
+          internal_splits <- internal_splits[-1L]
+          internal_oh <- internal_oh[-1L]
+        }
+        # Trailing gap check: last sub-block carries PolIII
+        while (length(internal_splits) > 0) {
+          trailing_gene <- wt_3prime_end - internal_splits[length(internal_splits)]
+          trailing_total <- trailing_gene + nchar(polIII_for_block)
+          if (trailing_total >= min_sub_content) break
+          prev_boundary <- if (length(internal_splits) >= 2L) {
+            internal_splits[length(internal_splits) - 1L]
+          } else {
+            wt_3prime_start - 1L
+          }
+          merged_total <- (wt_3prime_end - prev_boundary) + nchar(polIII_for_block)
+          if (merged_total > max_sub_content) break
+          internal_splits <- internal_splits[-length(internal_splits)]
+          internal_oh <- internal_oh[-length(internal_oh)]
+        }
 
         split_points <- c(wt_3prime_start - 1L, internal_splits, wt_3prime_end)
         n_sub <- length(split_points) - 1L
