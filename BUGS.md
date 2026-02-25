@@ -100,6 +100,17 @@
 - **Files to modify:** `R/04_mutation_design.R` (new function), `run_pipeline.R` (call site), `R/11_output.R` (output columns), `tests/testthat/test-mutation-design.R` (tests)
 - **Current workaround (F9):** All 40 variants blanket-skipped and written to `_skipped_variants.csv`. Safe but loses coverage at 2 positions per gene.
 
+### BUG-004: Large downstream cassette exceeds synthesis limit (unsplittable)
+- **File:** `R/06_overhang_selection.R` (`dp_solve_superblock_splits`), `R/09_wt_geneblock_design.R`
+- **Status:** OPEN — design decision needed
+- **What:** The superblock DP can only place splits within the gene region (codon boundaries). The downstream cassette (intergene + PolIII) is treated as an unsplittable blob appended to the last sub-block via `extra_content_length`. If the cassette alone exceeds ~1778 nt (1800 - 22 overhead), or if cassette + remaining gene content in the last sub-block exceeds that limit, the DP fails to find a feasible solution. It returns empty splits with a warning and the pipeline proceeds to build an unorderable gene block.
+- **Trigger:** `intergene_elements` totaling >~1400 nt (leaving room for PolIII ~300 nt + some gene content). A 3000 nt intergene region makes it impossible regardless of gene length.
+- **Two candidate fixes:**
+  - **Option 1 — Separate cassette fragments:** Treat intergene elements as independent BsmBI gene block(s) with their own junction overhangs. Conceptually adds a new fragment category. PolIII stays as the most 3' element before oh3/barcode. Downside: more overhangs in the BsmBI reaction = lower set fidelity.
+  - **Option 3 — Extend DP into cassette (preferred):** Concatenate gene + cassette into a single splittable sequence. The DP places splits anywhere in the combined sequence — codon boundaries within the gene, any position within the cassette. No new fragment categories; cassette sub-blocks are just more superblock sub-blocks. Requires: (a) coordinate system refactor (positions > gene_len index into cassette), (b) mixed candidate generation (codon-boundary in gene, free in cassette), (c) protect last ~10 nt of cassette from splitting (oh3 derivation region). Affected files: `dp_solve_superblock_splits()`, `compute_global_superblock_boundaries()`, `design_wt_geneblocks()`.
+  - Both options produce the same physical result (more BsmBI fragments in the same reaction). Option 3 is cleaner architecturally.
+- **Current workaround:** None. Pipeline will produce oversized gene blocks if cassette is too large.
+
 ## Verified NOT Bugs
 
 | Claim | Status |
