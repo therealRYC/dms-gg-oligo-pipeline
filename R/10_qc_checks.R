@@ -24,6 +24,7 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
                            oh3, oh4,
                            max_oligo_length = MAX_OLIGO_LENGTH,
                            max_block_length = MAX_GENEBLOCK_LENGTH,
+                           min_block_length = MIN_GENEBLOCK_LENGTH,
                            min_hamming = DEFAULT_MIN_HAMMING,
                            assembly_plan = NULL) {
   checks <- list()
@@ -217,6 +218,17 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
     pass   = n_poliii_term == 0L,
     detail = paste0(n_poliii_term, " / ", length(barcodes),
                     " barcode(s) contain TTTT")
+  )
+
+  # 15. Gene block minimum length (synthesis minimum, warning only)
+  n_under_min <- sum(blocks$length < min_block_length)
+  checks[[length(checks) + 1L]] <- qc_check(
+    name   = "block_min_length",
+    desc   = "All gene blocks above synthesis minimum length",
+    pass   = n_under_min == 0L,
+    detail = paste0(n_under_min, " block(s) below ", min_block_length,
+                    " nt minimum. Range: ", min(blocks$length), "-",
+                    max(blocks$length), " nt")
   )
 
   # Compile report

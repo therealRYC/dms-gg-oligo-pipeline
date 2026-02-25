@@ -1080,10 +1080,17 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 #'   in the same GG reaction — e.g., oh3 + all oh2 values for BsmBI)
 #' @param hf_set High-fidelity overhang set
 #' @param oh_fidelity Fidelity data frame (overhang + fidelity columns)
+#' @param min_sub_length Minimum gene content per sub-block (default 0, no minimum).
+#'   When > 0, the DP rejects transitions that produce sub-blocks shorter than this.
+#' @param tile_boundary_nts Integer vector of tile boundary positions (end_nt for 3'WT,
+#'   start_nt for 5'WT). Used for soft proximity penalty: splits near a tile boundary
+#'   get a reduced score to avoid tiny sub-blocks for narrower tiles.
 #' @return Data frame with split_nt, junction_oh, junction_in_hf, junction_fidelity
 dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
                                         max_sub_length, extra_content_length = 0L,
-                                        exclude_ohs, hf_set, oh_fidelity) {
+                                        exclude_ohs, hf_set, oh_fidelity,
+                                        min_sub_length = 0L,
+                                        tile_boundary_nts = integer(0)) {
 
   gene_region_length <- region_end_nt - region_start_nt + 1L
   total_content <- gene_region_length + extra_content_length
@@ -1160,6 +1167,18 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
     cand_in_hf[ci] <- in_hf
     cand_fid[ci] <- fid
     cand_score[ci] <- 10 * in_hf + fid
+
+    # Soft penalty: prefer splits away from tile boundaries.
+    # When a global split falls just inside a narrow tile's WT region, it creates
+    # a tiny first sub-block. Penalizing near-boundary candidates makes the DP
+    # prefer positions that produce well-sized blocks for all tiles.
+    if (min_sub_length > 0L && length(tile_boundary_nts) > 0) {
+      dists <- p - tile_boundary_nts
+      near <- dists[dists > 0L & dists < min_sub_length]
+      if (length(near) > 0) {
+        cand_score[ci] <- cand_score[ci] - 5 * max(1 - near / min_sub_length)
+      }
+    }
   }
 
   # Determine minimum number of splits K
@@ -1187,7 +1206,7 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
       if (!cand_valid[ci]) next
       p <- candidates[ci]
       first_sub <- p - prev_boundary  # = p - region_start_nt + 1
-      if (first_sub <= max_sub_length) {
+      if (first_sub >= min_sub_length && first_sub <= max_sub_length) {
         dp_prev[ci] <- cand_score[ci]
       }
     }
@@ -1204,7 +1223,25 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
           for (cj in rev(seq_len(ci - 1L))) {
             sub_len <- p - candidates[cj]
             if (sub_len > max_sub_length) break  # all earlier are farther
+            if (sub_len < min_sub_length) next   # sub-block too small
             if (!is.finite(dp_prev[cj])) next
+
+            # Enforce overhang uniqueness: cand_oh[ci] must not match any
+            # ancestor in the parent chain. This prevents ambiguous ligation
+            # where two superblock junction overhangs are identical.
+            oh_conflict <- FALSE
+            ancestor <- cj
+            for (kk in (k - 1L):1L) {
+              if (cand_oh[ancestor] == cand_oh[ci]) {
+                oh_conflict <- TRUE
+                break
+              }
+              if (kk > 1L) {
+                ancestor <- parent[kk, ancestor]
+                if (is.na(ancestor)) break
+              }
+            }
+            if (oh_conflict) next
 
             new_score <- dp_prev[cj] + cand_score[ci]
             if (new_score > dp_curr[ci]) {
@@ -1222,7 +1259,7 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
     for (ci in seq_len(n_cand)) {
       if (!is.finite(dp_prev[ci])) next
       last_sub <- (region_end_nt - candidates[ci]) + extra_content_length
-      if (last_sub <= max_sub_length && last_sub > 0L) {
+      if (last_sub >= min_sub_length && last_sub <= max_sub_length && last_sub > 0L) {
         if (dp_prev[ci] > best_score) {
           best_score <- dp_prev[ci]
           best_ci <- ci
@@ -1299,7 +1336,8 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
 compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
                                                   polIII_len, max_sub_length,
                                                   hf_set, oh_fidelity,
-                                                  oh3, oh4, oh_L) {
+                                                  oh3, oh4, oh_L,
+                                                  min_sub_length = 0L) {
 
   # --- 3'WT boundaries (BsmBI reaction) ---
   # The longest possible 3'WT region: from earliest tile end to gene end
@@ -1311,6 +1349,9 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
     vapply(c(oh3, tiles$oh2_seq), reverse_complement, character(1))
   ))
 
+  # Collect tile boundary nt positions for proximity penalty
+  tile_boundary_nts <- unique(c(tiles$start_nt, tiles$end_nt))
+
   splits_3wt <- dp_solve_superblock_splits(
     cds = cds,
     region_start_nt = earliest_3wt_start,
@@ -1319,7 +1360,9 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
     extra_content_length = polIII_len,
     exclude_ohs = exclude_3wt,
     hf_set = hf_set,
-    oh_fidelity = oh_fidelity
+    oh_fidelity = oh_fidelity,
+    min_sub_length = min_sub_length,
+    tile_boundary_nts = tile_boundary_nts
   )
 
   # --- 5'WT boundaries (BsaI reaction) ---
@@ -1342,7 +1385,9 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
       extra_content_length = 0L,
       exclude_ohs = exclude_5wt,
       hf_set = hf_set,
-      oh_fidelity = oh_fidelity
+      oh_fidelity = oh_fidelity,
+      min_sub_length = min_sub_length,
+      tile_boundary_nts = tile_boundary_nts
     )
   } else {
     splits_5wt <- data.frame(
@@ -1358,8 +1403,9 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
 #' Assign global superblock boundaries to individual tiles
 #'
 #' For each tile, selects the subset of global boundaries that fall within
-#' that tile's WT region range. The result is a per-tile split data frame
-#' in the same format as the old per-tile optimize_split_points() output.
+#' that tile's WT region range, then validates per-tile sub-block sizes.
+#' Splits that create undersized leading or trailing sub-blocks are dropped
+#' (merged with adjacent sub-block) unless merging would exceed max_sub_length.
 #'
 #' Because boundaries are global, tiles with overlapping WT regions share
 #' the same boundary-to-boundary sub-blocks, enabling efficient deduplication.
@@ -1368,10 +1414,16 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
 #' @param global_3wt Data frame of global 3'WT split positions
 #' @param global_5wt Data frame of global 5'WT split positions
 #' @param gene_len Gene length in nt
+#' @param min_sub_length Minimum gene content per sub-block (default 0)
+#' @param max_sub_length Maximum gene content per sub-block (default Inf)
+#' @param polIII_len Length of PolIII/downstream cassette appended to last 3'WT sub-block
 #' @return Data frame with split_nt, junction_oh, junction_in_hf,
 #'   junction_fidelity, block_type, tile_id
 assign_global_boundaries_to_tiles <- function(tiles, global_3wt, global_5wt,
-                                               gene_len) {
+                                               gene_len,
+                                               min_sub_length = 0L,
+                                               max_sub_length = Inf,
+                                               polIII_len = 0L) {
   splits_list <- list()
 
   for (i in seq_len(nrow(tiles))) {
@@ -1384,9 +1436,50 @@ assign_global_boundaries_to_tiles <- function(tiles, global_3wt, global_5wt,
                   global_3wt$split_nt < gene_len
       if (any(in_range)) {
         s3 <- global_3wt[in_range, , drop = FALSE]
-        s3$block_type <- "bsmbi_3wt"
-        s3$tile_id <- tile$tile_id
-        splits_list[[length(splits_list) + 1L]] <- s3
+
+        # Per-tile size validation for 3'WT splits
+        if (min_sub_length > 0L && nrow(s3) > 0) {
+          region_start <- tile$end_nt  # boundary before first sub-block
+          region_end <- gene_len
+          split_nts <- s3$split_nt
+
+          # Drop leading splits that create undersized first sub-block
+          while (length(split_nts) > 0) {
+            leading_gap <- split_nts[1L] - region_start
+            if (leading_gap >= min_sub_length) break
+            # Check if merging with second sub-block would overflow
+            next_boundary <- if (length(split_nts) >= 2L) split_nts[2L] else region_end
+            merged <- next_boundary - region_start
+            if (merged > max_sub_length) break  # can't merge, keep undersized
+            split_nts <- split_nts[-1L]
+          }
+
+          # Drop trailing splits that create undersized last sub-block
+          # (last 3'WT sub-block carries polIII_len extra content)
+          while (length(split_nts) > 0) {
+            trailing_gene <- region_end - split_nts[length(split_nts)]
+            trailing_total <- trailing_gene + polIII_len
+            if (trailing_total >= min_sub_length) break
+            # Check if merging with preceding sub-block would overflow
+            if (length(split_nts) >= 2L) {
+              prev_boundary <- split_nts[length(split_nts) - 1L]
+            } else {
+              prev_boundary <- region_start
+            }
+            merged_total <- (region_end - prev_boundary) + polIII_len
+            if (merged_total > max_sub_length) break  # can't merge, keep undersized
+            split_nts <- split_nts[-length(split_nts)]
+          }
+
+          # Rebuild s3 with surviving splits
+          s3 <- s3[s3$split_nt %in% split_nts, , drop = FALSE]
+        }
+
+        if (nrow(s3) > 0) {
+          s3$block_type <- "bsmbi_3wt"
+          s3$tile_id <- tile$tile_id
+          splits_list[[length(splits_list) + 1L]] <- s3
+        }
       }
     }
 
@@ -1397,9 +1490,47 @@ assign_global_boundaries_to_tiles <- function(tiles, global_3wt, global_5wt,
                   global_5wt$split_nt < tile$start_nt
       if (any(in_range)) {
         s5 <- global_5wt[in_range, , drop = FALSE]
-        s5$block_type <- "bsai_5wt"
-        s5$tile_id <- tile$tile_id
-        splits_list[[length(splits_list) + 1L]] <- s5
+
+        # Per-tile size validation for 5'WT splits
+        if (min_sub_length > 0L && nrow(s5) > 0) {
+          region_start <- 0L  # boundary before first sub-block (gene start - 1)
+          region_end <- tile$start_nt - 1L
+          split_nts <- s5$split_nt
+
+          # Drop trailing splits that create undersized last sub-block
+          while (length(split_nts) > 0) {
+            trailing_gap <- region_end - split_nts[length(split_nts)]
+            if (trailing_gap >= min_sub_length) break
+            # Check if merging with preceding sub-block would overflow
+            if (length(split_nts) >= 2L) {
+              prev_boundary <- split_nts[length(split_nts) - 1L]
+            } else {
+              prev_boundary <- region_start
+            }
+            merged <- region_end - prev_boundary
+            if (merged > max_sub_length) break  # can't merge, keep undersized
+            split_nts <- split_nts[-length(split_nts)]
+          }
+
+          # Drop leading splits that create undersized first sub-block
+          while (length(split_nts) > 0) {
+            leading_gap <- split_nts[1L] - region_start
+            if (leading_gap >= min_sub_length) break
+            next_boundary <- if (length(split_nts) >= 2L) split_nts[2L] else region_end
+            merged <- next_boundary - region_start
+            if (merged > max_sub_length) break
+            split_nts <- split_nts[-1L]
+          }
+
+          # Rebuild s5 with surviving splits
+          s5 <- s5[s5$split_nt %in% split_nts, , drop = FALSE]
+        }
+
+        if (nrow(s5) > 0) {
+          s5$block_type <- "bsai_5wt"
+          s5$tile_id <- tile$tile_id
+          splits_list[[length(splits_list) + 1L]] <- s5
+        }
       }
     }
   }
@@ -1490,6 +1621,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   boundary_method <- config$boundary_method %||% "dp"
   multi_k <- config$multi_k %||% TRUE
   overlap_codons <- config$overlap_codons %||% 4L
+  min_geneblock_length <- config$min_geneblock_length %||% MIN_GENEBLOCK_LENGTH
   min_mutable_nt <- config$min_mutable_nt
   if (is.null(min_mutable_nt)) {
     min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
@@ -1642,14 +1774,18 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     polIII_len = polIII_len,
     max_sub_length = max_block_length - block_overhead,
     hf_set = hf_set, oh_fidelity = oh_fidelity,
-    oh3 = oh3, oh4 = oh4, oh_L = oh_L
+    oh3 = oh3, oh4 = oh4, oh_L = oh_L,
+    min_sub_length = max(0L, min_geneblock_length - block_overhead)
   )
 
   all_splits <- assign_global_boundaries_to_tiles(
     tiles = tiles,
     global_3wt = global_boundaries$splits_3wt,
     global_5wt = global_boundaries$splits_5wt,
-    gene_len = gene_len
+    gene_len = gene_len,
+    min_sub_length = max(0L, min_geneblock_length - block_overhead),
+    max_sub_length = max_block_length - block_overhead,
+    polIII_len = polIII_len
   )
 
   n_global_3wt <- nrow(global_boundaries$splits_3wt)
@@ -1767,6 +1903,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     reaction_fidelity = reaction_fidelity_df,
     strategy_used = strategy_used,
     hf_set_used = hf_set,
+    oh_fidelity_used = oh_fidelity,
     summary = list(
       n_tiles = n_tiles,
       n_boundaries = n_boundaries,

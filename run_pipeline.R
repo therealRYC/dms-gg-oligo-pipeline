@@ -191,7 +191,8 @@ assembly_plan <- plan_assembly(
     search_window_K = cfg$search_window_K,
     boundary_method = cfg$boundary_method,
     multi_k = cfg$multi_k_search,
-    overlap_codons = cfg$overlap_codons
+    overlap_codons = cfg$overlap_codons,
+    min_geneblock_length = cfg$min_geneblock_length
   ),
   downstream_cassette = if (nzchar(cfg$intergene_concat)) cfg$downstream_cassette else NULL
 )
@@ -302,6 +303,7 @@ geneblock_result <- design_wt_geneblocks(
   paqci_star2 = cfg$paqci_star2,
   paqci_star1 = cfg$paqci_star1,
   max_block_length    = cfg$max_geneblock_length,
+  min_block_length    = cfg$min_geneblock_length,
   fidelity_threshold  = cfg$overhang_fidelity_threshold,
   assembly_plan       = assembly_plan
 )
@@ -326,6 +328,7 @@ qc_result <- run_qc_checks(
   oh4             = oh4,
   max_oligo_length = cfg$max_oligo_length,
   max_block_length = cfg$max_geneblock_length,
+  min_block_length = cfg$min_geneblock_length,
   min_hamming      = cfg$min_hamming_distance,
   assembly_plan    = assembly_plan
 )
