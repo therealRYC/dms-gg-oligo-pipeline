@@ -1206,7 +1206,7 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
       if (!cand_valid[ci]) next
       p <- candidates[ci]
       first_sub <- p - prev_boundary  # = p - region_start_nt + 1
-      if (first_sub <= max_sub_length) {
+      if (first_sub >= min_sub_length && first_sub <= max_sub_length) {
         dp_prev[ci] <- cand_score[ci]
       }
     }
