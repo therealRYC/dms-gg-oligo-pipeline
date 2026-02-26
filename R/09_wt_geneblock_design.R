@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-25 — Support downstream_cassette (intergene_elements + polIII) for flexible constructs
+# Last updated: 2026-02-26 — Fix PolIII-aware split filtering in 3'WT forward/leading gap checks
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -38,20 +38,19 @@
 #'   - tile_manifests: data frame describing per-tile reaction contents
 #'   - helper_plasmid: data frame describing helper plasmid insert
 design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
-                                  oh3, oh4, paqci_star2, paqci_star1,
-                                  superblock_boundaries = NULL,
-                                  max_block_length = MAX_GENEBLOCK_LENGTH,
-                                  min_block_length = MIN_GENEBLOCK_LENGTH,
-                                  fidelity_threshold = DEFAULT_FIDELITY_THRESHOLD,
-                                  assembly_plan = NULL) {
-
+                                 oh3, oh4, paqci_star2, paqci_star1,
+                                 superblock_boundaries = NULL,
+                                 max_block_length = MAX_GENEBLOCK_LENGTH,
+                                 min_block_length = MIN_GENEBLOCK_LENGTH,
+                                 fidelity_threshold = DEFAULT_FIDELITY_THRESHOLD,
+                                 assembly_plan = NULL) {
   n_tiles <- nrow(tiles)
   gene_len <- nchar(cds)
   blocks <- list()
   manifests <- list()
   # Minimum gene content (nt) for a sub-block to be useful after adding enzyme sites.
   # A sub-block below this threshold would produce a gene fragment too short to synthesize.
-  block_overhead <- 22L  # 2 x 11-nt enzyme sites per block
+  block_overhead <- 22L # 2 x 11-nt enzyme sites per block
   min_sub_content <- max(5L, min_block_length - block_overhead)
 
   # Use core cassette (cassette minus last 5 nt) when oh3 is derived from promoter.
@@ -79,14 +78,18 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
     sb_5wt <- if (nrow(ap_splits) > 0) {
       ap_splits[ap_splits$block_type == "bsai_5wt", , drop = FALSE]
     } else {
-      data.frame(split_nt = integer(0), junction_oh = character(0),
-                 tile_id = integer(0), stringsAsFactors = FALSE)
+      data.frame(
+        split_nt = integer(0), junction_oh = character(0),
+        tile_id = integer(0), stringsAsFactors = FALSE
+      )
     }
     sb_3wt <- if (nrow(ap_splits) > 0) {
       ap_splits[ap_splits$block_type == "bsmbi_3wt", , drop = FALSE]
     } else {
-      data.frame(split_nt = integer(0), junction_oh = character(0),
-                 tile_id = integer(0), stringsAsFactors = FALSE)
+      data.frame(
+        split_nt = integer(0), junction_oh = character(0),
+        tile_id = integer(0), stringsAsFactors = FALSE
+      )
     }
   } else {
     if (is.null(superblock_boundaries)) {
@@ -122,7 +125,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       } else {
         sb_in_region <- superblock_boundaries[
           superblock_boundaries$junction_nt >= wt_5prime_start &
-          superblock_boundaries$junction_nt <= wt_5prime_end, , drop = FALSE
+            superblock_boundaries$junction_nt <= wt_5prime_end, ,
+          drop = FALSE
         ]
         sb_junction_nt <- sb_in_region$junction_nt
         sb_junction_oh <- sb_in_region$junction_oh
@@ -134,17 +138,21 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         tentative_len <- nchar(wt_5prime_seq) + block_overhead
 
         if (tentative_len > max_block_length && use_precomputed_splits &&
-            !is.null(assembly_plan$hf_set_used) && !is.null(assembly_plan$oh_fidelity_used)) {
+          !is.null(assembly_plan$hf_set_used) && !is.null(assembly_plan$oh_fidelity_used)) {
           # No global split available — compute local split
           cli::cli_alert_info(paste0(
             "Tile ", tile$tile_id, ": 5'WT block oversized (",
             tentative_len, " > ", max_block_length,
             " nt). Computing local split."
           ))
-          local_exclude <- unique(c(tile$oh1_seq,
+          local_exclude <- unique(c(
+            tile$oh1_seq,
             substring(cds, wt_5prime_start, wt_5prime_start + 3L),
-            vapply(c(tile$oh1_seq, substring(cds, wt_5prime_start, wt_5prime_start + 3L)),
-                   reverse_complement, character(1))))
+            vapply(
+              c(tile$oh1_seq, substring(cds, wt_5prime_start, wt_5prime_start + 3L)),
+              reverse_complement, character(1)
+            )
+          ))
           local_splits <- optimize_split_points(
             cds = cds,
             block_start_nt = wt_5prime_start,
@@ -225,7 +233,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             wt_5prime_start - 1L
           }
           merged <- wt_5prime_end - prev_boundary
-          if (merged > max_sub_content) break  # can't merge safely
+          if (merged > max_sub_content) break # can't merge safely
           internal_nt <- internal_nt[-length(internal_nt)]
           internal_oh_bsai <- internal_oh_bsai[-length(internal_oh_bsai)]
         }
@@ -278,8 +286,10 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       if (use_precomputed_splits) {
         sb_3wt_region <- sb_3wt[sb_3wt$tile_id == tile$tile_id, , drop = FALSE]
       } else {
-        sb_3wt_region <- data.frame(split_nt = integer(0), junction_oh = character(0),
-                                     stringsAsFactors = FALSE)
+        sb_3wt_region <- data.frame(
+          split_nt = integer(0), junction_oh = character(0),
+          stringsAsFactors = FALSE
+        )
       }
 
       if (nrow(sb_3wt_region) == 0) {
@@ -288,15 +298,17 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         tentative_len <- nchar(full_content) + block_overhead
 
         if (tentative_len > max_block_length && use_precomputed_splits &&
-            !is.null(assembly_plan$hf_set_used) && !is.null(assembly_plan$oh_fidelity_used)) {
+          !is.null(assembly_plan$hf_set_used) && !is.null(assembly_plan$oh_fidelity_used)) {
           # No global split available for this tile's 3'WT region — compute local split
           cli::cli_alert_info(paste0(
             "Tile ", tile$tile_id, ": 3'WT block oversized (",
             tentative_len, " > ", max_block_length,
             " nt). Computing local split."
           ))
-          local_exclude <- unique(c(oh3, tile$oh2_seq,
-            vapply(c(oh3, tile$oh2_seq), reverse_complement, character(1))))
+          local_exclude <- unique(c(
+            oh3, tile$oh2_seq,
+            vapply(c(oh3, tile$oh2_seq), reverse_complement, character(1))
+          ))
           local_splits <- optimize_split_points(
             cds = cds,
             block_start_nt = wt_3prime_start,
@@ -319,7 +331,9 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           oh_5 <- tile$oh2_seq
           oh_3 <- oh3
           block_seq <- create_bsmbi_block(paste0(wt_3prime_seq, polIII_for_block),
-                                           oh_5, oh_3, oh3_spacer = oh3_spacer)
+            oh_5, oh_3,
+            oh3_spacer = oh3_spacer
+          )
 
           blocks[[length(blocks) + 1]] <- data.frame(
             block_name = block_name, sequence = block_seq,
@@ -362,9 +376,18 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             # Gap too small — check if skipping would overflow
             next_sp <- if (j < length(internal_splits)) internal_splits[j + 1L] else wt_3prime_end
             merged_gap <- next_sp - prev_sp
-            # For the last sub-block, add PolIII content
-            if (j == length(internal_splits) || (j < length(internal_splits) && !any(keep_idx[(j+1):length(internal_splits)]))) {
-              # This may become part of the last sub-block — conservative: don't add polIII here
+            # If dropping this split would make the remaining block become the
+            # last sub-block, include PolIII length in the overflow check.
+            # Without this, merging near-boundary tiles with gene content just
+            # under max_sub_content can produce oversized blocks once PolIII
+            # is appended.
+            remaining_splits_after <- if (j < length(internal_splits)) {
+              any(keep_idx[(j + 1L):length(keep_idx)])
+            } else {
+              FALSE
+            }
+            if (!remaining_splits_after) {
+              merged_gap <- merged_gap + nchar(polIII_for_block)
             }
             if (merged_gap > max_sub_content) {
               # Skipping would overflow — keep the undersized split
@@ -386,7 +409,11 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             wt_3prime_end
           }
           merged <- next_boundary - (wt_3prime_start - 1L)
-          if (merged > max_sub_content) break  # can't merge safely
+          # If dropping this split produces a single block, include PolIII
+          if (length(internal_splits) == 1L) {
+            merged <- merged + nchar(polIII_for_block)
+          }
+          if (merged > max_sub_content) break # can't merge safely
           internal_splits <- internal_splits[-1L]
           internal_oh <- internal_oh[-1L]
         }
@@ -445,7 +472,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       oh_5 <- tile$oh2_seq
       oh_3 <- oh3
       block_seq <- create_bsmbi_block(polIII_for_block, oh_5, oh_3,
-                                       oh3_spacer = oh3_spacer)
+        oh3_spacer = oh3_spacer
+      )
 
       blocks[[length(blocks) + 1]] <- data.frame(
         block_name = block_name, sequence = block_seq,
@@ -499,7 +527,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
   }
 
   # Design helper plasmid insert
-  oh_L <- substring(cds, 1, 4)  # First 4 nt of gene
+  oh_L <- substring(cds, 1, 4) # First 4 nt of gene
   helper <- design_helper_plasmid(oh_L, oh4, paqci_star2, paqci_star1)
 
   # Check block lengths — only apply legacy splitting if NOT using assembly_plan
@@ -592,7 +620,7 @@ design_helper_plasmid <- function(oh_L, oh_R, paqci_star2, paqci_star1) {
   bsai_rev <- orient_enzyme_site("BsaI", oh_R, "reverse")
 
   # Stuffer = placeholder replaced during assembly (use a short dummy for ordering)
-  stuffer <- "NNNNNNNNNNNNNNNNNNNN"  # 20 nt placeholder
+  stuffer <- "NNNNNNNNNNNNNNNNNNNN" # 20 nt placeholder
 
   helper_seq <- paste0(paqci_fwd, bsai_fwd, stuffer, bsai_rev, paqci_rev)
 
@@ -623,7 +651,9 @@ design_helper_plasmid <- function(oh_L, oh_R, paqci_star2, paqci_star1) {
 #' @return List with `blocks` (deduplicated data frame) and `name_map`
 #'   (named list mapping every original block name to the surviving name)
 deduplicate_blocks <- function(blocks) {
-  if (nrow(blocks) == 0) return(list(blocks = blocks, name_map = list()))
+  if (nrow(blocks) == 0) {
+    return(list(blocks = blocks, name_map = list()))
+  }
 
   # Group by sequence
   unique_seqs <- unique(blocks$sequence)
@@ -668,7 +698,7 @@ deduplicate_blocks <- function(blocks) {
 #' @param fidelity_threshold Overhang fidelity threshold
 #' @return Updated blocks data frame with oversized blocks split
 apply_superblock_splitting <- function(blocks, cds, polIII, oh3,
-                                        max_block_length, fidelity_threshold) {
+                                       max_block_length, fidelity_threshold) {
   new_blocks <- list()
 
   # Collect all existing overhangs for exclusion
@@ -683,7 +713,7 @@ apply_superblock_splitting <- function(blocks, cds, polIII, oh3,
     }
 
     # Calculate number of sub-blocks needed
-    enzyme_site_len <- 11L  # BsaI or BsmBI site
+    enzyme_site_len <- 11L # BsaI or BsmBI site
     n_subblocks <- ceiling(block$length / (max_block_length - 2 * enzyme_site_len))
 
     # Select junction overhangs
