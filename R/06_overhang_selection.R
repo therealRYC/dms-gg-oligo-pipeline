@@ -623,16 +623,22 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
 #' Precompute boundary scores for all valid codon positions
 #'
 #' For each codon position b in the gene, extract the gene-derived overhangs
-#' (oh1, oh2) and compute a composite score incorporating HF set membership,
-#' pairwise fidelity with oh_L (BsaI reaction), and individual fidelity (BsmBI).
+#' (oh1, oh2) and compute a composite OOGGA-style score:
+#'   score = oogga_score(oh1) + oogga_score(oh2) + pairwise_bonus(oh1, oh_L) + penalty
+#'
+#' The pairwise bonus uses context-dependent set fidelity for oh1 with oh_L in the
+#' BsaI reaction, which is MORE accurate than OOGGA's context-independent approach.
 #'
 #' @param cds Domesticated gene sequence
 #' @param hf_set Character vector of high-fidelity overhangs
 #' @param oh_fidelity Data frame with overhang + fidelity columns
 #' @param bsai_matrix 256x256 BsaI pairwise ligation matrix (or NULL)
+#' @param eff_lookup Named numeric vector (overhang -> efficiency from
+#'   compute_overhang_efficiency()). If NULL, efficiency is treated as 1.0.
 #' @return List with vectors: oh1_seq, oh2_seq, score, valid (all length n_codons)
 precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
-                                       bsai_matrix = NULL) {
+                                       bsai_matrix = NULL,
+                                       eff_lookup = NULL) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
   oh_L <- substring(cds, 1, 4)
@@ -640,6 +646,12 @@ precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
 
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
+
+  # Default efficiency: 1.0 for all overhangs (no efficiency penalty)
+  if (is.null(eff_lookup)) {
+    eff_lookup <- rep(1.0, nrow(oh_fidelity))
+    names(eff_lookup) <- oh_fidelity$overhang
+  }
 
   oh1_seq <- character(n_codons)
   oh2_seq <- character(n_codons)
@@ -667,31 +679,36 @@ precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
     }
     valid[b] <- TRUE
 
-    # HF membership (10 pts each)
     oh1_in <- oh1 %in% hf_set
     oh2_in <- oh2 %in% hf_set
     oh1_hf[b] <- oh1_in
     oh2_hf[b] <- oh2_in
-    hf_bonus <- 10.0 * (oh1_in + oh2_in)
 
-    # oh1 pairwise fidelity with oh_L (BsaI reaction context)
+    # OOGGA-style base scores for both gene-derived overhangs
+    oh1_base <- oogga_score(oh1, fid_lookup, eff_lookup, hf_set)
+    oh2_base <- oogga_score(oh2, fid_lookup, eff_lookup, hf_set)
+
+    # oh1 pairwise fidelity bonus with oh_L (BsaI reaction context).
+    # This is context-dependent scoring — more accurate than OOGGA's
+    # context-independent P_fid, so we add it as a bonus on top.
     if (!is.null(bsai_matrix) && oh1 %in% rownames(bsai_matrix) &&
       oh_L %in% rownames(bsai_matrix)) {
       sf <- compute_set_fidelity(c(oh_L, oh1), bsai_matrix)
-      oh1_pw <- sf$set_fidelity
+      oh1_pw_bonus <- sf$set_fidelity
     } else {
-      oh1_pw <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else 0.5
+      oh1_pw_bonus <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else 0.5
     }
 
-    # oh2 individual fidelity (BsmBI reaction partner oh3 not yet chosen)
-    oh2_fid <- if (oh2 %in% names(fid_lookup)) unname(fid_lookup[oh2]) else 0.5
-
-    # Penalize boundaries where either overhang has very low individual fidelity
+    # Low-fidelity safety floor: penalize boundaries where either overhang
+    # has very low individual fidelity (< 0.80). The multiplicative OOGGA
+    # score already penalizes low-fidelity overhangs, but this explicit
+    # penalty provides a hard safety threshold.
     fid_penalty <- 0.0
     oh1_ind_fid <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else 0.5
-    if (oh1_ind_fid < 0.80 || oh2_fid < 0.80) fid_penalty <- -5.0
+    oh2_ind_fid <- if (oh2 %in% names(fid_lookup)) unname(fid_lookup[oh2]) else 0.5
+    if (oh1_ind_fid < 0.80 || oh2_ind_fid < 0.80) fid_penalty <- -5.0
 
-    scores[b] <- hf_bonus + 2.0 * oh1_pw + 1.0 * oh2_fid + fid_penalty
+    scores[b] <- oh1_base + oh2_base + oh1_pw_bonus + fid_penalty
   }
 
   precomp_elapsed <- (proc.time() - precomp_start)[["elapsed"]]
@@ -829,6 +846,9 @@ dp_solve_k <- function(K, n_codons, min_codons, max_codons,
 #' @param multi_k Logical: try multiple tile counts? (default TRUE)
 #' @param k_range Integer vector of K values to try (NULL = auto)
 #' @param search_window_K Unused (kept for interface compatibility)
+#' @param overlap_codons Number of overlap codons between adjacent tiles
+#' @param eff_lookup Named numeric vector (overhang -> efficiency). If NULL,
+#'   efficiency is treated as 1.0 for all overhangs.
 #' @return Data frame with tile info (same format as search_tile_boundaries)
 search_tile_boundaries_dp <- function(cds, max_mutable_nt,
                                       min_mutable_nt = NULL,
@@ -838,7 +858,8 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
                                       multi_k = TRUE,
                                       k_range = NULL,
                                       search_window_K = NULL,
-                                      overlap_codons = 4L) {
+                                      overlap_codons = 4L,
+                                      eff_lookup = NULL) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
 
@@ -897,7 +918,9 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
   }
 
   # Precompute scores for all boundary positions
-  precomp <- precompute_boundary_scores(cds, hf_set, oh_fidelity, bsai_matrix)
+  precomp <- precompute_boundary_scores(cds, hf_set, oh_fidelity, bsai_matrix,
+    eff_lookup = eff_lookup
+  )
 
   # Determine K range to search (use effective_max_codons for boundary spacing)
   K_ideal <- ceiling(n_codons / effective_max_codons) - 1L
@@ -1048,10 +1071,10 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
 # SUPERBLOCK SPLIT-POINT OPTIMIZATION
 # =============================================================================
 
-#' Optimize superblock split positions for oversized gene blocks
+#' Optimize superblock split positions for oversized gene blocks (greedy)
 #'
-#' Same search strategy as tile boundaries: search candidate positions within
-#' the block where the gene-derived junction overhang is in the HF set.
+#' Greedy search for split positions within the block where the gene-derived
+#' junction overhang scores highest under OOGGA-style scoring.
 #'
 #' @param cds Full domesticated gene sequence
 #' @param block_start_nt Start position in gene (1-based)
@@ -1064,12 +1087,15 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
 #' @param extra_content_length Additional content appended to the last sub-block
 #'   (e.g., PolIII promoter length for 3'WT blocks) that isn't part of the gene
 #'   region but must be counted for sizing. Default 0.
+#' @param eff_lookup Named numeric vector (overhang -> efficiency). If NULL,
+#'   efficiency is treated as 1.0 for all overhangs.
 #' @return Data frame with split positions and junction overhangs
 optimize_split_points <- function(cds, block_start_nt, block_end_nt,
                                   max_sub_length, existing_ohs,
                                   hf_set, oh_fidelity,
                                   search_window = 50L,
-                                  extra_content_length = 0L) {
+                                  extra_content_length = 0L,
+                                  eff_lookup = NULL) {
   gene_block_length <- block_end_nt - block_start_nt + 1L
   total_block_length <- gene_block_length + extra_content_length
 
@@ -1083,6 +1109,12 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
+
+  # Default efficiency: 1.0 for all overhangs if not provided
+  if (is.null(eff_lookup)) {
+    eff_lookup <- rep(1.0, nrow(oh_fidelity))
+    names(eff_lookup) <- oh_fidelity$overhang
+  }
 
   # Enzyme site overhead per sub-block junction
   junction_overhead <- 22L # 2 x 11-nt enzyme sites
@@ -1118,7 +1150,7 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 
         in_hf <- junction_oh %in% hf_set
         fid <- if (junction_oh %in% names(fid_lookup)) unname(fid_lookup[junction_oh]) else 0.5
-        score <- 10 * in_hf + fid
+        score <- oogga_score(junction_oh, fid_lookup, eff_lookup, hf_set)
 
         if (score > best$score) {
           best <- list(pos = split_nt, oh = junction_oh, in_hf = in_hf, fid = fid, score = score)
@@ -1166,13 +1198,13 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 
 #' DP-optimize superblock split positions within a gene region
 #'
-#' Finds the set of split positions maximizing total junction fidelity,
+#' Finds the set of split positions maximizing total OOGGA-style junction score,
 #' using exactly K splits (where K = minimum splits needed for all sub-blocks
 #' to fit within max_sub_length). Uses a layered DP analogous to dp_solve_k()
 #' for tile boundaries.
 #'
-#' The DP uses the same scoring as tile boundary search:
-#'   score(p) = 10 * (junction_oh in HF set) + fidelity(junction_oh)
+#' OOGGA scoring per candidate:
+#'   score(p) = P_fid(oh) * P_eff(oh) * (1 + w_hf * in_HF)
 #'
 #' Constraint: every sub-block's gene content <= max_sub_length nt, where
 #' the last sub-block also carries extra_content_length (e.g., PolIII).
@@ -1193,12 +1225,15 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 #' @param tile_boundary_nts Integer vector of tile boundary positions (end_nt for 3'WT,
 #'   start_nt for 5'WT). Used for soft proximity penalty: splits near a tile boundary
 #'   get a reduced score to avoid tiny sub-blocks for narrower tiles.
+#' @param eff_lookup Named numeric vector (overhang -> efficiency). If NULL,
+#'   efficiency is treated as 1.0 for all overhangs.
 #' @return Data frame with split_nt, junction_oh, junction_in_hf, junction_fidelity
 dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
                                        max_sub_length, extra_content_length = 0L,
                                        exclude_ohs, hf_set, oh_fidelity,
                                        min_sub_length = 0L,
-                                       tile_boundary_nts = integer(0)) {
+                                       tile_boundary_nts = integer(0),
+                                       eff_lookup = NULL) {
   gene_region_length <- region_end_nt - region_start_nt + 1L
   total_content <- gene_region_length + extra_content_length
 
@@ -1220,6 +1255,12 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
 
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
+
+  # Default efficiency: 1.0 for all overhangs if not provided
+  if (is.null(eff_lookup)) {
+    eff_lookup <- rep(1.0, nrow(oh_fidelity))
+    names(eff_lookup) <- oh_fidelity$overhang
+  }
 
   # Build exclusion set including reverse complements
   exclude_set <- unique(c(
@@ -1273,7 +1314,7 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
     fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else 0.5
     cand_in_hf[ci] <- in_hf
     cand_fid[ci] <- fid
-    cand_score[ci] <- 10 * in_hf + fid
+    cand_score[ci] <- oogga_score(oh, fid_lookup, eff_lookup, hf_set)
 
     # Soft penalty: prefer splits away from tile boundaries.
     # When a global split falls just inside a narrow tile's WT region, it creates
@@ -1467,7 +1508,8 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
     hf_set = hf_set,
     oh_fidelity = oh_fidelity,
     min_sub_length = min_sub_length,
-    tile_boundary_nts = tile_boundary_nts
+    tile_boundary_nts = tile_boundary_nts,
+    eff_lookup = eff_lookup
   )
 
   # --- 5'WT boundaries (BsaI reaction) ---
@@ -1492,7 +1534,8 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
       hf_set = hf_set,
       oh_fidelity = oh_fidelity,
       min_sub_length = min_sub_length,
-      tile_boundary_nts = tile_boundary_nts
+      tile_boundary_nts = tile_boundary_nts,
+      eff_lookup = eff_lookup
     )
   } else {
     splits_5wt <- data.frame(
@@ -2101,6 +2144,11 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   bsai_matrix <- load_pairwise_matrix("BsaI")
   bsmbi_matrix <- load_pairwise_matrix("BsmBI")
 
+  # Compute OOGGA efficiency metric from the generic Potapov pairwise matrix.
+  # P_eff(X) = M[X][RC(X)] / max(diag(M)) — relative ligation efficiency.
+  potapov_matrix <- load_pairwise_matrix("potapov_18h")
+  eff_lookup <- compute_overhang_efficiency(potapov_matrix)
+
   # Phase 1-3: Search tile boundaries
   if (boundary_method == "dp") {
     cli::cli_h3("Searching tile boundaries for HF overhangs (DP optimizer)")
@@ -2112,7 +2160,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       oh_fidelity = oh_fidelity,
       bsai_matrix = bsai_matrix,
       multi_k = multi_k,
-      overlap_codons = overlap_codons
+      overlap_codons = overlap_codons,
+      eff_lookup = eff_lookup
     )
   } else {
     cli::cli_h3("Searching tile boundaries for HF overhangs (greedy)")
