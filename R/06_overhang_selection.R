@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-26 — Add tile-boundary superblock partitioning (Task B)
+# Last updated: 2026-02-26 — Add OOGGA-style scoring (P_fid * P_eff * HF bonus)
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -323,6 +323,67 @@ compute_set_fidelity <- function(overhangs, pairwise_matrix) {
       stringsAsFactors = FALSE
     )
   )
+}
+
+# =============================================================================
+# OOGGA-STYLE SCORING
+# =============================================================================
+# Scoring based on OOGGA (Mukundan & Madhusudhan 2025):
+#   score = P_fid(oh) * P_eff(oh) * (1 + w_hf * in_HF)
+# P_fid = M[X][RC(X)] / sum(M[X][*])  — individual fidelity (context-independent)
+# P_eff = M[X][RC(X)] / max(diag(M))  — relative ligation efficiency
+# w_hf  = bonus for Potapov Table 1 HF set membership (default 0.5)
+
+#' Compute relative ligation efficiency for all 256 overhangs
+#'
+#' Efficiency measures how much correct product you get (yield), distinct from
+#' fidelity (what fraction of product is correct). Extracted from the diagonal
+#' of the Potapov 256x256 pairwise ligation matrix: P_eff(X) = M[X][RC(X)] / max(diag(M)).
+#'
+#' @param pairwise_matrix Named 256x256 matrix from load_pairwise_matrix().
+#'   M[X,Y] = ligation frequency of overhang X with RC(Y). Diagonal M[X,X]
+#'   gives the correct Watson-Crick ligation count.
+#' @return Named numeric vector of length 256 (overhang -> efficiency in [0, 1],
+#'   with the best overhang = 1.0)
+compute_overhang_efficiency <- function(pairwise_matrix) {
+  diagonal <- diag(pairwise_matrix)
+  max_diag <- max(diagonal)
+  # Guard against zero/degenerate matrix (shouldn't happen with real data)
+  if (max_diag <= 0) {
+    cli::cli_alert_warning("Pairwise matrix diagonal has max <= 0; returning uniform efficiency.")
+    eff <- rep(1.0, length(diagonal))
+    names(eff) <- rownames(pairwise_matrix)
+    return(eff)
+  }
+  eff <- diagonal / max_diag
+  names(eff) <- rownames(pairwise_matrix)
+  eff
+}
+
+#' Compute OOGGA-style overhang score with HF set bonus
+#'
+#' Combines ligation fidelity (P_fid) and efficiency (P_eff) multiplicatively,
+#' with an additive bonus for membership in the Potapov Table 1 high-fidelity set.
+#' This biases selection toward experimentally validated overhangs that have both
+#' high individual quality AND low cross-reactivity in multi-fragment assemblies.
+#'
+#' Score = P_fid(oh) * P_eff(oh) * (1 + w_hf * in_HF)
+#'
+#' @param oh Character, 4-nt overhang sequence
+#' @param fid_lookup Named numeric vector (overhang -> fidelity, i.e. P_fid)
+#' @param eff_lookup Named numeric vector (overhang -> efficiency, i.e. P_eff)
+#' @param hf_set Character vector of Potapov Table 1 HF overhangs
+#' @param w_hf Numeric, HF bonus weight (default DEFAULT_HF_BONUS_WEIGHT = 0.5).
+#'   A value of 0.5 means HF overhangs get 1.5x their base score.
+#' @return Numeric score (higher is better)
+oogga_score <- function(oh, fid_lookup, eff_lookup, hf_set,
+                        w_hf = DEFAULT_HF_BONUS_WEIGHT) {
+  # Look up P_fid; fall back to 0.5 for unknown overhangs (conservative default)
+  fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else 0.5
+  # Look up P_eff; fall back to 0.5 for unknown overhangs
+  eff <- if (oh %in% names(eff_lookup)) unname(eff_lookup[oh]) else 0.5
+  in_hf <- oh %in% hf_set
+  fid * eff * (1 + w_hf * in_hf)
 }
 
 # =============================================================================
