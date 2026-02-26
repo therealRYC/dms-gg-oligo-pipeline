@@ -1,5 +1,5 @@
 # Created: 2026-02-20
-# Last updated: 2026-02-26 — Add Potapov Table 1 sequences, OOGGA research findings to BUG-006
+# Last updated: 2026-02-26 — Finalize OOGGA scoring decision (Option B) in BUG-006
 
 # Bug Inventory — DMS GG Oligo Pipeline
 
@@ -139,8 +139,8 @@
     - **Option A — Pure OOGGA DP:** Score overhangs purely by `P_fid × P_eff` products. No HF set bonus. Simpler.
     - **Option B — OOGGA DP + HF set upscoring:** Same per-overhang scoring, plus bonus for overhangs in the Potapov Table 1 HF set. Captures pairwise interactions not in individual fidelity.
   - **Recommendation:** Option B adds genuine value because: (1) HF sets encode pairwise interactions not captured by individual fidelity, (2) HF sets were experimentally validated, (3) bonus is most valuable for freely-chosen overhangs (oh3, oh4, SB junctions).
-  - **Decision:** Deferred pending tile-boundary architecture completion. See `Plans/260226_overhang-architecture-redesign.md` for full analysis.
-  - References: Potapov et al. 2018 (PMID 30335370), Pryor et al. 2020 (PMC7467295), kappagate/tatapov (Edinburgh Genome Foundry).
+  - **Decision (2026-02-26):** Option B confirmed. Score = `P_fid(oh) × P_eff(oh) × (1 + w_hf × in_HF)` where w_hf=0.5 default. Implementation in worktree `260226-oogga-scoring`. See `Plans/260226_overhang-architecture-redesign.md` Task C for full implementation plan.
+  - References: Potapov et al. 2018 (PMID 30335370), Pryor et al. 2020 (PMC7467295), OOGGA (bioRxiv 10.1101/2025.06.16.659877).
 
 ## Verified NOT Bugs
 

@@ -367,20 +367,118 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
 
 ---
 
-### Task C: OOGGA-Style Scoring Upgrade (DEFERRED)
+### Task C: OOGGA-Style Scoring Upgrade (Option B — OOGGA + HF Upscoring)
 
-**Scope**: Replace current scoring (`10 * in_HF + fidelity`) with OOGGA-style scoring.
+**Scope**: Replace current ad-hoc scoring with OOGGA-style `P_fid × P_eff` scoring plus
+a bonus for Potapov Table 1 HF set membership. Affects all 3 scoring locations.
+
+**Decision**: Option B confirmed by user on 2026-02-26.
+
+**Worktree**: `260226-oogga-scoring` (branch `260226-oogga-scoring`)
 
 **Files to modify**:
-- `R/06_overhang_selection.R`: Add `P_eff` computation, modify `dp_solve_k()` and `dp_solve_superblock_splits()` scoring
-- New tests for efficiency metric
+- `R/06_overhang_selection.R`:
+  1. Add `compute_overhang_efficiency()` function (or add `efficiency` column to `builtin_overhang_fidelity()`)
+  2. Add `oogga_score()` helper that computes `P_fid × P_eff × (1 + w_hf * in_HF)`
+  3. Modify `precompute_boundary_scores()` (line 551) — replace scoring at line 611
+  4. Modify `optimize_split_points()` (line 985) — replace scoring at line 1038
+  5. Modify `dp_solve_superblock_splits()` (line 1114) — replace scoring at line 1193
+- `tests/testthat/test-overhang-selection.R`: Add tests for new scoring function
+- `R/constants.R`: Add default weight constants
 
-**Dependencies**: Task A (needs Potapov Table 1 set for Option B upscoring). Also benefits from Task B being done first.
+**Dependencies**: Task A should be merged first (so the HF set is correct). Can run in
+parallel if the agent hard-codes the Potapov set locally.
 
-**Design decision needed**: Option A (pure OOGGA) vs Option B (OOGGA + HF bonus).
-Recommendation: Option B. See Section 2 for rationale.
+#### Implementation Plan
 
-**NOT yet planned in detail.** Separate worktree recommended: `260225-DP-OOGGA`.
+**Step 1: Add P_eff data (efficiency metric)**
+
+P_eff requires the raw diagonal count `M[X][RC(X)]` for each overhang, which we don't
+currently store directly. Two approaches:
+
+- **Option i (preferred):** Extract from the pairwise matrix. We already have
+  `load_pairwise_matrix("potapov_18h")` which returns a 256×256 matrix where
+  `mat[X, X]` = correct ligation count. Compute:
+  ```r
+  diagonal <- diag(mat)  # M[X][RC(X)] for all 256
+  max_diag <- max(diagonal)
+  P_eff <- diagonal / max_diag
+  ```
+- **Option ii:** Hard-code P_eff values alongside the existing fidelity data in
+  `builtin_overhang_fidelity()` (add an `efficiency` column).
+
+Preferred: Option i, since the pairwise matrix is already loaded in `plan_assembly()`.
+
+**Step 2: Create `oogga_score()` helper**
+
+```r
+#' Compute OOGGA-style overhang score with HF set bonus
+#'
+#' Score = P_fid(oh) * P_eff(oh) * (1 + w_hf * (oh in HF set))
+#'
+#' @param oh Character, 4-nt overhang sequence
+#' @param fid_lookup Named numeric vector (overhang -> fidelity)
+#' @param eff_lookup Named numeric vector (overhang -> efficiency)
+#' @param hf_set Character vector of HF overhangs
+#' @param w_hf Numeric, HF bonus weight (default 0.5)
+#' @return Numeric score
+oogga_score <- function(oh, fid_lookup, eff_lookup, hf_set, w_hf = 0.5) {
+  fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else 0.5
+  eff <- if (oh %in% names(eff_lookup)) unname(eff_lookup[oh]) else 0.5
+  in_hf <- oh %in% hf_set
+  fid * eff * (1 + w_hf * in_hf)
+}
+```
+
+**Step 3: Update the 3 scoring locations**
+
+All three currently use `score = 10 * in_HF + fidelity` (or a variant). Replace with
+`oogga_score()` calls. The key change is that the score is now **multiplicative** (fid × eff)
+rather than **additive** (10 * in_HF + fidelity).
+
+| Location | Current scoring | New scoring |
+|----------|----------------|-------------|
+| `precompute_boundary_scores()` line 611 | `10*(oh1_in+oh2_in) + 2*oh1_pw + oh2_fid + penalty` | `oogga_score(oh1) + oogga_score(oh2) + pairwise_bonus(oh1,oh_L)` |
+| `optimize_split_points()` line 1038 | `10*in_hf + fid` | `oogga_score(oh)` |
+| `dp_solve_superblock_splits()` line 1193 | `10*in_hf + fid` | `oogga_score(oh)` |
+
+Note: `precompute_boundary_scores()` also uses `compute_set_fidelity()` for oh1 pairwise
+fidelity with oh_L in the BsaI reaction (line 597). This context-dependent pairwise
+scoring should be KEPT — it's more accurate than OOGGA's context-independent approach.
+The oogga_score provides the base, and the pairwise bonus adds context-awareness.
+
+**Step 4: Add constants**
+
+In `R/constants.R` or at the top of `R/06_overhang_selection.R`:
+```r
+DEFAULT_HF_BONUS_WEIGHT <- 0.5  # w_hf in oogga_score
+DEFAULT_FIDELITY_WEIGHT <- 1.0  # w_fid (for future tuning)
+DEFAULT_EFFICIENCY_WEIGHT <- 1.0  # w_eff (for future tuning)
+```
+
+**Step 5: Add tests**
+
+- Test that `oogga_score()` returns higher values for HF overhangs than non-HF ones
+  with similar fidelity
+- Test that P_eff values are in [0, 1] with max = 1.0
+- Test that the tile boundary DP still finds valid boundaries with new scoring
+- Regression: run existing integration tests (GRIN2A, AKAP11) to verify no breakage
+
+**Step 6: Low-fidelity penalty**
+
+Keep the existing penalty for overhangs with fidelity < 0.80 (line 609). In the new
+scoring, this maps to: if `P_fid < 0.80`, subtract a penalty. The multiplicative
+nature of oogga_score already penalizes low-fidelity overhangs, but an explicit
+floor-penalty provides a hard safety threshold.
+
+#### Acceptance Criteria
+
+- `oogga_score()` function exists and is tested
+- P_eff values computed from pairwise matrix diagonal
+- All 3 scoring locations updated
+- All existing tests pass (FAIL 0)
+- Integration tests (GRIN2A, AKAP11) produce valid assemblies
+- Tile boundary DP selects boundaries with ≥0.80 fidelity (same as current)
 
 ---
 
@@ -419,18 +517,19 @@ Recommendation: Option B. See Section 2 for rationale.
 ### Dependency Graph
 
 ```
-Task A (HF Set Fix) ──────────────────────── standalone
-                                                   ↓ (nice to have for scoring)
-Task B (Tile-Boundary SBs) ──── standalone    Task C (OOGGA Scoring)
-         ↓
+Task A (HF Set Fix) ──── standalone
+Task B (Tile-Boundary SBs) ──── standalone
+Task C (OOGGA Scoring) ──── standalone (benefits from A being merged first)
+         ↓ (B must complete)
 Task D (Integration)
          ↓
 Task E (Cassette Architecture)
 ```
 
-**Tasks A and B can be done in parallel.**
-Task C is deferred.
-Task D depends on B.
+**Tasks A, B, and C can all run in parallel.**
+Task C should use the correct HF set — if Task A isn't merged yet, hard-code the
+Potapov Table 1 sequences locally.
+Task D depends on B (and benefits from A+C being merged).
 Task E depends on D.
 
 ---
