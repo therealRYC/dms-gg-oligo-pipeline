@@ -161,7 +161,7 @@ load_overhang_fidelity <- function(enzyme_name = "BsmBI") {
 #' explicitly requested via set_name.
 #'
 #' @param set_name Name of the set. Default "potapov_set3_25" returns the
-#'   hard-coded Potapov Table 1 Set 3. Legacy names like "potapov_set2_20"
+#'   hard-coded Potapov Table 1 Set 3. Legacy names like "greedy_fidelity_20"
 #'   will attempt to load from RDS, falling back to greedy generation.
 #' @return Character vector of high-fidelity overhangs
 load_high_fidelity_set <- function(set_name = "potapov_set3_25") {

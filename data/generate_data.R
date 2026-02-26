@@ -220,8 +220,8 @@ hf_20 <- generate_hf_set_standalone(potapov_18h, 20)
 hf_10 <- generate_hf_set_standalone(potapov_18h, 10)
 
 hf_sets <- list(
-  potapov_set2_20 = hf_20,
-  potapov_set2_10 = hf_10
+  greedy_fidelity_20 = hf_20,
+  greedy_fidelity_10 = hf_10
 )
 saveRDS(hf_sets, "data/neb_overhang_fidelity/high_fidelity_sets.rds")
 cat("Saved data/neb_overhang_fidelity/high_fidelity_sets.rds\n")
