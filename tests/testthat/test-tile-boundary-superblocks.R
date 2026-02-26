@@ -1,5 +1,5 @@
 # Created: 2026-02-26
-# Last updated: 2026-02-26 — Initial test suite for tile-boundary superblock architecture
+# Last updated: 2026-02-26 — Fix expect_lte/expect_gte info= param; fix TRIO DNAString handling
 # test-tile-boundary-superblocks.R — Tests for the tile-boundary superblock redesign
 #
 # Architecture overview:
@@ -336,7 +336,7 @@ test_that("3a: no superblock gene content exceeds max_sub_length", {
     if (i == nrow(sbs)) {
       content <- content + polIII_len
     }
-    expect_lte(content, TEST_MAX_SUB,
+    expect_true(content <= TEST_MAX_SUB,
       info = sprintf("SB%d content %d exceeds max %d", i, content, TEST_MAX_SUB)
     )
   }
@@ -376,7 +376,7 @@ test_that("3c: orderable block length includes overhead", {
     content <- sbs$gene_content[i]
     if (i == nrow(sbs)) content <- content + polIII_len
     orderable <- content + TEST_BLOCK_OVERHEAD
-    expect_lte(orderable, TEST_MAX_BLOCK_LENGTH,
+    expect_true(orderable <= TEST_MAX_BLOCK_LENGTH,
       info = sprintf("SB%d orderable %d exceeds %d", i, orderable, TEST_MAX_BLOCK_LENGTH)
     )
   }
@@ -519,6 +519,14 @@ test_that("5a: AKAP11 — superblocks fit within synthesis limit", {
   skip_if_not(file.exists(file.path(pipeline_dir, "examples", "260225_akap11_config.yaml")),
     message = "AKAP11 config not found"
   )
+  skip_if_not(file.exists(file.path(pipeline_dir, "data", "AKAP11_NM_016248_CDS.fasta")),
+    message = "AKAP11 FASTA not found"
+  )
+
+  # load_config resolves gene_fasta relative to working directory
+
+  old_wd <- setwd(pipeline_dir)
+  on.exit(setwd(old_wd), add = TRUE)
 
   config <- load_config(file.path(pipeline_dir, "examples", "260225_akap11_config.yaml"))
   gene <- read_gene(config$gene_fasta)
@@ -565,7 +573,7 @@ test_that("5a: AKAP11 — superblocks fit within synthesis limit", {
   for (i in seq_len(nrow(result$superblocks))) {
     content <- result$superblocks$gene_content[i]
     if (i == nrow(result$superblocks)) content <- content + polIII_len
-    expect_lte(content + TEST_BLOCK_OVERHEAD, config$max_geneblock_length,
+    expect_true(content + TEST_BLOCK_OVERHEAD <= config$max_geneblock_length,
       info = sprintf(
         "AKAP11 SB%d oversized: %d > %d", i,
         content + TEST_BLOCK_OVERHEAD, config$max_geneblock_length
@@ -579,6 +587,12 @@ test_that("5b: GRIN2A — superblocks fit within synthesis limit", {
   skip_if_not(file.exists(file.path(pipeline_dir, "examples", "260221_grin2a_bug001_fix.yaml")),
     message = "GRIN2A config not found"
   )
+  skip_if_not(file.exists(file.path(pipeline_dir, "data", "GRIN2A_NM_000833_CDS.fasta")),
+    message = "GRIN2A FASTA not found"
+  )
+
+  old_wd <- setwd(pipeline_dir)
+  on.exit(setwd(old_wd), add = TRUE)
 
   config <- load_config(file.path(pipeline_dir, "examples", "260221_grin2a_bug001_fix.yaml"))
   gene <- read_gene(config$gene_fasta)
@@ -632,12 +646,11 @@ test_that("5c: TRIO — large gene produces valid superblocks", {
   codon_usage <- load_codon_usage() # default CoCoPUTs table
   polIII <- TEST_POLIII
   polIII_len <- nchar(polIII)
-  scan_result <- scan_enzyme_sites(
-    Biostrings::DNAString(gene_seq), polIII, codon_usage
-  )
+  cds_dna <- Biostrings::DNAString(gene_seq)
+  scan_result <- scan_enzyme_sites(cds_dna, polIII, codon_usage)
   if (nrow(scan_result$domestication) > 0) {
     cds_dna <- apply_domestication(
-      Biostrings::DNAString(gene_seq),
+      cds_dna,
       scan_result$domestication,
       codon_usage = codon_usage
     )
@@ -860,7 +873,7 @@ test_that("8a: SB boundary overhangs checked in BOTH BsaI and BsmBI fidelity", {
       oh <- tiles$oh2_seq[boundary_tile]
       fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else 0
       # Should be reasonably high fidelity (tile boundary DP already optimized)
-      expect_gte(fid, 0.80,
+      expect_true(fid >= 0.80,
         info = sprintf(
           "SB boundary tile %d oh2=%s fidelity=%.3f too low",
           boundary_tile, oh, fid
