@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-26 — Add OOGGA-style scoring (P_fid * P_eff * HF bonus)
+# Last updated: 2026-02-26 — Wire tile-boundary superblocks into plan_assembly()
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -2059,6 +2059,100 @@ get_tile_reaction_overhangs <- function(partition_result, tile_idx, tiles,
   }
 
   ohs
+}
+
+#' Convert tile-boundary partition to legacy all_splits format
+#'
+#' Translates the output of partition_tile_superblocks() into the per-tile
+#' split data frame consumed by design_wt_geneblocks() and R/12_report.R.
+#' This is a compatibility shim — downstream consumers expect columns:
+#' split_nt, junction_oh, junction_in_hf, junction_fidelity, block_type, tile_id.
+#'
+#' For each SB boundary (at tiles$end_nt[boundary_tile]):
+#'   - bsmbi_3wt entries: tiles whose 3'WT region spans past this boundary
+#'     (tile$end_nt < split_nt)
+#'   - bsai_5wt entries: tiles whose 5'WT region spans back past this boundary
+#'     (split_nt < tile$start_nt)
+#'
+#' @param partition_result List from partition_tile_superblocks()
+#' @param tiles Data frame of tiles (must have end_nt, start_nt, oh2_seq,
+#'   oh2_in_hf, oh2_fidelity, tile_id columns)
+#' @param gene_len Length of the domesticated CDS in nucleotides
+#' @param polIII_len Length of downstream cassette (unused, kept for interface
+#'   consistency)
+#' @return Data frame with columns: split_nt, junction_oh, junction_in_hf,
+#'   junction_fidelity, block_type, tile_id. Empty (0-row) if n_superblocks <= 1.
+convert_partition_to_splits <- function(partition_result, tiles, gene_len,
+                                        polIII_len = 0L) {
+  empty_result <- data.frame(
+    split_nt = integer(0), junction_oh = character(0),
+    junction_in_hf = logical(0), junction_fidelity = numeric(0),
+    block_type = character(0), tile_id = integer(0),
+    stringsAsFactors = FALSE
+  )
+
+  sbs <- partition_result$superblocks
+  n_sb <- partition_result$n_superblocks
+
+  # No splits needed if only 1 superblock
+  if (n_sb <= 1L) {
+    return(empty_result)
+  }
+
+  n_tiles <- nrow(tiles)
+  splits_list <- vector("list", 0L)
+
+  # Pre-extract boundary info for each SB boundary (between SB bi and SB bi+1)
+  for (bi in seq_len(n_sb - 1L)) {
+    boundary_tile <- sbs$end_tile[bi]
+    split_nt <- tiles$end_nt[boundary_tile]
+    junction_oh <- tiles$oh2_seq[boundary_tile]
+    junction_in_hf <- tiles$oh2_in_hf[boundary_tile]
+    junction_fidelity <- tiles$oh2_fidelity[boundary_tile]
+
+    # --- bsmbi_3wt entries ---
+    # Tile t's 3'WT region: [tile_t.end_nt + 1, gene_len]
+    # This boundary is within that region if tile_t.end_nt < split_nt
+    for (t in seq_len(n_tiles)) {
+      if (tiles$end_nt[t] < split_nt) {
+        splits_list[[length(splits_list) + 1L]] <- data.frame(
+          split_nt = split_nt,
+          junction_oh = junction_oh,
+          junction_in_hf = junction_in_hf,
+          junction_fidelity = junction_fidelity,
+          block_type = "bsmbi_3wt",
+          tile_id = tiles$tile_id[t],
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+
+    # --- bsai_5wt entries ---
+    # Tile t's 5'WT region: [1, tile_t.start_nt - 1]
+    # This boundary is within that region if split_nt < tile_t.start_nt
+    # (and tile must actually have a 5'WT region, i.e., start_nt > 1)
+    for (t in seq_len(n_tiles)) {
+      if (tiles$start_nt[t] > 1L && split_nt < tiles$start_nt[t]) {
+        splits_list[[length(splits_list) + 1L]] <- data.frame(
+          split_nt = split_nt,
+          junction_oh = junction_oh,
+          junction_in_hf = junction_in_hf,
+          junction_fidelity = junction_fidelity,
+          block_type = "bsai_5wt",
+          tile_id = tiles$tile_id[t],
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+
+  if (length(splits_list) > 0) {
+    all_splits <- do.call(rbind, splits_list)
+    rownames(all_splits) <- NULL
+    all_splits
+  } else {
+    empty_result
+  }
 }
 
 # =============================================================================
