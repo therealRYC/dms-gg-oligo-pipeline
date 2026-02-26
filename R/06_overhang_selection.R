@@ -1458,6 +1458,9 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
   )
 }
 
+#' DEPRECATED: Use partition_tile_superblocks() + convert_partition_to_splits()
+#' instead. Kept for regression tests and backward compatibility.
+#'
 #' Compute global superblock boundaries for 3'WT and 5'WT regions
 #'
 #' Instead of computing split points independently per tile (which produces
@@ -1552,6 +1555,9 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
   list(splits_3wt = splits_3wt, splits_5wt = splits_5wt)
 }
 
+#' DEPRECATED: Use partition_tile_superblocks() + convert_partition_to_splits()
+#' instead. Kept for regression tests and backward compatibility.
+#'
 #' Assign global superblock boundaries to individual tiles
 #'
 #' For each tile, selects the subset of global boundaries that fall within
@@ -2519,6 +2525,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     core_downstream_cassette = core_downstream_cassette, # full cassette minus last 5 nt (NULL if not derived)
     oh3_spacer = oh3_spacer, # terminal nt of promoter (NULL if not derived)
     superblock_splits = all_splits,
+    tile_partition = partition_result, # new tile-boundary partition (native format)
     reaction_fidelity = reaction_fidelity_df,
     strategy_used = strategy_used,
     hf_set_used = hf_set,
@@ -2529,7 +2536,9 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       n_boundaries_both_in_hf = n_both_hf,
       n_boundaries_one_in_hf = n_one_hf,
       n_boundaries_neither_in_hf = n_neither_hf,
+      n_superblocks = partition_result$n_superblocks,
       n_superblock_splits = nrow(all_splits),
+      n_sb_collisions = partition_result$n_collisions,
       overall_min_fidelity = min(reaction_fidelity_df$set_fidelity)
     )
   )
