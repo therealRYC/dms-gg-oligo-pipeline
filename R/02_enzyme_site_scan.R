@@ -1,3 +1,5 @@
+# Created: 2025-02-01
+# Last updated: 2026-02-26 — Handle DNAString S4 objects in scan_downstream_junctions()
 # 02_enzyme_site_scan.R — Find endogenous BsaI/BsmBI/PaqCI sites, suggest silent mutations
 # DMS Golden Gate Oligo Pipeline
 
@@ -149,13 +151,13 @@ suggest_domestication <- function(cds, sites, codon_usage) {
   for (i in seq_len(nrow(sites))) {
     site <- sites[i, ]
     site_start <- site$start
-    site_end   <- site$end
-    enzyme     <- site$enzyme
-    enz        <- ENZYMES[[enzyme]]
+    site_end <- site$end
+    enzyme <- site$enzyme
+    enz <- ENZYMES[[enzyme]]
 
     # Find codons overlapping this site
     first_codon <- ceiling(site_start / 3)
-    last_codon  <- ceiling(site_end / 3)
+    last_codon <- ceiling(site_end / 3)
 
     best_fix <- NULL
 
@@ -163,17 +165,17 @@ suggest_domestication <- function(cds, sites, codon_usage) {
       original_codon <- codons[codon_pos]
       aa <- translate_codon(original_codon)
 
-      if (aa == "*") next  # Skip stop codons
+      if (aa == "*") next # Skip stop codons
 
       # Get alternative codons for this amino acid, ranked by frequency
       ranked <- get_ranked_codons(aa, codon_usage)
-      ranked <- ranked[ranked != original_codon]  # exclude current
+      ranked <- ranked[ranked != original_codon] # exclude current
 
       for (alt_codon in ranked) {
         # Try substituting and check if the target site is disrupted
         test_cds <- replace_codon(cds, codon_pos, alt_codon)
         region_start <- max(1, site_start - 8)
-        region_end   <- min(nchar(test_cds), site_end + 8)
+        region_end <- min(nchar(test_cds), site_end + 8)
         region <- substring(test_cds, region_start, region_end)
 
         # Check the target enzyme's site is gone
@@ -198,18 +200,18 @@ suggest_domestication <- function(cds, sites, codon_usage) {
         if (creates_new) next
 
         orig_freq <- codon_usage$frequency[codon_usage$codon == original_codon]
-        alt_freq  <- codon_usage$frequency[codon_usage$codon == alt_codon]
+        alt_freq <- codon_usage$frequency[codon_usage$codon == alt_codon]
         best_fix <- data.frame(
-          site_start     = site_start,
-          site_end       = site_end,
-          enzyme         = enzyme,
-          strand         = site$strand,
-          codon_pos      = codon_pos,
+          site_start = site_start,
+          site_end = site_end,
+          enzyme = enzyme,
+          strand = site$strand,
+          codon_pos = codon_pos,
           original_codon = original_codon,
-          new_codon      = alt_codon,
-          aa             = aa,
-          freq_original  = orig_freq,
-          freq_new       = alt_freq,
+          new_codon = alt_codon,
+          aa = aa,
+          freq_original = orig_freq,
+          freq_new = alt_freq,
           stringsAsFactors = FALSE
         )
         break
@@ -253,7 +255,9 @@ suggest_domestication <- function(cds, sites, codon_usage) {
 #' @return Modified CDS with enzyme sites removed
 apply_domestication <- function(cds, domestication, codon_usage = NULL,
                                 max_iterations = 5L) {
-  if (nrow(domestication) == 0) return(cds)
+  if (nrow(domestication) == 0) {
+    return(cds)
+  }
 
   # Sort by position (descending) to avoid index shifting
   domestication <- domestication[order(-domestication$codon_pos), ]
@@ -334,13 +338,14 @@ apply_domestication <- function(cds, domestication, codon_usage = NULL,
 #' @return Data frame with columns: junction_label, enzyme, left_context, right_context
 scan_downstream_junctions <- function(cds, polIII, intergene_elements = NULL) {
   # Max recognition site length across all enzymes (PaqCI = 7 nt)
-  context_len <- 6L  # max_site_len - 1
+  context_len <- 6L # max_site_len - 1
 
   results <- list()
 
   # Build ordered list of (name, sequence) pairs for the downstream cassette
-  # Start with gene 3' end
-  pieces <- list(list(name = "gene_3prime", sequence = cds))
+  # Start with gene 3' end (convert S4 DNAString to character if needed)
+  cds_char <- if (is(cds, "DNAString")) as.character(cds) else cds
+  pieces <- list(list(name = "gene_3prime", sequence = cds_char))
   if (!is.null(intergene_elements) && length(intergene_elements) > 0) {
     for (elem in intergene_elements) {
       pieces[[length(pieces) + 1L]] <- elem
@@ -351,21 +356,23 @@ scan_downstream_junctions <- function(cds, polIII, intergene_elements = NULL) {
   }
 
   # Check each adjacent pair
-  if (length(pieces) < 2L) return(empty_junction_df())
+  if (length(pieces) < 2L) {
+    return(empty_junction_df())
+  }
 
   for (i in seq_len(length(pieces) - 1L)) {
-    left_seq  <- pieces[[i]]$sequence
+    left_seq <- pieces[[i]]$sequence
     right_seq <- pieces[[i + 1L]]$sequence
-    left_name  <- pieces[[i]]$name
+    left_name <- pieces[[i]]$name
     right_name <- pieces[[i + 1L]]$name
 
     # Extract context: last N nt of left, first N nt of right
-    left_len  <- nchar(left_seq)
+    left_len <- nchar(left_seq)
     right_len <- nchar(right_seq)
-    n_left  <- min(context_len, left_len)
+    n_left <- min(context_len, left_len)
     n_right <- min(context_len, right_len)
 
-    left_context  <- substring(left_seq, left_len - n_left + 1L, left_len)
+    left_context <- substring(left_seq, left_len - n_left + 1L, left_len)
     right_context <- substring(right_seq, 1L, n_right)
     junction_region <- paste0(left_context, right_context)
 
@@ -379,15 +386,15 @@ scan_downstream_junctions <- function(cds, polIII, intergene_elements = NULL) {
         # Only report sites that actually SPAN the junction (not fully within one side)
         for (s in seq_len(nrow(sites))) {
           site_start <- sites$start[s]
-          site_end   <- sites$end[s]
+          site_end <- sites$end[s]
           # The junction boundary is at position n_left (between left_context and right_context)
           if (site_start <= n_left && site_end > n_left) {
             results[[length(results) + 1L]] <- data.frame(
               junction_label = junction_label,
-              enzyme         = enz_name,
-              strand         = sites$strand[s],
-              left_context   = left_context,
-              right_context  = right_context,
+              enzyme = enz_name,
+              strand = sites$strand[s],
+              left_context = left_context,
+              right_context = right_context,
               stringsAsFactors = FALSE
             )
           }

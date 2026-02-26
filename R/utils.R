@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-21 — Fix orient_enzyme_site() reverse case: use RC(overhang) for complementary overhangs
+# Last updated: 2026-02-26 — Handle DNAString S4 objects in extract_codons()
 # DMS Golden Gate Oligo Pipeline
 
 # Null-coalescing operator (not in base R; available in rlang)
@@ -32,10 +32,10 @@ find_enzyme_sites <- function(seq, site) {
   site_rc <- reverse_complement(site_upper)
 
   results <- data.frame(
-    start  = integer(0),
-    end    = integer(0),
+    start = integer(0),
+    end = integer(0),
     strand = character(0),
-    match  = character(0),
+    match = character(0),
     stringsAsFactors = FALSE
   )
 
@@ -45,7 +45,7 @@ find_enzyme_sites <- function(seq, site) {
     hit <- regexpr(site_upper, substring(seq_upper, pos), fixed = TRUE)
     if (hit == -1L) break
     abs_start <- pos + hit - 1L
-    abs_end   <- abs_start + nchar(site_upper) - 1L
+    abs_end <- abs_start + nchar(site_upper) - 1L
     results <- rbind(results, data.frame(
       start = abs_start, end = abs_end, strand = "+",
       match = substring(seq_upper, abs_start, abs_end),
@@ -61,7 +61,7 @@ find_enzyme_sites <- function(seq, site) {
       hit <- regexpr(site_rc, substring(seq_upper, pos), fixed = TRUE)
       if (hit == -1L) break
       abs_start <- pos + hit - 1L
-      abs_end   <- abs_start + nchar(site_rc) - 1L
+      abs_end <- abs_start + nchar(site_rc) - 1L
       results <- rbind(results, data.frame(
         start = abs_start, end = abs_end, strand = "-",
         match = substring(seq_upper, abs_start, abs_end),
@@ -81,7 +81,9 @@ find_enzyme_sites <- function(seq, site) {
 has_enzyme_sites <- function(seq, enzymes = c("BsaI", "BsmBI", "PaqCI")) {
   for (enz_name in enzymes) {
     enz <- ENZYMES[[enz_name]]
-    if (nrow(find_enzyme_sites(seq, enz$recog)) > 0) return(TRUE)
+    if (nrow(find_enzyme_sites(seq, enz$recog)) > 0) {
+      return(TRUE)
+    }
   }
   FALSE
 }
@@ -130,6 +132,8 @@ orient_enzyme_site <- function(enzyme_name, overhang, orientation = "forward",
 #' @param cds Character string of coding DNA sequence (length divisible by 3)
 #' @return Character vector of codons
 extract_codons <- function(cds) {
+  # Convert DNAString/S4 objects to plain character for base R string ops
+  if (is(cds, "DNAString")) cds <- as.character(cds)
   n <- nchar(cds)
   if (n %% 3 != 0) stop("CDS length not divisible by 3")
   starts <- seq(1, n, by = 3)
@@ -143,7 +147,7 @@ extract_codons <- function(cds) {
 #' @return Modified CDS string
 replace_codon <- function(cds, position, new_codon) {
   start <- (position - 1L) * 3L + 1L
-  end   <- start + 2L
+  end <- start + 2L
   paste0(
     substring(cds, 1, start - 1L),
     new_codon,
