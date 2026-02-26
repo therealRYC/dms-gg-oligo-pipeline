@@ -2374,44 +2374,44 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     if (oh4_in_hf) " (HF)" else " (non-HF)"
   ))
 
-  # Phase 5: Global superblock boundary optimization (DP)
+  # Phase 5: Tile-boundary superblock partitioning
   #
-  # Instead of computing split points independently per tile (which causes
-  # boundary drift and prevents block reuse), compute GLOBAL boundaries shared
-  # across all tiles, then assign each tile the subset within its WT range.
-  cli::cli_h3("Computing global superblock boundaries (DP optimizer)")
+  # Groups contiguous tiles into superblocks at tile boundaries, replacing the
+  # old global DP system. Each SB's gene content fits within the synthesis limit.
+  # SB boundary overhangs (oh2 of boundary tiles) are checked for collisions
+  # with oh3 and each other.
+  cli::cli_h3("Partitioning tiles into superblocks")
   block_overhead <- 22L # 2 x 11-nt enzyme sites per block
   n_tiles <- nrow(tiles)
 
-  global_boundaries <- compute_global_superblock_boundaries(
-    cds = cds, gene_len = gene_len, tiles = tiles,
+  partition_result <- partition_tile_superblocks(
+    tiles = tiles,
+    gene_len = gene_len,
     polIII_len = polIII_len,
     max_sub_length = max_block_length - block_overhead,
-    hf_set = hf_set, oh_fidelity = oh_fidelity,
-    oh3 = oh3, oh4 = oh4, oh_L = oh_L,
-    min_sub_length = max(0L, min_geneblock_length - block_overhead),
-    eff_lookup = eff_lookup
+    oh3 = oh3
   )
 
-  all_splits <- assign_global_boundaries_to_tiles(
+  # Convert partition to legacy all_splits format for downstream consumers
+  # (design_wt_geneblocks, R/12_report.R)
+  all_splits <- convert_partition_to_splits(
+    partition_result = partition_result,
     tiles = tiles,
-    global_3wt = global_boundaries$splits_3wt,
-    global_5wt = global_boundaries$splits_5wt,
     gene_len = gene_len,
-    min_sub_length = max(0L, min_geneblock_length - block_overhead),
-    max_sub_length = max_block_length - block_overhead,
     polIII_len = polIII_len
   )
 
-  n_global_3wt <- nrow(global_boundaries$splits_3wt)
-  n_global_5wt <- nrow(global_boundaries$splits_5wt)
-  if (n_global_3wt + n_global_5wt > 0) {
-    n_hf <- sum(global_boundaries$splits_3wt$junction_in_hf) +
-      sum(global_boundaries$splits_5wt$junction_in_hf)
+  if (partition_result$n_superblocks > 1L) {
+    n_boundaries <- partition_result$n_superblocks - 1L
+    n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
+      seq_len(n_boundaries)
+    ]])
     cli::cli_alert_info(paste0(
-      "Global boundaries: ", n_global_3wt, " 3'WT + ", n_global_5wt,
-      " 5'WT split(s). ", n_hf, " junction(s) in HF set. ",
-      "Assigned ", nrow(all_splits), " per-tile split entries."
+      "Tile-boundary partition: ", partition_result$n_superblocks,
+      " superblocks, ", n_boundaries, " boundary(ies). ",
+      n_hf, " junction(s) in HF set. ",
+      nrow(all_splits), " per-tile split entries. ",
+      partition_result$n_collisions, " unresolved collision(s)."
     ))
   } else {
     cli::cli_alert_success("All gene blocks within synthesis limit. No superblock splits needed.")
