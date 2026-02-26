@@ -1479,12 +1479,16 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
 #' @param oh3 Fixed BsmBI overhang
 #' @param oh4 Fixed BsaI overhang
 #' @param oh_L First 4 nt of gene (BsaI overhang)
+#' @param min_sub_length Minimum gene content per sub-block (default 0)
+#' @param eff_lookup Named numeric vector (overhang -> efficiency). If NULL,
+#'   efficiency is treated as 1.0 for all overhangs.
 #' @return List with $splits_3wt and $splits_5wt data frames
 compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
                                                  polIII_len, max_sub_length,
                                                  hf_set, oh_fidelity,
                                                  oh3, oh4, oh_L,
-                                                 min_sub_length = 0L) {
+                                                 min_sub_length = 0L,
+                                                 eff_lookup = NULL) {
   # --- 3'WT boundaries (BsmBI reaction) ---
   # The longest possible 3'WT region: from earliest tile end to gene end
   earliest_3wt_start <- min(tiles$end_nt) + 1L
@@ -2291,7 +2295,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     max_sub_length = max_block_length - block_overhead,
     hf_set = hf_set, oh_fidelity = oh_fidelity,
     oh3 = oh3, oh4 = oh4, oh_L = oh_L,
-    min_sub_length = max(0L, min_geneblock_length - block_overhead)
+    min_sub_length = max(0L, min_geneblock_length - block_overhead),
+    eff_lookup = eff_lookup
   )
 
   all_splits <- assign_global_boundaries_to_tiles(
