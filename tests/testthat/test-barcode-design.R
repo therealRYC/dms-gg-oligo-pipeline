@@ -49,8 +49,8 @@ test_that("barcode filters enforce enzyme site exclusion", {
 test_that("filter_barcode_junctions removes barcodes creating junction enzyme sites", {
   # BsmBI recognition = CGTCTC. If left context ends with "CGTCT" and barcode starts with "C",
   # the junction creates CGTCTC.
-  barcodes <- c("CACGTACGTACG", "TACGTACGTACG", "GACGTACGTACG")  # first starts with C
-  left_context <- "CGTCT"  # + "C" from barcode → CGTCTC = BsmBI
+  barcodes <- c("CACGTACGTACG", "TACGTACGTACG", "GACGTACGTACG") # first starts with C
+  left_context <- "CGTCT" # + "C" from barcode → CGTCTC = BsmBI
   result <- filter_barcode_junctions(barcodes, left_context = left_context, right_context = "")
   expect_false("CACGTACGTACG" %in% result)
   expect_true("TACGTACGTACG" %in% result)
@@ -69,7 +69,7 @@ test_that("filter_barcode_junctions checks right context too", {
   barcodes <- c("ACGTACGGTCTC", "ACGTACGTACGT")
   # Actually the site would need to span: barcode ending + context start
   # Barcode ending in "GGTCT" + context "C..." → GGTCTC at junction
-  barcodes2 <- c("ACGTACGGTCT", "ACGTACGTACG")  # 11 nt each
+  barcodes2 <- c("ACGTACGGTCT", "ACGTACGTACG") # 11 nt each
   right_context <- "CAGTCA"
   result <- filter_barcode_junctions(barcodes2, left_context = "", right_context = right_context)
   # First barcode + right = "ACGTACGGTCTCAGTCA" contains GGTCTC → rejected
@@ -138,7 +138,8 @@ test_that("Generator matrix has correct dimensions and G*H^T = 0", {
     for (j in seq_len(nrow(H))) {
       dot <- gf4_dot(G[i, ], H[j, ])
       expect_equal(dot, 0L,
-        info = paste("G row", i, "* H row", j, "should be 0"))
+        info = paste("G row", i, "* H row", j, "should be 0")
+      )
     }
   }
 })
@@ -160,8 +161,9 @@ test_that("Enumerated codewords have correct count and minimum distance >= 3", {
   for (i in seq_len(n_check - 1)) {
     for (j in (i + 1):n_check) {
       d <- hamming_distance(codewords[i], codewords[j])
-      expect_gte(d, 3L,
-        info = paste("Distance between", codewords[i], "and", codewords[j]))
+      expect_true(d >= 3L,
+        info = paste("Distance between", codewords[i], "and", codewords[j])
+      )
     }
   }
 })
@@ -211,7 +213,7 @@ test_that("generate_prefixes_linear produces valid prefixes for k=12", {
 })
 
 test_that("gf4_sample_codewords produces unique codewords with d >= 3", {
-  H <- gf4_hamming_parity_check(3)  # [21, 18, 3]_4
+  H <- gf4_hamming_parity_check(3) # [21, 18, 3]_4
   G <- gf4_generator_from_parity(H)
 
   # Sample 100 codewords from the massive [21, 18, 3]_4 code
@@ -296,53 +298,58 @@ test_that("generate_prefixes filters out enzyme sites from prefix pool", {
 
 test_that("filter_barcodes_batch correctly applies all filters", {
   barcodes <- c(
-    "ACGTACGTACGT",   # Good: 50% GC, no sites, no homopolymers
-    "CGTCTCAACAGT",   # Bad: contains BsmBI site CGTCTC
-    "AAAAACGTACGT",   # Bad: homopolymer AAAAA
-    "AAAAAAAAAAAA",   # Bad: 0% GC + homopolymer
-    "ACACACACGTGT"    # Good: 50% GC
+    "ACGTACGTACGT", # Good: 50% GC, no sites, no homopolymers
+    "CGTCTCAACAGT", # Bad: contains BsmBI site CGTCTC
+    "AAAAACGTACGT", # Bad: homopolymer AAAAA
+    "AAAAAAAAAAAA", # Bad: 0% GC + homopolymer
+    "ACACACACGTGT" # Good: 50% GC
   )
   keep <- filter_barcodes_batch(barcodes, max_homopolymer = 4, gc_range = c(0.25, 0.75))
-  expect_true(keep[1])   # good
-  expect_false(keep[2])  # enzyme site
-  expect_false(keep[3])  # homopolymer
-  expect_false(keep[4])  # GC + homopolymer
-  expect_true(keep[5])   # good
+  expect_true(keep[1]) # good
+  expect_false(keep[2]) # enzyme site
+  expect_false(keep[3]) # homopolymer
+  expect_false(keep[4]) # GC + homopolymer
+  expect_true(keep[5]) # good
 })
 
 test_that("filter_barcodes_batch checks junction context", {
   barcodes <- c("CACGTACGTACG", "TACGTACGTACG")
-  left_context <- "CGTCT"  # + "C" from first barcode → CGTCTC = BsmBI
+  left_context <- "CGTCT" # + "C" from first barcode → CGTCTC = BsmBI
   keep <- filter_barcodes_batch(
-    barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
+    barcodes,
+    max_homopolymer = 4, gc_range = c(0.0, 1.0),
     junction_left_context = left_context
   )
-  expect_false(keep[1])  # creates junction enzyme site
-  expect_true(keep[2])   # clean
+  expect_false(keep[1]) # creates junction enzyme site
+  expect_true(keep[2]) # clean
 })
 
 test_that("filter_barcodes_batch rejects barcodes with PolIII terminator (TTTT)", {
   barcodes <- c(
-    "ACGTACGTACGT",   # Good: no TTTT
-    "ACTTTTACGTAC",   # Bad: contains TTTT
-    "TTTTACGTACGT",   # Bad: TTTT at start
-    "ACGTACGTTTTT",   # Bad: TTTT at end (plus TTTTT)
-    "ACGATTTCGTAC"    # Good: only TTT (3 Ts), not 4
+    "ACGTACGTACGT", # Good: no TTTT
+    "ACTTTTACGTAC", # Bad: contains TTTT
+    "TTTTACGTACGT", # Bad: TTTT at start
+    "ACGTACGTTTTT", # Bad: TTTT at end (plus TTTTT)
+    "ACGATTTCGTAC" # Good: only TTT (3 Ts), not 4
   )
-  keep <- filter_barcodes_batch(barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
-                                filter_poliii_term = TRUE)
-  expect_true(keep[1])    # no TTTT
-  expect_false(keep[2])   # TTTT
-  expect_false(keep[3])   # TTTT
-  expect_false(keep[4])   # TTTT (also homopolymer)
-  expect_true(keep[5])    # only TTT
+  keep <- filter_barcodes_batch(barcodes,
+    max_homopolymer = 4, gc_range = c(0.0, 1.0),
+    filter_poliii_term = TRUE
+  )
+  expect_true(keep[1]) # no TTTT
+  expect_false(keep[2]) # TTTT
+  expect_false(keep[3]) # TTTT
+  expect_false(keep[4]) # TTTT (also homopolymer)
+  expect_true(keep[5]) # only TTT
 })
 
 test_that("filter_barcodes_batch allows TTTT when filter_poliii_term = FALSE", {
   barcodes <- c("ACTTTTACGTAC", "ACGTACGTACGT")
-  keep <- filter_barcodes_batch(barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
-                                filter_poliii_term = FALSE)
-  expect_true(keep[1])   # TTTT allowed when filter disabled
+  keep <- filter_barcodes_batch(barcodes,
+    max_homopolymer = 4, gc_range = c(0.0, 1.0),
+    filter_poliii_term = FALSE
+  )
+  expect_true(keep[1]) # TTTT allowed when filter disabled
   expect_true(keep[2])
 })
 
@@ -383,8 +390,10 @@ test_that("check_prefix_feasibility auto-adjusts min_hamming when needed", {
   # Request high hamming for small prefix — should auto-adjust downward
   # cli::cli_alert_warning emits a cli message, not an R warning, so we just
   # verify the returned d is lower than requested
-  d <- check_prefix_feasibility(1000, prefix_length = 6, min_hamming = 5,
-                                 min_hamming_floor = 2L)
+  d <- check_prefix_feasibility(1000,
+    prefix_length = 6, min_hamming = 5,
+    min_hamming_floor = 2L
+  )
   expect_true(d < 5L)
   expect_gte(d, 2L)
 })
@@ -392,8 +401,10 @@ test_that("check_prefix_feasibility auto-adjusts min_hamming when needed", {
 test_that("check_prefix_feasibility errors when no d works", {
   # Impossibly many variants for tiny prefix
   expect_error(
-    check_prefix_feasibility(1e9, prefix_length = 4, min_hamming = 3,
-                              min_hamming_floor = 2L),
+    check_prefix_feasibility(1e9,
+      prefix_length = 4, min_hamming = 3,
+      min_hamming_floor = 2L
+    ),
     "Cannot generate enough unique prefixes"
   )
 })
@@ -403,25 +414,33 @@ test_that("check_prefix_feasibility errors when no d works", {
 # ============================================================================
 
 test_that("auto_size_barcode_length finds minimum length", {
-  len <- auto_size_barcode_length(100, prefix_length = 12, barcodes_per_variant = 1,
-                                    min_hamming = 3)
+  len <- auto_size_barcode_length(100,
+    prefix_length = 12, barcodes_per_variant = 1,
+    min_hamming = 3
+  )
   expect_true(is.integer(len))
-  expect_gte(len, 12)  # at least prefix_length
-  expect_lte(len, 30)  # within max bounds
+  expect_gte(len, 12) # at least prefix_length
+  expect_lte(len, 30) # within max bounds
 })
 
 test_that("auto_size_barcode_length increases with more barcodes_per_variant", {
-  len_small <- auto_size_barcode_length(100, prefix_length = 12, barcodes_per_variant = 1,
-                                          min_hamming = 3)
-  len_large <- auto_size_barcode_length(100, prefix_length = 12, barcodes_per_variant = 10,
-                                          min_hamming = 3)
+  len_small <- auto_size_barcode_length(100,
+    prefix_length = 12, barcodes_per_variant = 1,
+    min_hamming = 3
+  )
+  len_large <- auto_size_barcode_length(100,
+    prefix_length = 12, barcodes_per_variant = 10,
+    min_hamming = 3
+  )
   expect_gte(len_large, len_small)
 })
 
 test_that("auto_size_barcode_length errors on impossible request", {
   expect_error(
-    auto_size_barcode_length(100, prefix_length = 28, barcodes_per_variant = 100,
-                              min_hamming = 3),
+    auto_size_barcode_length(100,
+      prefix_length = 28, barcodes_per_variant = 100,
+      min_hamming = 3
+    ),
     "Cannot auto-size"
   )
 })
@@ -433,7 +452,8 @@ test_that("auto_size_barcode_length errors on impossible request", {
 test_that("generate_barcodes_per_prefix produces correct count and structure", {
   prefixes <- c("ACGTACGT", "TGCATGCA", "GGCCTTAA")
   barcodes <- generate_barcodes_per_prefix(
-    prefixes, suffix_length = 4, barcodes_per_variant = 3,
+    prefixes,
+    suffix_length = 4, barcodes_per_variant = 3,
     gc_range = c(0.25, 0.75), max_homopolymer = 4
   )
   # 3 prefixes * 3 barcodes per variant = 9 total
@@ -449,7 +469,8 @@ test_that("generate_barcodes_per_prefix produces correct count and structure", {
 test_that("generate_barcodes_per_prefix with suffix_length=0 returns prefixes", {
   prefixes <- c("ACGTACGT", "TGCATGCA")
   barcodes <- generate_barcodes_per_prefix(
-    prefixes, suffix_length = 0, barcodes_per_variant = 1,
+    prefixes,
+    suffix_length = 0, barcodes_per_variant = 1,
     gc_range = c(0.25, 0.75), max_homopolymer = 4
   )
   expect_equal(barcodes, prefixes)
@@ -504,7 +525,8 @@ test_that("design_barcodes prefix Hamming distance guarantee", {
       for (j in (i + 1):length(prefixes)) {
         d <- hamming_distance(prefixes[i], prefixes[j])
         expect_gte(d, result$effective_hamming,
-          label = paste("prefix distance between", prefixes[i], "and", prefixes[j]))
+          label = paste("prefix distance between", prefixes[i], "and", prefixes[j])
+        )
       }
     }
   }
@@ -552,7 +574,8 @@ test_that("design_barcodes with barcodes_per_variant=10 shares prefixes within v
     v_bcs <- result$barcodes[((v - 1) * 10 + 1):(v * 10)]
     v_prefixes <- unique(substring(v_bcs, 1, 8))
     expect_equal(length(v_prefixes), 1,
-                 info = paste("Variant", v, "should have exactly 1 unique prefix"))
+      info = paste("Variant", v, "should have exactly 1 unique prefix")
+    )
   }
 
   # All variant prefixes should be distinct
