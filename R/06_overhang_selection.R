@@ -2444,12 +2444,12 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       stringsAsFactors = FALSE
     )
 
-    # BsmBI reaction overhangs: oh2_i, [3'WT junction ohs], oh3
-    bsmbi_ohs <- unique(c(tile$oh2_seq, oh3))
-    tile_3wt_splits <- all_splits[all_splits$tile_id == i & all_splits$block_type == "bsmbi_3wt", ]
-    if (nrow(tile_3wt_splits) > 0) {
-      bsmbi_ohs <- unique(c(bsmbi_ohs, tile_3wt_splits$junction_oh))
-    }
+    # BsmBI reaction overhangs: use get_tile_reaction_overhangs() which
+    # computes the correct per-tile OH set from the partition (oh2 of this tile,
+    # visible SB boundary OHs, and oh3)
+    bsmbi_ohs <- unique(get_tile_reaction_overhangs(
+      partition_result, i, tiles, oh3, "bsmbi"
+    ))
 
     bsmbi_result <- compute_set_fidelity(bsmbi_ohs, bsmbi_matrix)
     n_bsmbi_hf <- sum(bsmbi_ohs %in% hf_set)
