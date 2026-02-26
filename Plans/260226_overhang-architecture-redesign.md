@@ -1,5 +1,5 @@
 <!-- Created: 2026-02-26 -->
-<!-- Last updated: 2026-02-26 — Complete handoff document for parallel agent work -->
+<!-- Last updated: 2026-02-26 — Fix Potapov Table 1 sequences from actual paper PDF -->
 
 # Overhang Architecture Redesign — Handoff Document
 
@@ -180,28 +180,27 @@ sets with poor pairwise interactions.
 
 ### The Correct 25-Overhang Set (Potapov 2018 Table 1, Set 3)
 
-Source: Extracted from the **kappagate** Python library (Edinburgh Genome Foundry),
-which references Potapov et al. 2018 Table 1. Cross-validated against the Pryor et al.
-2020 35-fragment set (many of these 25 appear as a subset).
+Source: Directly extracted from Potapov et al. 2018, ACS Synth Bio, Table 1 (PDF).
+Note: includes AAAA (homopolymer) — confirmed present in the paper's optimized set.
 
 **Predicted set fidelity: 95.8%** — highest for any 25-overhang set in the paper.
 
 ```
-GGAG  GATA  GGCA  GGTC  TCGC
-GAGG  CAGT  GTAA  TCCA  CACA
-GAAT  ATAG  AGTA  ATCA  TCTT
-AGGT  CAAA  AAGC  GCAC  CAAC
-AACG  CGAA  GTCT  TCAG  CCAT
+CCTC  CTAA  GACA  GCAC  AATC
+GTAA  TGAA  ATTA  CCAG  AGGA
+ACAA  TAGA  CGGA  CATA  CAGC
+AACG  AAGT  CTCC  AGAT  ACCA
+AGTG  GGTA  GCGA  AAAA  ATGA
 ```
 
 As an R vector:
 ```r
 POTAPOV_TABLE1_SET3_25 <- c(
-  "GGAG", "GATA", "GGCA", "GGTC", "TCGC",
-  "GAGG", "CAGT", "GTAA", "TCCA", "CACA",
-  "GAAT", "ATAG", "AGTA", "ATCA", "TCTT",
-  "AGGT", "CAAA", "AAGC", "GCAC", "CAAC",
-  "AACG", "CGAA", "GTCT", "TCAG", "CCAT"
+  "CCTC", "CTAA", "GACA", "GCAC", "AATC",
+  "GTAA", "TGAA", "ATTA", "CCAG", "AGGA",
+  "ACAA", "TAGA", "CGGA", "CATA", "CAGC",
+  "AACG", "AAGT", "CTCC", "AGAT", "ACCA",
+  "AGTG", "GGTA", "GCGA", "AAAA", "ATGA"
 )
 ```
 

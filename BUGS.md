@@ -126,8 +126,8 @@
 - **Fix:** Replace with the 25-overhang set from Potapov 2018 Table 1 (predicted 95.8% set fidelity — the highest for any 25-overhang set in the paper). This gives more headroom for gene-derived overhangs to land in the set. Update `high_fidelity_sets.rds` and `load_high_fidelity_set()` default. Remove `generate_hf_set()` as the primary path (keep only as last-resort fallback).
 - **Potapov Table 1 — 25-overhang set (Set 3, to be embedded in code):**
   - Source: Potapov et al. 2018, ACS Synth Bio, Table 1. Optimized via simulated annealing for **set fidelity**. Predicted 95.8% set fidelity.
-  - Extracted from kappagate library (Edinburgh Genome Foundry), which references Potapov 2018. Cross-validated against Pryor et al. 2020 35-fragment set.
-  - Exact sequences: `GGAG, GATA, GGCA, GGTC, TCGC, GAGG, CAGT, GTAA, TCCA, CACA, GAAT, ATAG, AGTA, ATCA, TCTT, AGGT, CAAA, AAGC, GCAC, CAAC, AACG, CGAA, GTCT, TCAG, CCAT`
+  - Extracted directly from Potapov 2018 paper PDF Table 1. Note: includes AAAA (homopolymer) — confirmed in paper's SA-optimized set.
+  - Exact sequences: `CCTC, CTAA, GACA, GCAC, AATC, GTAA, TGAA, ATTA, CCAG, AGGA, ACAA, TAGA, CGGA, CATA, CAGC, AACG, AAGT, CTCC, AGAT, ACCA, AGTG, GGTA, GCGA, AAAA, ATGA`
   - Table 1 also has: Set 1 (15 OHs, >99%, includes MoClo), Set 2 (20, ~98%), Set 4 (30, ~90%).
 - **OOGGA scoring research (completed 2026-02-26):**
   - OOGGA (Mukundan & Madhusudhan 2025, bioRxiv 10.1101/2025.06.16.659877) uses a DP that scores by individual overhang fidelity and efficiency.
