@@ -569,3 +569,126 @@ test_that("global boundaries produce shared splits across tiles", {
     )
   }
 })
+
+# =============================================================================
+# OOGGA-STYLE SCORING TESTS
+# =============================================================================
+
+test_that("compute_overhang_efficiency returns valid P_eff values", {
+  oh_data <- builtin_overhang_fidelity()
+  mat <- generate_pairwise_from_fidelity(oh_data)
+  eff <- compute_overhang_efficiency(mat)
+
+  # Should have 256 named values
+  expect_equal(length(eff), 256)
+  expect_true(all(!is.na(names(eff))))
+  expect_true(all(nchar(names(eff)) == 4))
+
+  # All values in [0, 1]
+  expect_true(all(eff >= 0))
+  expect_true(all(eff <= 1))
+
+  # Max should be exactly 1.0 (the most efficient overhang)
+  expect_equal(max(eff), 1.0)
+
+  # Min should be > 0 (all overhangs have some ligation)
+  expect_true(min(eff) > 0)
+})
+
+test_that("compute_overhang_efficiency handles degenerate matrix gracefully", {
+  # Zero matrix — should return uniform 1.0
+  mat <- matrix(0,
+    nrow = 4, ncol = 4,
+    dimnames = list(
+      c("AAAA", "CCCC", "GGGG", "TTTT"),
+      c("AAAA", "CCCC", "GGGG", "TTTT")
+    )
+  )
+  eff <- compute_overhang_efficiency(mat)
+  expect_equal(length(eff), 4)
+  expect_true(all(eff == 1.0))
+})
+
+test_that("oogga_score computes P_fid * P_eff * (1 + w_hf * in_HF) correctly", {
+  fid_lookup <- c("AAAA" = 0.996, "AACG" = 0.934, "GGCG" = 0.669)
+  eff_lookup <- c("AAAA" = 1.0, "AACG" = 0.8, "GGCG" = 0.4)
+  hf_set <- c("AACG", "AAAA") # AACG is in HF, GGCG is not
+
+  # AACG: in HF -> 0.934 * 0.8 * (1 + 0.5 * 1) = 0.934 * 0.8 * 1.5
+  score_hf <- oogga_score("AACG", fid_lookup, eff_lookup, hf_set, w_hf = 0.5)
+  expect_equal(score_hf, 0.934 * 0.8 * 1.5, tolerance = 1e-6)
+
+  # GGCG: not in HF -> 0.669 * 0.4 * (1 + 0.5 * 0) = 0.669 * 0.4 * 1.0
+  score_nohf <- oogga_score("GGCG", fid_lookup, eff_lookup, hf_set, w_hf = 0.5)
+  expect_equal(score_nohf, 0.669 * 0.4 * 1.0, tolerance = 1e-6)
+})
+
+test_that("oogga_score with w_hf=0 gives pure OOGGA (no HF bonus)", {
+  fid_lookup <- c("AACG" = 0.934)
+  eff_lookup <- c("AACG" = 0.8)
+  hf_set <- c("AACG")
+
+  score <- oogga_score("AACG", fid_lookup, eff_lookup, hf_set, w_hf = 0.0)
+  expect_equal(score, 0.934 * 0.8 * 1.0, tolerance = 1e-6)
+})
+
+test_that("oogga_score falls back to 0.5 for unknown overhangs", {
+  fid_lookup <- c("AAAA" = 0.996)
+  eff_lookup <- c("AAAA" = 1.0)
+  hf_set <- character(0)
+
+  # "NNNN" not in lookups -> fid=0.5, eff=0.5
+  score <- oogga_score("NNNN", fid_lookup, eff_lookup, hf_set)
+  expect_equal(score, 0.5 * 0.5 * 1.0, tolerance = 1e-6)
+})
+
+test_that("oogga_score returns higher values for HF overhangs than non-HF with similar fidelity", {
+  # Two overhangs with identical fidelity and efficiency, but one is HF
+  fid_lookup <- c("AACG" = 0.95, "TGGT" = 0.95)
+  eff_lookup <- c("AACG" = 0.85, "TGGT" = 0.85)
+  hf_set <- c("AACG")
+
+  score_hf <- oogga_score("AACG", fid_lookup, eff_lookup, hf_set)
+  score_nohf <- oogga_score("TGGT", fid_lookup, eff_lookup, hf_set)
+
+  expect_gt(score_hf, score_nohf)
+  # The ratio should be (1 + w_hf) = 1.5
+  expect_equal(score_hf / score_nohf, 1.5, tolerance = 1e-6)
+})
+
+test_that("precompute_boundary_scores works with eff_lookup parameter", {
+  # Use the test gene from setup.R
+  skip_if_not(exists("TEST_GENE_SEQ"), message = "TEST_GENE_SEQ not available")
+
+  oh_data <- builtin_overhang_fidelity()
+  hf_set <- generate_hf_set(oh_data, 20)
+
+  # Generate efficiency lookup
+  mat <- generate_pairwise_from_fidelity(oh_data)
+  eff_lookup <- compute_overhang_efficiency(mat)
+
+  # Call with eff_lookup (new scoring)
+  result_with_eff <- precompute_boundary_scores(
+    TEST_GENE_SEQ, hf_set, oh_data,
+    eff_lookup = eff_lookup
+  )
+
+  # Call without eff_lookup (default = 1.0 efficiency)
+  result_no_eff <- precompute_boundary_scores(
+    TEST_GENE_SEQ, hf_set, oh_data,
+    eff_lookup = NULL
+  )
+
+  # Both should have valid structure
+  expect_equal(length(result_with_eff$score), nchar(TEST_GENE_SEQ) %/% 3L)
+  expect_equal(length(result_no_eff$score), nchar(TEST_GENE_SEQ) %/% 3L)
+
+  # Scores with efficiency should be <= scores without (efficiency <= 1.0)
+  valid_idx <- which(result_with_eff$valid & result_no_eff$valid)
+  expect_true(length(valid_idx) > 0, info = "Should have some valid boundary positions")
+  for (i in valid_idx) {
+    expect_lte(result_with_eff$score[i], result_no_eff$score[i] + 1e-9,
+      label = paste("Position", i, ": eff-adjusted score should be <= base score")
+    )
+  }
+})
