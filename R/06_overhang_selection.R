@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-26 — Replace greedy HF set with Potapov Table 1 Set 3 (25 overhangs, BUG-006)
+# Last updated: 2026-02-26 — Add tile-boundary superblock partitioning (Task B)
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -1591,6 +1591,366 @@ assign_global_boundaries_to_tiles <- function(tiles, global_3wt, global_5wt,
       stringsAsFactors = FALSE
     )
   }
+}
+
+# =============================================================================
+# TILE-BOUNDARY SUPERBLOCK PARTITIONING
+# =============================================================================
+
+#' Check if two overhangs collide (identity or reverse complement)
+#'
+#' Two overhangs collide if they are identical or reverse complements of each
+#' other. In a Golden Gate reaction, colliding overhangs would ligate
+#' incorrectly, producing misassembled products.
+#'
+#' @param oh_a Character string, 4-nt overhang
+#' @param oh_b Character string, 4-nt overhang
+#' @return Logical TRUE if overhangs collide
+oh_collides <- function(oh_a, oh_b) {
+  oh_a == oh_b || oh_a == reverse_complement(oh_b)
+}
+
+#' Partition tiles into superblocks at tile boundaries
+#'
+#' Groups contiguous tiles into superblocks (SBs) such that each SB's gene
+#' content fits within max_sub_length. The last SB also accounts for the
+#' PolIII/cassette length when possible. SB boundaries align with tile
+#' boundaries — the boundary overhang is the oh2 of the last tile in each
+#' non-final SB.
+#'
+#' This replaces the old global superblock system
+#' (compute_global_superblock_boundaries + assign_global_boundaries_to_tiles)
+#' and eliminates BUG-005 by using per-tile overhang exclusion instead of
+#' global exclusion.
+#'
+#' Algorithm:
+#'   Phase 1: Forward greedy — accumulate tiles into SBs until adding the
+#'     next tile would exceed max_sub_length.
+#'   Phase 2: Adjust last SB to accommodate polIII_len (soft constraint —
+#'     the function proceeds even if no partition can fit polIII attached).
+#'   Phase 3: Build superblocks data frame.
+#'   Phase 4: Detect and resolve overhang collisions at SB boundaries by
+#'     shifting boundaries ±1 tile.
+#'   Phase 5: Compute block counts.
+#'
+#' @param tiles Data frame from search_tile_boundaries_dp() with columns:
+#'   tile_id, start_nt, end_nt, oh1_seq, oh2_seq, etc.
+#' @param gene_len Length of the domesticated CDS in nucleotides
+#' @param polIII_len Length of downstream cassette (PolIII + intergene elements)
+#'   in nt. Set to 0 if cassette is handled as a separate fragment.
+#' @param max_sub_length Maximum gene content per sub-block in nt
+#'   (typically max_block_length - block_overhead, e.g. 1800 - 22 = 1778)
+#' @param oh3 Optional oh3 overhang for collision checking. NULL skips
+#'   collision detection.
+#' @param oh_fidelity Optional fidelity data frame (reserved for future use)
+#' @param hf_set Optional HF overhang set (reserved for future use)
+#' @return List with:
+#'   \item{n_superblocks}{Integer, number of superblocks}
+#'   \item{superblocks}{Data frame: sb_id, start_tile, end_tile, gene_content}
+#'   \item{n_collisions}{Integer, number of unresolved overhang collisions
+#'     (0 = clean partition)}
+#'   \item{block_count}{List with tile_blocks and full_sb_blocks counts}
+partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
+                                       max_sub_length,
+                                       oh3 = NULL,
+                                       oh_fidelity = NULL,
+                                       hf_set = NULL) {
+  n_tiles <- nrow(tiles)
+
+  # --- Input validation ---
+  # If cassette alone exceeds max_sub_length, no partition can work
+  if (polIII_len > max_sub_length) {
+    stop(sprintf(
+      "Cassette/polIII length (%d) exceeds max_sub_length (%d); cannot partition.",
+      polIII_len, max_sub_length
+    ))
+  }
+
+  # =========================================================================
+  # Phase 1: Forward greedy partitioning
+  # =========================================================================
+  # Accumulate tiles left-to-right. When adding the next tile would cause the
+  # current SB's gene content to exceed max_sub_length, close the current SB
+  # and start a new one.
+  #
+  # Gene content of SB_i = right_boundary_nt - left_boundary_nt, where:
+  #   - left_boundary = 0 for first SB, tiles[prev_end_tile].end_nt otherwise
+  #   - right_boundary = tiles[end_tile].end_nt for non-last, gene_len for last
+  sb_end_tiles <- integer(0) # end_tile index for each SB
+  prev_boundary_nt <- 0L # left boundary (nt) of current SB
+  current_start_tile <- 1L
+
+  for (i in seq_len(n_tiles)) {
+    # Gene content of current SB if we include tile i
+    content <- tiles$end_nt[i] - prev_boundary_nt
+
+    if (content > max_sub_length && i > current_start_tile) {
+      # Close current SB at tile i-1 (tile i would overflow)
+      sb_end_tiles <- c(sb_end_tiles, i - 1L)
+      prev_boundary_nt <- tiles$end_nt[i - 1L]
+      current_start_tile <- i
+    }
+  }
+  # Close the last SB
+  sb_end_tiles <- c(sb_end_tiles, n_tiles)
+
+  # =========================================================================
+  # Phase 2: Adjust last SB for polIII/cassette budget
+  # =========================================================================
+  # The last SB's gene block includes the PolIII cassette. Its orderable
+  # length = gene_content + polIII_len, which must be <= max_sub_length.
+  # If it doesn't fit, split tiles from the last SB into a new penultimate SB.
+  # This is a soft constraint: if no partition can fit polIII (e.g., single
+  # tile's gene region + polIII > max_sub_length), proceed anyway.
+  n_sb <- length(sb_end_tiles)
+  if (polIII_len > 0L) {
+    last_left_nt <- if (n_sb >= 2L) tiles$end_nt[sb_end_tiles[n_sb - 1L]] else 0L
+    last_gene_content <- gene_len - last_left_nt
+
+    while (last_gene_content + polIII_len > max_sub_length) {
+      last_start_tile <- if (n_sb >= 2L) sb_end_tiles[n_sb - 1L] + 1L else 1L
+      last_end_tile <- sb_end_tiles[n_sb]
+
+      # Can't split a single-tile last SB further — accept and move on
+      if (last_start_tile == last_end_tile) break
+
+      # Find the earliest split tile where the remaining gene + polIII fits
+      found_split <- FALSE
+      for (split_at in seq(last_start_tile, last_end_tile - 1L)) {
+        remaining <- gene_len - tiles$end_nt[split_at]
+        if (remaining + polIII_len <= max_sub_length) {
+          # Also verify the new penultimate SB fits
+          new_penult_content <- tiles$end_nt[split_at] - last_left_nt
+          if (new_penult_content <= max_sub_length) {
+            # Insert new boundary: replace [..., last_end] with [..., split_at, last_end]
+            sb_end_tiles <- c(sb_end_tiles[-n_sb], split_at, last_end_tile)
+            found_split <- TRUE
+            break
+          }
+        }
+      }
+
+      if (!found_split) break # No valid split exists — accept oversized last SB
+
+      # Recompute for next iteration
+      n_sb <- length(sb_end_tiles)
+      last_left_nt <- tiles$end_nt[sb_end_tiles[n_sb - 1L]]
+      last_gene_content <- gene_len - last_left_nt
+    }
+  }
+
+  # =========================================================================
+  # Phase 3: Build superblocks data frame
+  # =========================================================================
+  n_sb <- length(sb_end_tiles)
+  sb_start_tiles <- c(1L, sb_end_tiles[-n_sb] + 1L)
+  gene_contents <- integer(n_sb)
+
+  for (i in seq_len(n_sb)) {
+    left_nt <- if (i == 1L) 0L else tiles$end_nt[sb_end_tiles[i - 1L]]
+    right_nt <- if (i == n_sb) gene_len else tiles$end_nt[sb_end_tiles[i]]
+    gene_contents[i] <- right_nt - left_nt
+  }
+
+  sbs <- data.frame(
+    sb_id = seq_len(n_sb),
+    start_tile = sb_start_tiles,
+    end_tile = sb_end_tiles,
+    gene_content = gene_contents,
+    stringsAsFactors = FALSE
+  )
+
+  # =========================================================================
+  # Phase 4: Overhang collision detection and resolution
+  # =========================================================================
+  # SB boundary overhangs must not collide with oh3 or with each other.
+  # If a collision is detected, try shifting the boundary ±1 tile.
+  n_collisions <- 0L
+
+  if (n_sb >= 2L && !is.null(oh3)) {
+    oh3_rc <- reverse_complement(oh3)
+
+    for (bi in seq_len(n_sb - 1L)) {
+      boundary_tile <- sb_end_tiles[bi]
+      boundary_oh <- tiles$oh2_seq[boundary_tile]
+
+      # --- Check for collision ---
+      has_collision <- FALSE
+
+      # vs oh3
+      if (oh_collides(boundary_oh, oh3)) {
+        has_collision <- TRUE
+      }
+
+      # vs other SB boundary OHs
+      if (!has_collision) {
+        for (bj in seq_len(n_sb - 1L)) {
+          if (bj == bi) next
+          other_oh <- tiles$oh2_seq[sb_end_tiles[bj]]
+          if (oh_collides(boundary_oh, other_oh)) {
+            has_collision <- TRUE
+            break
+          }
+        }
+      }
+
+      if (!has_collision) next
+
+      n_collisions <- n_collisions + 1L
+
+      # --- Try shifting boundary ±1 tile ---
+      shift_candidates <- c(boundary_tile - 1L, boundary_tile + 1L)
+      resolved <- FALSE
+
+      for (new_bt in shift_candidates) {
+        # Must be a valid tile index
+        if (new_bt < 1L || new_bt >= n_tiles) next
+
+        # Must maintain SB ordering: prev_boundary < new_bt < next_boundary
+        prev_end <- if (bi > 1L) sb_end_tiles[bi - 1L] else 0L
+        next_end <- if (bi < n_sb - 1L) sb_end_tiles[bi + 1L] else n_tiles
+        if (new_bt <= prev_end || new_bt >= next_end) next
+
+        # Validate sizing: SB before this boundary
+        left_nt <- if (bi == 1L) 0L else tiles$end_nt[sb_end_tiles[bi - 1L]]
+        new_right <- tiles$end_nt[new_bt]
+        if ((new_right - left_nt) > max_sub_length) next
+
+        # Validate sizing: SB after this boundary
+        if (bi == n_sb - 1L) {
+          # Boundary before the last SB — check polIII constraint
+          after_content <- gene_len - new_right
+          if (polIII_len > 0L && (after_content + polIII_len) > max_sub_length) next
+          if (after_content > max_sub_length) next
+        } else {
+          after_right <- tiles$end_nt[sb_end_tiles[bi + 1L]]
+          if ((after_right - new_right) > max_sub_length) next
+        }
+
+        # Check new OH for collisions
+        new_oh <- tiles$oh2_seq[new_bt]
+        new_has_collision <- FALSE
+
+        if (oh_collides(new_oh, oh3)) new_has_collision <- TRUE
+
+        if (!new_has_collision) {
+          for (bj in seq_len(n_sb - 1L)) {
+            if (bj == bi) next
+            other_oh <- tiles$oh2_seq[sb_end_tiles[bj]]
+            if (oh_collides(new_oh, other_oh)) {
+              new_has_collision <- TRUE
+              break
+            }
+          }
+        }
+
+        if (!new_has_collision) {
+          sb_end_tiles[bi] <- new_bt
+          resolved <- TRUE
+          break
+        }
+      }
+
+      if (resolved) n_collisions <- n_collisions - 1L
+    }
+
+    # Rebuild superblocks data frame with potentially updated boundaries
+    sb_start_tiles <- c(1L, sb_end_tiles[-n_sb] + 1L)
+    for (i in seq_len(n_sb)) {
+      left_nt <- if (i == 1L) 0L else tiles$end_nt[sb_end_tiles[i - 1L]]
+      right_nt <- if (i == n_sb) gene_len else tiles$end_nt[sb_end_tiles[i]]
+      gene_contents[i] <- right_nt - left_nt
+    }
+    sbs <- data.frame(
+      sb_id = seq_len(n_sb),
+      start_tile = sb_start_tiles,
+      end_tile = sb_end_tiles,
+      gene_content = gene_contents,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  # =========================================================================
+  # Phase 5: Block counting
+  # =========================================================================
+  # tile_blocks: within each SB, interior tile boundaries need partial fragments
+  #   for both BsaI (5'WT) and BsmBI (3'WT) → 2 * (N_i - 1) per SB
+  # full_sb_blocks: each non-terminal SB needs both BsaI and BsmBI versions
+  #   → 2 * (n_sb - 1) total
+  tile_blocks <- 0L
+  for (i in seq_len(n_sb)) {
+    n_tiles_in_sb <- sbs$end_tile[i] - sbs$start_tile[i] + 1L
+    tile_blocks <- tile_blocks + 2L * (n_tiles_in_sb - 1L)
+  }
+  full_sb_blocks <- 2L * (n_sb - 1L)
+
+  list(
+    n_superblocks = n_sb,
+    superblocks = sbs,
+    n_collisions = n_collisions,
+    block_count = list(
+      tile_blocks = tile_blocks,
+      full_sb_blocks = full_sb_blocks
+    )
+  )
+}
+
+#' Get all overhangs in a tile's BsmBI reaction
+#'
+#' For a tile in SB_i, the BsmBI (3'WT) reaction contains fragments joined by:
+#'   - oh2 of this tile (tile → 3'WT junction)
+#'   - SB boundary OHs visible to this tile: boundaries from SB_i onward,
+#'     excluding self if this tile IS the SB boundary (self-collision excluded)
+#'   - oh3 (last gene content → barcode junction)
+#'
+#' Used for per-tile collision validation: all returned OHs must be pairwise
+#' distinct (no identity or RC collisions).
+#'
+#' @param partition_result Output from partition_tile_superblocks()
+#' @param tile_idx Integer, tile index (1-based)
+#' @param tiles Data frame of tiles (must have oh2_seq column)
+#' @param oh3 Character, oh3 overhang sequence
+#' @param enzyme_context Character, enzyme context ("bsmbi" supported)
+#' @return Character vector of overhang sequences in this tile's reaction
+get_tile_reaction_overhangs <- function(partition_result, tile_idx, tiles,
+                                        oh3, enzyme_context) {
+  sbs <- partition_result$superblocks
+  n_sb <- partition_result$n_superblocks
+
+  # Find which SB this tile belongs to
+  my_sb_idx <- which(sbs$start_tile <= tile_idx & sbs$end_tile >= tile_idx)
+
+  ohs <- character(0)
+
+  if (enzyme_context == "bsmbi") {
+    # oh2 of this tile
+    ohs <- c(ohs, tiles$oh2_seq[tile_idx])
+
+    # SB boundary OHs visible to this tile.
+    # Boundaries are at end_tile of each non-final SB. A tile in SB_i sees:
+    #   - SB_i boundary (if tile is NOT the last tile in SB_i)
+    #   - SB_{i+1} through SB_{n-1} boundaries (always)
+    # The last tile of SB_i has oh2 == SB_i boundary, so including it would
+    # be a self-collision — we skip it.
+    if (n_sb >= 2L) {
+      for (si in seq_len(n_sb - 1L)) {
+        if (si >= my_sb_idx) {
+          boundary_tile <- sbs$end_tile[si]
+          # Exclude self: if this tile IS the boundary, its oh2 is already in ohs
+          if (boundary_tile != tile_idx) {
+            ohs <- c(ohs, tiles$oh2_seq[boundary_tile])
+          }
+        }
+      }
+    }
+
+    # oh3 (always present in BsmBI reactions)
+    if (!is.null(oh3) && nchar(oh3) > 0L) {
+      ohs <- c(ohs, oh3)
+    }
+  }
+
+  ohs
 }
 
 # =============================================================================
