@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-26 — Add OOGGA-style scoring (P_fid * P_eff * HF bonus)
+# Last updated: 2026-02-26 — Wire tile-boundary superblocks into plan_assembly()
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -1458,6 +1458,9 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
   )
 }
 
+#' DEPRECATED: Use partition_tile_superblocks() + convert_partition_to_splits()
+#' instead. Kept for regression tests and backward compatibility.
+#'
 #' Compute global superblock boundaries for 3'WT and 5'WT regions
 #'
 #' Instead of computing split points independently per tile (which produces
@@ -1552,6 +1555,9 @@ compute_global_superblock_boundaries <- function(cds, gene_len, tiles,
   list(splits_3wt = splits_3wt, splits_5wt = splits_5wt)
 }
 
+#' DEPRECATED: Use partition_tile_superblocks() + convert_partition_to_splits()
+#' instead. Kept for regression tests and backward compatibility.
+#'
 #' Assign global superblock boundaries to individual tiles
 #'
 #' For each tile, selects the subset of global boundaries that fall within
@@ -2061,6 +2067,100 @@ get_tile_reaction_overhangs <- function(partition_result, tile_idx, tiles,
   ohs
 }
 
+#' Convert tile-boundary partition to legacy all_splits format
+#'
+#' Translates the output of partition_tile_superblocks() into the per-tile
+#' split data frame consumed by design_wt_geneblocks() and R/12_report.R.
+#' This is a compatibility shim — downstream consumers expect columns:
+#' split_nt, junction_oh, junction_in_hf, junction_fidelity, block_type, tile_id.
+#'
+#' For each SB boundary (at tiles$end_nt[boundary_tile]):
+#'   - bsmbi_3wt entries: tiles whose 3'WT region spans past this boundary
+#'     (tile$end_nt < split_nt)
+#'   - bsai_5wt entries: tiles whose 5'WT region spans back past this boundary
+#'     (split_nt < tile$start_nt)
+#'
+#' @param partition_result List from partition_tile_superblocks()
+#' @param tiles Data frame of tiles (must have end_nt, start_nt, oh2_seq,
+#'   oh2_in_hf, oh2_fidelity, tile_id columns)
+#' @param gene_len Length of the domesticated CDS in nucleotides
+#' @param polIII_len Length of downstream cassette (unused, kept for interface
+#'   consistency)
+#' @return Data frame with columns: split_nt, junction_oh, junction_in_hf,
+#'   junction_fidelity, block_type, tile_id. Empty (0-row) if n_superblocks <= 1.
+convert_partition_to_splits <- function(partition_result, tiles, gene_len,
+                                        polIII_len = 0L) {
+  empty_result <- data.frame(
+    split_nt = integer(0), junction_oh = character(0),
+    junction_in_hf = logical(0), junction_fidelity = numeric(0),
+    block_type = character(0), tile_id = integer(0),
+    stringsAsFactors = FALSE
+  )
+
+  sbs <- partition_result$superblocks
+  n_sb <- partition_result$n_superblocks
+
+  # No splits needed if only 1 superblock
+  if (n_sb <= 1L) {
+    return(empty_result)
+  }
+
+  n_tiles <- nrow(tiles)
+  splits_list <- vector("list", 0L)
+
+  # Pre-extract boundary info for each SB boundary (between SB bi and SB bi+1)
+  for (bi in seq_len(n_sb - 1L)) {
+    boundary_tile <- sbs$end_tile[bi]
+    split_nt <- tiles$end_nt[boundary_tile]
+    junction_oh <- tiles$oh2_seq[boundary_tile]
+    junction_in_hf <- tiles$oh2_in_hf[boundary_tile]
+    junction_fidelity <- tiles$oh2_fidelity[boundary_tile]
+
+    # --- bsmbi_3wt entries ---
+    # Tile t's 3'WT region: [tile_t.end_nt + 1, gene_len]
+    # This boundary is within that region if tile_t.end_nt < split_nt
+    for (t in seq_len(n_tiles)) {
+      if (tiles$end_nt[t] < split_nt) {
+        splits_list[[length(splits_list) + 1L]] <- data.frame(
+          split_nt = split_nt,
+          junction_oh = junction_oh,
+          junction_in_hf = junction_in_hf,
+          junction_fidelity = junction_fidelity,
+          block_type = "bsmbi_3wt",
+          tile_id = tiles$tile_id[t],
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+
+    # --- bsai_5wt entries ---
+    # Tile t's 5'WT region: [1, tile_t.start_nt - 1]
+    # This boundary is within that region if split_nt < tile_t.start_nt
+    # (and tile must actually have a 5'WT region, i.e., start_nt > 1)
+    for (t in seq_len(n_tiles)) {
+      if (tiles$start_nt[t] > 1L && split_nt < tiles$start_nt[t]) {
+        splits_list[[length(splits_list) + 1L]] <- data.frame(
+          split_nt = split_nt,
+          junction_oh = junction_oh,
+          junction_in_hf = junction_in_hf,
+          junction_fidelity = junction_fidelity,
+          block_type = "bsai_5wt",
+          tile_id = tiles$tile_id[t],
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+
+  if (length(splits_list) > 0) {
+    all_splits <- do.call(rbind, splits_list)
+    rownames(all_splits) <- NULL
+    all_splits
+  } else {
+    empty_result
+  }
+}
+
 # =============================================================================
 # PROMOTER-DERIVED oh3
 # =============================================================================
@@ -2280,44 +2380,44 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     if (oh4_in_hf) " (HF)" else " (non-HF)"
   ))
 
-  # Phase 5: Global superblock boundary optimization (DP)
+  # Phase 5: Tile-boundary superblock partitioning
   #
-  # Instead of computing split points independently per tile (which causes
-  # boundary drift and prevents block reuse), compute GLOBAL boundaries shared
-  # across all tiles, then assign each tile the subset within its WT range.
-  cli::cli_h3("Computing global superblock boundaries (DP optimizer)")
+  # Groups contiguous tiles into superblocks at tile boundaries, replacing the
+  # old global DP system. Each SB's gene content fits within the synthesis limit.
+  # SB boundary overhangs (oh2 of boundary tiles) are checked for collisions
+  # with oh3 and each other.
+  cli::cli_h3("Partitioning tiles into superblocks")
   block_overhead <- 22L # 2 x 11-nt enzyme sites per block
   n_tiles <- nrow(tiles)
 
-  global_boundaries <- compute_global_superblock_boundaries(
-    cds = cds, gene_len = gene_len, tiles = tiles,
+  partition_result <- partition_tile_superblocks(
+    tiles = tiles,
+    gene_len = gene_len,
     polIII_len = polIII_len,
     max_sub_length = max_block_length - block_overhead,
-    hf_set = hf_set, oh_fidelity = oh_fidelity,
-    oh3 = oh3, oh4 = oh4, oh_L = oh_L,
-    min_sub_length = max(0L, min_geneblock_length - block_overhead),
-    eff_lookup = eff_lookup
+    oh3 = oh3
   )
 
-  all_splits <- assign_global_boundaries_to_tiles(
+  # Convert partition to legacy all_splits format for downstream consumers
+  # (design_wt_geneblocks, R/12_report.R)
+  all_splits <- convert_partition_to_splits(
+    partition_result = partition_result,
     tiles = tiles,
-    global_3wt = global_boundaries$splits_3wt,
-    global_5wt = global_boundaries$splits_5wt,
     gene_len = gene_len,
-    min_sub_length = max(0L, min_geneblock_length - block_overhead),
-    max_sub_length = max_block_length - block_overhead,
     polIII_len = polIII_len
   )
 
-  n_global_3wt <- nrow(global_boundaries$splits_3wt)
-  n_global_5wt <- nrow(global_boundaries$splits_5wt)
-  if (n_global_3wt + n_global_5wt > 0) {
-    n_hf <- sum(global_boundaries$splits_3wt$junction_in_hf) +
-      sum(global_boundaries$splits_5wt$junction_in_hf)
+  if (partition_result$n_superblocks > 1L) {
+    n_boundaries <- partition_result$n_superblocks - 1L
+    n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
+      seq_len(n_boundaries)
+    ]])
     cli::cli_alert_info(paste0(
-      "Global boundaries: ", n_global_3wt, " 3'WT + ", n_global_5wt,
-      " 5'WT split(s). ", n_hf, " junction(s) in HF set. ",
-      "Assigned ", nrow(all_splits), " per-tile split entries."
+      "Tile-boundary partition: ", partition_result$n_superblocks,
+      " superblocks, ", n_boundaries, " boundary(ies). ",
+      n_hf, " junction(s) in HF set. ",
+      nrow(all_splits), " per-tile split entries. ",
+      partition_result$n_collisions, " unresolved collision(s)."
     ))
   } else {
     cli::cli_alert_success("All gene blocks within synthesis limit. No superblock splits needed.")
@@ -2350,12 +2450,12 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       stringsAsFactors = FALSE
     )
 
-    # BsmBI reaction overhangs: oh2_i, [3'WT junction ohs], oh3
-    bsmbi_ohs <- unique(c(tile$oh2_seq, oh3))
-    tile_3wt_splits <- all_splits[all_splits$tile_id == i & all_splits$block_type == "bsmbi_3wt", ]
-    if (nrow(tile_3wt_splits) > 0) {
-      bsmbi_ohs <- unique(c(bsmbi_ohs, tile_3wt_splits$junction_oh))
-    }
+    # BsmBI reaction overhangs: use get_tile_reaction_overhangs() which
+    # computes the correct per-tile OH set from the partition (oh2 of this tile,
+    # visible SB boundary OHs, and oh3)
+    bsmbi_ohs <- unique(get_tile_reaction_overhangs(
+      partition_result, i, tiles, oh3, "bsmbi"
+    ))
 
     bsmbi_result <- compute_set_fidelity(bsmbi_ohs, bsmbi_matrix)
     n_bsmbi_hf <- sum(bsmbi_ohs %in% hf_set)
@@ -2425,6 +2525,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     core_downstream_cassette = core_downstream_cassette, # full cassette minus last 5 nt (NULL if not derived)
     oh3_spacer = oh3_spacer, # terminal nt of promoter (NULL if not derived)
     superblock_splits = all_splits,
+    tile_partition = partition_result, # new tile-boundary partition (native format)
     reaction_fidelity = reaction_fidelity_df,
     strategy_used = strategy_used,
     hf_set_used = hf_set,
@@ -2435,7 +2536,9 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       n_boundaries_both_in_hf = n_both_hf,
       n_boundaries_one_in_hf = n_one_hf,
       n_boundaries_neither_in_hf = n_neither_hf,
+      n_superblocks = partition_result$n_superblocks,
       n_superblock_splits = nrow(all_splits),
+      n_sb_collisions = partition_result$n_collisions,
       overall_min_fidelity = min(reaction_fidelity_df$set_fidelity)
     )
   )

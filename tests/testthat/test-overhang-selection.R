@@ -158,11 +158,15 @@ test_that("plan_assembly returns complete assembly plan", {
   expect_equal(nchar(plan$oh3), 4)
   expect_equal(nchar(plan$oh4), 4)
   expect_true(!is.null(plan$superblock_splits))
+  expect_true(!is.null(plan$tile_partition))
   expect_true(!is.null(plan$reaction_fidelity))
   expect_true(!is.null(plan$summary))
 
   # Short gene shouldn't need superblock splits
   expect_equal(nrow(plan$superblock_splits), 0)
+  expect_equal(plan$tile_partition$n_superblocks, 1L)
+  expect_equal(plan$tile_partition$n_collisions, 0L)
+  expect_equal(plan$summary$n_superblocks, 1L)
 
   # Reaction fidelity should be computed for each tile
   expect_true(nrow(plan$reaction_fidelity) > 0)
@@ -239,7 +243,12 @@ test_that("plan_assembly handles long gene with superblocking", {
 
   expect_true(nrow(plan$tiles) >= 8) # 2100/243 ~ 9 tiles
   expect_true(!is.null(plan$superblock_splits))
-  # Long gene should trigger superblock splits
+  expect_true(!is.null(plan$tile_partition))
+  # Long gene should trigger superblock splits (tile-boundary partitioning)
+  expect_true(plan$tile_partition$n_superblocks >= 2L,
+    info = "2100 nt gene should have >= 2 superblocks"
+  )
+  expect_equal(plan$tile_partition$n_collisions, 0L)
   expect_true(nrow(plan$superblock_splits) > 0,
     info = "2100 nt gene should trigger superblock splitting"
   )
@@ -567,6 +576,104 @@ test_that("global boundaries produce shared splits across tiles", {
     expect_lte(length(unique_split_nts), nrow(bsmbi_splits),
       label = "Unique split positions <= total per-tile entries (reuse)"
     )
+  }
+})
+
+# =============================================================================
+# CONVERT PARTITION TO SPLITS (SHIM) TESTS
+# =============================================================================
+
+test_that("convert_partition_to_splits returns empty for single superblock", {
+  # Build a mock partition with 1 SB
+  tiles <- data.frame(
+    tile_id = 1:3, start_nt = c(1L, 201L, 401L), end_nt = c(200L, 400L, 600L),
+    oh2_seq = c("ACGT", "TGCA", "GCAT"), oh2_in_hf = c(TRUE, TRUE, FALSE),
+    oh2_fidelity = c(0.99, 0.98, 0.95), stringsAsFactors = FALSE
+  )
+  part <- list(
+    n_superblocks = 1L,
+    superblocks = data.frame(
+      sb_id = 1L, start_tile = 1L, end_tile = 3L,
+      gene_content = 600L, stringsAsFactors = FALSE
+    ),
+    n_collisions = 0L
+  )
+  splits <- convert_partition_to_splits(part, tiles, 600L)
+  expect_equal(nrow(splits), 0L)
+  expect_true(all(c(
+    "split_nt", "junction_oh", "junction_in_hf",
+    "junction_fidelity", "block_type", "tile_id"
+  ) %in% names(splits)))
+})
+
+test_that("convert_partition_to_splits generates correct bsmbi_3wt and bsai_5wt entries", {
+  # 5 tiles, 2 superblocks: SB1 = tiles 1-3, SB2 = tiles 4-5
+  # Boundary at tile 3, end_nt=600
+  tiles <- data.frame(
+    tile_id = 1:5,
+    start_nt = c(1L, 201L, 401L, 601L, 801L),
+    end_nt = c(200L, 400L, 600L, 800L, 1000L),
+    oh1_seq = c("ATGG", "CCTA", "GGAT", "TTAC", "ACGT"),
+    oh2_seq = c("TGCA", "GCAT", "ACTT", "CGGA", "TTAG"),
+    oh2_in_hf = c(TRUE, FALSE, TRUE, TRUE, FALSE),
+    oh2_fidelity = c(0.99, 0.95, 0.98, 0.97, 0.93),
+    stringsAsFactors = FALSE
+  )
+  part <- list(
+    n_superblocks = 2L,
+    superblocks = data.frame(
+      sb_id = 1:2, start_tile = c(1L, 4L),
+      end_tile = c(3L, 5L),
+      gene_content = c(600L, 400L),
+      stringsAsFactors = FALSE
+    ),
+    n_collisions = 0L
+  )
+  gene_len <- 1000L
+
+  splits <- convert_partition_to_splits(part, tiles, gene_len)
+
+  # Boundary at tile 3, end_nt=600, oh2=ACTT
+  expect_true(nrow(splits) > 0)
+  expect_true(all(splits$split_nt == 600L))
+  expect_true(all(splits$junction_oh == "ACTT"))
+  expect_true(all(splits$junction_in_hf == TRUE))
+
+  # bsmbi_3wt: tiles whose end_nt < 600 → tiles 1 (200) and 2 (400)
+  bsmbi_rows <- splits[splits$block_type == "bsmbi_3wt", ]
+  expect_equal(sort(bsmbi_rows$tile_id), c(1L, 2L))
+
+  # bsai_5wt: tiles whose start_nt > 600 → tiles 4 (601) and 5 (801)
+  bsai_rows <- splits[splits$block_type == "bsai_5wt", ]
+  expect_equal(sort(bsai_rows$tile_id), c(4L, 5L))
+})
+
+test_that("convert_partition_to_splits round-trips through plan_assembly correctly", {
+  cu <- builtin_human_codon_usage()
+  cds <- TEST_LONG_GENE_SEQ
+  scan_result <- scan_enzyme_sites(cds, "", cu)
+  if (nrow(scan_result$domestication) > 0) {
+    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
+  }
+  tile_size <- compute_max_tile_size(300, 12)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+
+  # Verify shim output has correct schema
+  splits <- plan$superblock_splits
+  expect_true(all(c(
+    "split_nt", "junction_oh", "junction_in_hf",
+    "junction_fidelity", "block_type", "tile_id"
+  ) %in% names(splits)))
+
+  if (nrow(splits) > 0) {
+    # All junction overhangs should be 4-nt
+    expect_true(all(nchar(splits$junction_oh) == 4))
+    # All block types should be valid
+    expect_true(all(splits$block_type %in% c("bsmbi_3wt", "bsai_5wt")))
+    # All tile_ids should be valid
+    expect_true(all(splits$tile_id %in% plan$tiles$tile_id))
+    # split_nt should match a tile end_nt (since boundaries are at tile endpoints)
+    expect_true(all(splits$split_nt %in% plan$tiles$end_nt))
   }
 })
 

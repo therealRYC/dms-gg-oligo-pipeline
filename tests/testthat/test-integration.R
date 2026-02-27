@@ -1,6 +1,6 @@
 # test-integration.R — Full pipeline integration test (3-enzyme architecture)
 # Updated to use plan_assembly() for dynamic tile boundary search + overhang selection
-# Updated: 2026-02-20 — Add junction context to design_barcodes, filter gene-edge variants (BUG-6/7)
+# Updated: 2026-02-26 — Add tile_partition assertions for tile-boundary superblock integration
 
 test_that("full pipeline runs on short test gene (3-enzyme)", {
   # Write test FASTA
@@ -48,20 +48,22 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   gene$original_cds <- gene$cds
   if (cfg$auto_domesticate && nrow(scan_result$domestication) > 0) {
     gene$cds <- apply_domestication(gene$cds, scan_result$domestication,
-                                     codon_usage = codon_usage)
+      codon_usage = codon_usage
+    )
   }
 
   # Verify domestication for all 3 enzymes
   for (enz_name in c("BsaI", "BsmBI", "PaqCI")) {
     remaining <- find_enzyme_sites(gene$cds, ENZYMES[[enz_name]]$recog)
     expect_equal(nrow(remaining), 0,
-                 info = paste(enz_name, "sites should be removed"))
+      info = paste(enz_name, "sites should be removed")
+    )
   }
 
   # Step 5: Design mutations
   variants <- design_mutations(gene$cds, codon_usage)
   variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
-  expect_equal(nrow(variants), 98 * 20)  # 98 mutable codons (skip Met@1, stop@100) * 20 mutations
+  expect_equal(nrow(variants), 98 * 20) # 98 mutable codons (skip Met@1, stop@100) * 20 mutations
 
   # Step 6: Plan assembly (dynamic tile boundary search + overhang selection)
   tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
@@ -106,13 +108,18 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
 
   # Short gene shouldn't need superblock splits
   expect_equal(nrow(assembly_plan$superblock_splits), 0)
+  expect_true(!is.null(assembly_plan$tile_partition))
+  expect_equal(assembly_plan$tile_partition$n_superblocks, 1L)
+  expect_equal(assembly_plan$tile_partition$n_collisions, 0L)
 
   # Step 7: Design barcodes (with junction context — BUG-7 fix)
   bsmbi_fwd_oh3_seq <- orient_enzyme_site("BsmBI", oh3, "forward")
   bsai_rev_oh4_seq <- orient_enzyme_site("BsaI", oh4, "reverse")
-  junction_left_context <- substring(bsmbi_fwd_oh3_seq,
-                                      nchar(bsmbi_fwd_oh3_seq) - 5L,
-                                      nchar(bsmbi_fwd_oh3_seq))
+  junction_left_context <- substring(
+    bsmbi_fwd_oh3_seq,
+    nchar(bsmbi_fwd_oh3_seq) - 5L,
+    nchar(bsmbi_fwd_oh3_seq)
+  )
   junction_right_context <- substring(bsai_rev_oh4_seq, 1L, 6L)
 
   barcode_result <- design_barcodes(
@@ -257,20 +264,22 @@ test_that("full pipeline runs on long test gene with superblocking", {
   gene$original_cds <- gene$cds
   if (cfg$auto_domesticate && nrow(scan_result$domestication) > 0) {
     gene$cds <- apply_domestication(gene$cds, scan_result$domestication,
-                                     codon_usage = codon_usage)
+      codon_usage = codon_usage
+    )
   }
 
   # Long test gene was constructed enzyme-site-free, so no domestication needed
   for (enz_name in c("BsaI", "BsmBI", "PaqCI")) {
     remaining <- find_enzyme_sites(gene$cds, ENZYMES[[enz_name]]$recog)
     expect_equal(nrow(remaining), 0,
-                 info = paste(enz_name, "sites should be absent"))
+      info = paste(enz_name, "sites should be absent")
+    )
   }
 
   # Step 5: Design mutations
   variants <- design_mutations(gene$cds, codon_usage)
   variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
-  expect_equal(nrow(variants), 698 * 20)  # 698 mutable codons (skip Met@1, stop@700) * 20 mutations
+  expect_equal(nrow(variants), 698 * 20) # 698 mutable codons (skip Met@1, stop@700) * 20 mutations
 
   # Step 6: Plan assembly (dynamic tile boundary search + superblocks)
   tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
@@ -298,14 +307,20 @@ test_that("full pipeline runs on long test gene with superblocking", {
   expect_true(nrow(skipped_variants) < (nrow(variants) + nrow(skipped_variants)) * 0.05)
 
   # Verify assembly plan for long gene
-  expect_true(nrow(tiles) >= 8)  # 2100/243 ~ 8.6 → at least 9 tiles
+  expect_true(nrow(tiles) >= 8) # 2100/243 ~ 8.6 → at least 9 tiles
   expect_true(all(!is.na(variants$tile_id)))
   expect_equal(nchar(oh3), 4)
   expect_equal(nchar(oh4), 4)
 
-  # Long gene should trigger superblock splits
+  # Long gene should trigger superblock splits (tile-boundary partitioning)
+  expect_true(!is.null(assembly_plan$tile_partition))
+  expect_true(assembly_plan$tile_partition$n_superblocks >= 2L,
+    info = "2100 nt gene should have >= 2 superblocks"
+  )
+  expect_equal(assembly_plan$tile_partition$n_collisions, 0L)
   expect_true(nrow(assembly_plan$superblock_splits) > 0,
-              info = "2100 nt gene should trigger superblock splitting")
+    info = "2100 nt gene should trigger superblock splitting"
+  )
 
   # All junction overhangs should be 4-nt gene-derived
   if (nrow(assembly_plan$superblock_splits) > 0) {
@@ -318,9 +333,11 @@ test_that("full pipeline runs on long test gene with superblocking", {
   # Step 7: Design barcodes (with junction context — BUG-7 fix)
   bsmbi_fwd_oh3_seq <- orient_enzyme_site("BsmBI", oh3, "forward")
   bsai_rev_oh4_seq <- orient_enzyme_site("BsaI", oh4, "reverse")
-  junction_left_context <- substring(bsmbi_fwd_oh3_seq,
-                                      nchar(bsmbi_fwd_oh3_seq) - 5L,
-                                      nchar(bsmbi_fwd_oh3_seq))
+  junction_left_context <- substring(
+    bsmbi_fwd_oh3_seq,
+    nchar(bsmbi_fwd_oh3_seq) - 5L,
+    nchar(bsmbi_fwd_oh3_seq)
+  )
   junction_right_context <- substring(bsai_rev_oh4_seq, 1L, 6L)
 
   barcode_result <- design_barcodes(
@@ -403,8 +420,10 @@ test_that("full pipeline runs on long test gene with superblocking", {
 
 test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   # Skip unless RUN_SLOW_TESTS=true (this test takes several minutes)
-  skip_if(Sys.getenv("RUN_SLOW_TESTS") != "true",
-          "Slow test: set RUN_SLOW_TESTS=true to run")
+  skip_if(
+    Sys.getenv("RUN_SLOW_TESTS") != "true",
+    "Slow test: set RUN_SLOW_TESTS=true to run"
+  )
 
   # TRIO: NM_007118.4, 9294 nt, 3098 codons, 20 enzyme sites
   tmp_fasta <- tempfile(fileext = ".fasta")
@@ -447,24 +466,27 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   scan_result <- scan_enzyme_sites(gene$cds, cfg$polIII_promoter, codon_usage)
   gene$original_cds <- gene$cds
   expect_true(nrow(scan_result$domestication) > 0,
-              info = "TRIO should have enzyme sites requiring domestication")
+    info = "TRIO should have enzyme sites requiring domestication"
+  )
 
   if (cfg$auto_domesticate && nrow(scan_result$domestication) > 0) {
     gene$cds <- apply_domestication(gene$cds, scan_result$domestication,
-                                     codon_usage = codon_usage)
+      codon_usage = codon_usage
+    )
   }
 
   # Verify domestication for all 3 enzymes
   for (enz_name in c("BsaI", "BsmBI", "PaqCI")) {
     remaining <- find_enzyme_sites(gene$cds, ENZYMES[[enz_name]]$recog)
     expect_equal(nrow(remaining), 0,
-                 info = paste(enz_name, "sites should be removed after domestication"))
+      info = paste(enz_name, "sites should be removed after domestication")
+    )
   }
 
   # Step 5: Design mutations — 3098 codons * 20 mutations
   variants <- design_mutations(gene$cds, codon_usage)
   variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
-  expect_equal(nrow(variants), 3096 * 20)  # 3096 mutable codons (skip Met@1, stop@3098)
+  expect_equal(nrow(variants), 3096 * 20) # 3096 mutable codons (skip Met@1, stop@3098)
 
   # Step 6: Plan assembly (dynamic tile boundary search + superblocks)
   tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
@@ -492,14 +514,21 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   expect_true(nrow(skipped_variants) < (nrow(variants) + nrow(skipped_variants)) * 0.05)
 
   expect_true(nrow(tiles) >= 38,
-              info = "9294 nt / 243 nt per tile ~ 39 tiles")
+    info = "9294 nt / 243 nt per tile ~ 39 tiles"
+  )
   expect_true(all(!is.na(variants$tile_id)))
   expect_equal(nchar(oh3), 4)
   expect_equal(nchar(oh4), 4)
 
-  # TRIO MUST trigger superblock splitting
+  # TRIO MUST trigger superblock splitting (tile-boundary partitioning)
+  expect_true(!is.null(assembly_plan$tile_partition))
+  expect_true(assembly_plan$tile_partition$n_superblocks >= 4L,
+    info = "TRIO (9294 nt) should have >= 4 superblocks"
+  )
+  expect_equal(assembly_plan$tile_partition$n_collisions, 0L)
   expect_true(nrow(assembly_plan$superblock_splits) >= 5,
-              info = "TRIO (9294 nt) should have >= 5 superblock split points")
+    info = "TRIO (9294 nt) should have >= 5 per-tile split entries"
+  )
 
   # Per-reaction fidelity should be computed
   expect_true(nrow(assembly_plan$reaction_fidelity) > 0)
@@ -507,9 +536,11 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   # Step 7: Design barcodes (with junction context — BUG-7 fix)
   bsmbi_fwd_oh3_seq <- orient_enzyme_site("BsmBI", oh3, "forward")
   bsai_rev_oh4_seq <- orient_enzyme_site("BsaI", oh4, "reverse")
-  junction_left_context <- substring(bsmbi_fwd_oh3_seq,
-                                      nchar(bsmbi_fwd_oh3_seq) - 5L,
-                                      nchar(bsmbi_fwd_oh3_seq))
+  junction_left_context <- substring(
+    bsmbi_fwd_oh3_seq,
+    nchar(bsmbi_fwd_oh3_seq) - 5L,
+    nchar(bsmbi_fwd_oh3_seq)
+  )
   junction_right_context <- substring(bsai_rev_oh4_seq, 1L, 6L)
 
   barcode_result <- design_barcodes(
@@ -548,7 +579,8 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
 
   # All gene blocks should fit within synthesis limits
   expect_true(all(geneblock_result$blocks$length <= cfg$max_geneblock_length),
-              info = "All blocks must be <= 1800 nt after superblock splitting")
+    info = "All blocks must be <= 1800 nt after superblock splitting"
+  )
 
   # Step 10: QC (with assembly_plan)
   qc_result <- run_qc_checks(
@@ -673,10 +705,10 @@ test_that("QC variant_count check passes with expanded variants (barcodes_per_va
   variants_expanded <- variants[rep(seq_len(nrow(variants)), each = 3L), ]
   variants_expanded$barcode_idx <- rep(1:3, times = nrow(variants))
   rownames(variants_expanded) <- NULL
-  expect_equal(nrow(variants_expanded), 120)  # 40 * 3
+  expect_equal(nrow(variants_expanded), 120) # 40 * 3
 
   # The check should use unique(variant_id), NOT nrow()
   n_unique <- length(unique(variants_expanded$variant_id))
-  expect_equal(n_unique, 40)  # Still 40 unique variants
+  expect_equal(n_unique, 40) # Still 40 unique variants
   expect_equal(n_unique, ((nchar(cds) %/% 3L) - 2L) * 20L)
 })
