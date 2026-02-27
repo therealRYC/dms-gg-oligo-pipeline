@@ -58,13 +58,13 @@ boundary_method: "dp"                   # Dynamic programming tile boundaries
 # Included by default (WPRE + bGH polyA). Comment out for minimal layout.
 intergene_elements:
   - name: "WPRE"
-    sequence: "YOUR_WPRE_SEQUENCE_HERE"            # ~590 nt
+    sequence: "AATCAACCTCTGG...CCCCGCCTG"   # 592 nt (WHV8 tripartite element)
   - name: "bGH_polyA"
-    sequence: "YOUR_BGH_POLYA_SEQUENCE_HERE"        # ~225 nt
+    sequence: "CTGTGCCTTCTAG...GCTCTATGG"   # 225 nt (bovine growth hormone polyA)
 ```
 
 ### Code
-`load_config()` parses `yaml::read_yaml(config_path)`, applies defaults via `%||%`, and calls `build_downstream_cassette()` which concatenates `intergene_elements` + PolIII into `downstream_cassette`. With WPRE (~590 nt) + bGH polyA (~225 nt) + PolIII (250 nt) = **~1065 nt** downstream cassette.
+`load_config()` parses `yaml::read_yaml(config_path)`, applies defaults via `%||%`, and calls `build_downstream_cassette()` which concatenates `intergene_elements` + PolIII into `downstream_cassette`. With WPRE (592 nt) + bGH polyA (225 nt) + PolIII (250 nt) = **1067 nt** downstream cassette.
 
 **Intergene elements** are validated (non-empty, ACGT-only), uppercased, and concatenated in order. The resulting `downstream_cassette = WPRE + bGH_polyA + polIII_promoter` is used throughout the pipeline (3'WT gene blocks, superblock splitting, etc.). The cassette adds ~815 nt beyond the PolIII-only layout, which means more 3'WT gene blocks will need superblock splitting — this is handled automatically (see Step 6d).
 
