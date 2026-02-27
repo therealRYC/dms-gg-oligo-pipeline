@@ -25,6 +25,8 @@ The pipeline uses **three restriction enzymes** in a two-level assembly:
 
 The original plan used BsmBI (Level 1) + PaqCI (Level 2) with tile-type-specific oligo structures (leading/internal/trailing). The current design adds BsaI to create a **universal oligo structure** — every oligo has the same layout regardless of where the tile sits in the gene. This eliminates tile-type branching logic entirely.
 
+**Leading vs. trailing tiles in the 3-enzyme design:** The oligo structure is identical for all tiles. What differs is the **gene blocks**: tile 1 has a shorter (or empty) 5'WT BsaI block and a longer 3'WT BsmBI block; the last tile has a longer 5'WT block and a shorter 3'WT block. The helper plasmid + superblock splitting handle this transparently — the oligo doesn't need to "know" its position in the gene.
+
 ### Final assembled construct (per variant):
 
 ```
@@ -51,10 +53,20 @@ barcode_prefix_length: 12               # 12 nt prefix (Hamming-constrained)
 min_hamming_distance: 3                 # Error-correcting Hamming distance
 barcodes_per_variant: 10                # 10 replicate barcodes per mutation
 boundary_method: "dp"                   # Dynamic programming tile boundaries
+
+# Optional intergene elements — placed between gene 3' end and PolIII promoter.
+# Omit this section entirely for the default layout (gene → PolIII → barcode).
+# intergene_elements:
+#   - name: "WPRE"
+#     sequence: "AATCAACCTCTGGATTAC..."    # ~600 nt
+#   - name: "bGH_polyA"
+#     sequence: "CTGTGCCTTCTAGTTGCC..."    # ~250 nt
 ```
 
 ### Code
 `load_config()` parses `yaml::read_yaml(config_path)`, applies defaults via `%||%`, and calls `build_downstream_cassette()` which concatenates `intergene_elements` (if any) + PolIII into `downstream_cassette`. For default GRIN2A with no intergene elements, `downstream_cassette = polIII` (250 nt).
+
+**Intergene elements** are fully supported: when specified, each element's `name` and `sequence` are validated (must be non-empty, ACGT-only), uppercased, and concatenated in order. The resulting `downstream_cassette = intergene_concat + polIII_promoter` is used throughout the pipeline wherever the PolIII sequence appears (3'WT gene blocks, superblock splitting, etc.). If the combined cassette makes gene blocks exceed 1800 nt, superblock splitting handles it automatically.
 
 ---
 
@@ -68,7 +80,11 @@ Read the FASTA, validate it's a proper CDS (divisible by 3, starts with ATG, no 
 CDS:     ATGGGCAGAGTG...TCTGATGTTTAA   (4395 nt)
 Codons:  1465 (including stop)
 Protein: MGRVG...SDV* → 1464 aa (stop removed from display)
-oh_L:    ATGG  (first 4 nt — this is the "leading" BsaI overhang, fixed for all tiles)
+oh_L:    ATGG  (first 4 nt of CDS — gene-dependent BsaI overhang, fixed for all tiles)
+
+Note: oh_L is always ATG + the 4th nucleotide of the gene. Different genes yield
+different oh_L values (ATGA, ATGC, ATGG, ATGT). All have good fidelity:
+  ATGA = 0.990 (in HF Set 3!)   ATGC = 0.959   ATGG = 0.946   ATGT = 0.977
 ```
 
 ### Code
@@ -157,6 +173,9 @@ Example at position 2 (Gly/GGC):
   G2E  → GAG (Glu)     G2F  → TTC (Phe)     G2H  → CAC (His)
   ...18 more...         G2*  → TGA (Stop)
 ```
+
+### Planned: Synonymous mutation controls
+Standard DMS practice (DIMPLE, Enrich2/VAMP-seq normalization, Findlay 2018, Dunham & Beltrao 2021) includes **1 synonymous codon per position** as an internal positive control. Synonymous variants anchor the "functional" end of the score distribution (median synonymous score = 1, median nonsense = 0). This would increase to **21 variants per position** (19 missense + 1 stop + 1 synonymous), except at Met/Trp positions (single-codon AAs, no synonym exists). The synonymous codon should differ maximally from WT at the nucleotide level to be distinguishable by sequencing — i.e., pick the most-preferred *alternative* codon for the same amino acid. **This feature is not yet implemented but is planned for `04_mutation_design.R`.**
 
 ### Post-check: Inadvertent site creation
 After designing all mutations, each mutant codon is checked in its sequence context (±14 nt window). If the mutation accidentally creates a new BsaI/BsmBI/PaqCI site, the pipeline swaps to the next-best codon.
@@ -250,12 +269,19 @@ At a boundary between tile N and tile N+1 at codon position B:
 ```
 Gene: ...codon B-1 | codon B | codon B+1 | codon B+2...
                          ↓ boundary here
-Tile N ends here:   ────XXXX┃
-                        oh2  ┃  (last 4 nt of tile N)
-                             ┃
-Tile N+1 starts here:        ┃YYYY────
-                             ┃ oh1   (first 4 nt of tile N+1)
+                    ────XXXX────
+                        ↑↑↑↑
+                   oh2 = oh1 (SAME 4 nt!)
+
+Tile N includes:   ────[mutable region]────XXXX    (oh2 = last 4 nt)
+Tile N+1 includes:                         XXXX────[mutable region]────  (oh1 = first 4 nt)
 ```
+
+**Critical:** oh1 and oh2 at a boundary are the **same 4 nucleotides** — they are one
+sequence read from one position in the gene. oh2 is used in the BsmBI reaction
+(connecting tile to 3'WT), and oh1 is used in the BsaI reaction (connecting 5'WT
+to the next tile). Both tiles overlap at these 4 nt, which is how the assembly
+reconstructs the continuous gene sequence without gaps or insertions.
 
 ### OOGGA-style scoring
 Each candidate boundary position is scored using the **OOGGA formula** (Mukundan & Madhusudhan 2025):
@@ -287,6 +313,12 @@ DP to find K boundaries maximizing total score:
 BACKTRACK to recover boundary positions
 BUILD tiles data frame with oh1, oh2, fidelity, HF membership
 ```
+
+### Why not optimize for full set fidelity directly?
+
+Set fidelity (the probability of all ligations succeeding in a one-pot reaction) depends on ALL overhangs simultaneously — adding a new overhang changes the fidelity of every existing one. This violates the DP optimal substructure assumption: choosing boundary k's overhang affects the score of boundaries k+2, k+3, etc. True global set fidelity optimization would require simulated annealing or branch-and-bound (which is what NEB's GetSet algorithm uses for the Potapov Table 1 sets).
+
+The pipeline's approach is pragmatic: each tile's BsaI reaction only has ~3-5 overhangs (oh_L, oh1, oh4, plus 0-2 superblock junctions). With so few overhangs, individual OOGGA scores + pairwise bonus are excellent proxies for set fidelity. Phase 6 computes actual set fidelity post-hoc and reports it.
 
 ### GRIN2A numbers
 ```
@@ -343,6 +375,8 @@ oh_L = ATGG (gene 5' end, fixed)
 ```
 
 ### Constraint: oh3 and oh4 must not collide with any gene-derived overhang (oh1, oh2 at any tile boundary), and must not be reverse complements of each other.
+
+**Important wetlab note:** oh4 is auto-selected by the pipeline from the HF set, but the **helper plasmid must be built with matching oh4**. The pipeline outputs the helper plasmid insert sequence (including oh4) in `GRIN2A_helper_plasmid.csv`. When ordering or cloning the helper plasmid, ensure its BsaI site produces the same oh4 overhang that the pipeline selected. If you re-run the pipeline with different parameters, oh4 may change — always use the helper plasmid insert from the same pipeline run as the oligo pool.
 
 ---
 
