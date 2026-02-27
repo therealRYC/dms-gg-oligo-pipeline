@@ -119,7 +119,7 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 
 **Barcode design**: Unified hierarchical prefix-suffix mode -- each variant gets a unique high-Hamming-distance prefix (12 nt), extended with filtered random suffixes to the full barcode length (20 nt). Cross-variant Hamming distance is guaranteed by the prefix; within-variant replicates differ only in their suffix. Configurable `barcodes_per_variant` (default 10) for experimental replication. Prefixes that create enzyme sites at junction boundaries are automatically filtered.
 
-**Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split into superblocks at tile boundaries, using gene-derived overhangs (oh2) as junction sequences. This tile-boundary partitioning ensures each tile's reaction uses only locally-relevant overhangs, avoiding global exclusion conflicts. Overhang collisions at SB boundaries are detected and resolved by shifting boundaries ±1 tile.
+**Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split into superblocks at tile boundaries, using gene-derived overhangs (oh2) as junction sequences. This tile-boundary partitioning ensures each tile's reaction uses only locally-relevant overhangs, avoiding global exclusion conflicts. Overhang collisions at SB boundaries are detected and resolved by shifting boundaries ±1 tile. For very long downstream cassettes (>~1700 nt, e.g., multiple intergene elements), the cassette itself is split across multiple BsmBI-connected fragments — no user action required.
 
 ## Repository Structure
 

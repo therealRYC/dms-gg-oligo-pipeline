@@ -14,25 +14,31 @@ gene_fasta: "path/to/gene.fasta"          # Path to FASTA file with coding seque
 # the gene and barcode. This drives barcode transcription.
 polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGATAATTAGAATTAATTTGACTGTAAACACAAAGATATTAGTACAAAATACGTGACGTAGAAAGTAATAATTTCTTGGGTAGTTTGCAGTTTTTAATACGACTCACTATAGGGACTATCATATGCTTACCGTAACTTGAAAGTATTTCGATTTCTTGGCTTTATATATCTTGTGGAAAGGACGAAACACCG"
 
-# --- Intergene Elements (optional) ---
-# Additional sequence elements placed between the gene 3' end and the PolIII
-# promoter. Use this to insert reporters, selection cassettes, IRES elements,
-# or other constructs that should be part of the final assembled insert.
+# --- Intergene Elements ---
+# Sequence elements placed between the gene 3' end and the PolIII promoter.
+# Common elements: WPRE (mRNA stability/export), bGH polyA (polyadenylation).
 #
 # Each element has a name and a sequence. Elements are concatenated in order
 # and placed between the gene and PolIII promoter in the BsmBI gene blocks.
-#
-# When omitted (default), the pipeline behaves exactly as before: the PolIII
-# promoter follows directly after the gene.
+# If the combined cassette exceeds the gene block synthesis limit (1800 nt),
+# superblock splitting handles it automatically.
 #
 # Final construct layout:
-#   [Gene] — [intergene_element_1] — [intergene_element_2] — ... — [PolIII] — [Barcode]
+#   [Gene] — [WPRE] — [bGH_polyA] — [PolIII] — [Barcode]
 #
-# intergene_elements:
-#   - name: "T2A_GFP"
-#     sequence: "GAGGGCAGAGGAAGTCTG...ACGT"
-#   - name: "IRES_puro"
-#     sequence: "CCCCTCTCCCTCCC...ACGT"
+# To run WITHOUT intergene elements (PolIII directly after gene), comment out
+# or delete the intergene_elements section below.
+#
+# NOTE: For very long cassettes (>~1700 nt total including PolIII), the pipeline
+# automatically splits the cassette across multiple gene block fragments using
+# additional BsmBI junctions. No user action required.
+intergene_elements:
+  - name: "WPRE"
+    sequence: "AATCAACCTCTGGATTACAAAATTTGTGAAAGATTGACTGGTATTCTTAACTATGTTGCTCCTTTTACGCTATGTGGATACGCTGCTTTAATGCCTTTGTATCATGCTATTGCTTCCCGTATGGCTTTCATTTTCTCCTCCTTGTATAAATCCTGGTTGCTGTCTCTTTATGAGGAGTTGTGGCCCGTTGTCAGGCAACGTGGCGTGGTGTGCACTGTGTTTGCTGACGCAACCCCCACTGGTTGGGGCATTGCCACCACCTGTCAGCTCCTTTCCGGGACTTTCGCTTTCCCCCTCCCTATTGCCACGGCGGAACTCATCGCCGCCTGCCTTGCCCGCTGCTGGACAGGGGCTCGGCTGTTGGGCACTGACAATTCCGTGGTGTTGTCGGGGAAATCATCGTCCTTTCCTTGGCTGCTCGCCTGTGTTGCCACCTGGATTCTGCGCGGGACGTCCTTCTGCTACGTCCCTTCGGCCCTCAATCCAGCGGACCTTCCTTCCCGCGGCCTGCTGCCGGCTCTGCGGCCTCTTCCGCGTCTTCGCCTTCGCCCTCAGACGAGTCGGATCTCCCTTTGGGCCGCCTCCCCGCCTG"
+    # 592 nt — WHV8 tripartite element (Zufferey 1999). Standard in pLenti/CROPseq vectors.
+  - name: "bGH_polyA"
+    sequence: "CTGTGCCTTCTAGTTGCCAGCCATCTGTTGTTTGCCCCTCCCCCGTGCCTTCCTTGACCCTGGAAGGTGCCACTCCCACTGTCCTTTCCTAATAAAATGAGGAAATTGCATCGCATTGTCTGAGTAGGTGTCATTCTATTCTGGGGGGTGGGGTGGGGCAGGACAGCAAGGGGGAGGATTGGGAAGACAATAGCAGGCATGCTGGGGATGCGGTGGGCTCTATGG"
+    # 225 nt — bovine growth hormone polyA signal. Standard in pcDNA3.1/lentiviral vectors.
 
 # --- Codon Usage Table (optional) ---
 # By default, the pipeline uses the built-in CoCoPUTs human codon usage table

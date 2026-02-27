@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Fix variant_count for skipped Met/stop; add junction enzyme site check
+# Last updated: 2026-02-27 — Add cassette fragment integrity check (check 16)
 # 10_qc_checks.R — Comprehensive QC validation for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 
@@ -230,6 +230,23 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
                     " nt minimum. Range: ", min(blocks$length), "-",
                     max(blocks$length), " nt")
   )
+
+  # 16. Cassette fragment integrity (when cassette was split)
+  cassette_blocks <- blocks[grepl("^bsmbi_cassette_", blocks$block_name), , drop = FALSE]
+  if (nrow(cassette_blocks) > 0) {
+    # All cassette fragments should be within synthesis limits
+    cass_over <- sum(cassette_blocks$length > max_block_length)
+    cass_under <- sum(cassette_blocks$length < min_block_length)
+    checks[[length(checks) + 1L]] <- qc_check(
+      name   = "cassette_fragment_lengths",
+      desc   = "Cassette fragments within synthesis limits",
+      pass   = cass_over == 0L && cass_under == 0L,
+      detail = paste0(nrow(cassette_blocks), " cassette fragment(s). ",
+                      "Range: ", min(cassette_blocks$length), "-",
+                      max(cassette_blocks$length), " nt. ",
+                      cass_over, " over max, ", cass_under, " under min.")
+    )
+  }
 
   # Compile report
   report <- do.call(rbind, checks)

@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-26 — Wire tile-boundary superblocks into plan_assembly()
+# Last updated: 2026-02-27 — Allow oversized cassettes in partition_tile_superblocks(); expose cassette_needs_splitting flag
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -1772,10 +1772,14 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
   n_tiles <- nrow(tiles)
 
   # --- Input validation ---
-  # If cassette alone exceeds max_sub_length, no partition can work
-  if (polIII_len > max_sub_length) {
-    stop(sprintf(
-      "Cassette/polIII length (%d) exceeds max_sub_length (%d); cannot partition.",
+  # If cassette alone exceeds max_sub_length, the partition planner can still
+  # proceed — the cassette will be split into multiple fragments downstream
+  # by find_cassette_split_points() in design_wt_geneblocks(). Flag this so
+  # downstream consumers know cassette splitting is required.
+  cassette_needs_splitting <- polIII_len > max_sub_length
+  if (cassette_needs_splitting) {
+    cli::cli_alert_info(sprintf(
+      "Cassette length (%d) exceeds max_sub_length (%d). Cassette will be split into fragments.",
       polIII_len, max_sub_length
     ))
   }
@@ -1817,7 +1821,8 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
   # This is a soft constraint: if no partition can fit polIII (e.g., single
   # tile's gene region + polIII > max_sub_length), proceed anyway.
   n_sb <- length(sb_end_tiles)
-  if (polIII_len > 0L) {
+  if (polIII_len > 0L && !cassette_needs_splitting) {
+    # Normal case: cassette fits in one block, optimize gene content in last SB
     last_left_nt <- if (n_sb >= 2L) tiles$end_nt[sb_end_tiles[n_sb - 1L]] else 0L
     last_gene_content <- gene_len - last_left_nt
 
@@ -1851,6 +1856,15 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
       last_left_nt <- tiles$end_nt[sb_end_tiles[n_sb - 1L]]
       last_gene_content <- gene_len - last_left_nt
     }
+  } else if (polIII_len > 0L && cassette_needs_splitting) {
+    # Cassette is oversized — it will be split into separate BsmBI fragments
+    # by design_wt_geneblocks(). For partition purposes, treat the last SB as
+    # needing only gene content (no cassette budget), since the cassette will
+    # be in its own sub-blocks. Skip the normal Phase 2 adjustment.
+    cli::cli_alert_info(paste0(
+      "Skipping Phase 2 cassette budget adjustment — ",
+      "cassette will be split into separate fragments."
+    ))
   }
 
   # =========================================================================
@@ -2002,6 +2016,7 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
     n_superblocks = n_sb,
     superblocks = sbs,
     n_collisions = n_collisions,
+    cassette_needs_splitting = cassette_needs_splitting,
     block_count = list(
       tile_blocks = tile_blocks,
       full_sb_blocks = full_sb_blocks
@@ -2412,15 +2427,29 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
       seq_len(n_boundaries)
     ]])
+    cass_msg <- if (partition_result$cassette_needs_splitting) {
+      " Cassette will be split into fragments."
+    } else {
+      ""
+    }
     cli::cli_alert_info(paste0(
       "Tile-boundary partition: ", partition_result$n_superblocks,
       " superblocks, ", n_boundaries, " boundary(ies). ",
       n_hf, " junction(s) in HF set. ",
       nrow(all_splits), " per-tile split entries. ",
-      partition_result$n_collisions, " unresolved collision(s)."
+      partition_result$n_collisions, " unresolved collision(s).",
+      cass_msg
     ))
   } else {
-    cli::cli_alert_success("All gene blocks within synthesis limit. No superblock splits needed.")
+    cass_msg <- if (partition_result$cassette_needs_splitting) {
+      " Cassette will be split into fragments."
+    } else {
+      ""
+    }
+    cli::cli_alert_success(paste0(
+      "All gene blocks within synthesis limit. No superblock splits needed.",
+      cass_msg
+    ))
   }
 
   # Phase 6: Per-reaction pairwise validation
@@ -2530,6 +2559,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     strategy_used = strategy_used,
     hf_set_used = hf_set,
     oh_fidelity_used = oh_fidelity,
+    cassette_needs_splitting = partition_result$cassette_needs_splitting,
     summary = list(
       n_tiles = n_tiles,
       n_boundaries = n_boundaries,
@@ -2539,6 +2569,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       n_superblocks = partition_result$n_superblocks,
       n_superblock_splits = nrow(all_splits),
       n_sb_collisions = partition_result$n_collisions,
+      cassette_needs_splitting = partition_result$cassette_needs_splitting,
       overall_min_fidelity = min(reaction_fidelity_df$set_fidelity)
     )
   )
