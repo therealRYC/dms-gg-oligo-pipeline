@@ -54,19 +54,21 @@ min_hamming_distance: 3                 # Error-correcting Hamming distance
 barcodes_per_variant: 10                # 10 replicate barcodes per mutation
 boundary_method: "dp"                   # Dynamic programming tile boundaries
 
-# Optional intergene elements — placed between gene 3' end and PolIII promoter.
-# Omit this section entirely for the default layout (gene → PolIII → barcode).
-# intergene_elements:
-#   - name: "WPRE"
-#     sequence: "AATCAACCTCTGGATTAC..."    # ~600 nt
-#   - name: "bGH_polyA"
-#     sequence: "CTGTGCCTTCTAGTTGCC..."    # ~250 nt
+# Intergene elements — placed between gene 3' end and PolIII promoter.
+# Included by default (WPRE + bGH polyA). Comment out for minimal layout.
+intergene_elements:
+  - name: "WPRE"
+    sequence: "YOUR_WPRE_SEQUENCE_HERE"            # ~590 nt
+  - name: "bGH_polyA"
+    sequence: "YOUR_BGH_POLYA_SEQUENCE_HERE"        # ~225 nt
 ```
 
 ### Code
-`load_config()` parses `yaml::read_yaml(config_path)`, applies defaults via `%||%`, and calls `build_downstream_cassette()` which concatenates `intergene_elements` (if any) + PolIII into `downstream_cassette`. For default GRIN2A with no intergene elements, `downstream_cassette = polIII` (250 nt).
+`load_config()` parses `yaml::read_yaml(config_path)`, applies defaults via `%||%`, and calls `build_downstream_cassette()` which concatenates `intergene_elements` + PolIII into `downstream_cassette`. With WPRE (~590 nt) + bGH polyA (~225 nt) + PolIII (250 nt) = **~1065 nt** downstream cassette.
 
-**Intergene elements** are fully supported: when specified, each element's `name` and `sequence` are validated (must be non-empty, ACGT-only), uppercased, and concatenated in order. The resulting `downstream_cassette = intergene_concat + polIII_promoter` is used throughout the pipeline wherever the PolIII sequence appears (3'WT gene blocks, superblock splitting, etc.). If the combined cassette makes gene blocks exceed 1800 nt, superblock splitting handles it automatically.
+**Intergene elements** are validated (non-empty, ACGT-only), uppercased, and concatenated in order. The resulting `downstream_cassette = WPRE + bGH_polyA + polIII_promoter` is used throughout the pipeline (3'WT gene blocks, superblock splitting, etc.). The cassette adds ~815 nt beyond the PolIII-only layout, which means more 3'WT gene blocks will need superblock splitting — this is handled automatically (see Step 6d).
+
+To run **without** intergene elements (PolIII immediately after gene), comment out or delete the `intergene_elements:` section.
 
 ---
 
@@ -394,9 +396,11 @@ Phase 1: Forward greedy partition
     When accumulated gene content > max_sub_length (1778 nt):
         Close current superblock, start new one
 
-Phase 2: Adjust for PolIII
-    The last superblock's 3'WT block includes the PolIII cassette (250 nt)
-    If gene_content + 250 > 1778: split last superblock earlier
+Phase 2: Adjust for downstream cassette
+    The last superblock's 3'WT block includes the full downstream cassette.
+    With PolIII only: 250 nt. With WPRE + bGH polyA + PolIII: ~1065 nt.
+    If gene_content + cassette_len > 1778: split last superblock earlier
+    (may iterate: keep peeling tiles into a new penultimate SB until it fits)
 
 Phase 3: Collision detection
     SB boundary overhangs (oh2 of boundary tiles) must not collide
@@ -404,7 +408,7 @@ Phase 3: Collision detection
     If collision: try shifting boundary ±1 tile
 ```
 
-### GRIN2A numbers
+### GRIN2A numbers (PolIII only — 250 nt cassette)
 ```
 Gene: 4395 nt, PolIII: 250 nt, max sub-block: 1778 nt (1800 - 22 overhead)
 
@@ -419,13 +423,49 @@ SB2: tiles 8-14   (gene content ≈ 1600 nt)
 SB3: tiles 15-20  (gene content ≈ 1195 nt + 250 nt PolIII ≈ 1445 nt)
 ```
 
+### GRIN2A numbers (WPRE + bGH polyA + PolIII — ~1065 nt cassette)
+```
+Gene: 4395 nt, cassette: ~1065 nt, max sub-block: 1778 nt
+
+The larger cassette means the last SB can hold at most ~713 nt of gene content
+(1778 - 1065 = 713). This pushes more tiles into earlier superblocks:
+
+SB1: tiles 1-8    (gene content ≈ 1750 nt)
+SB2: tiles 9-16   (gene content ≈ 1750 nt)
+SB3: tiles 17-20  (gene content ≈ 700 nt + 1065 nt cassette ≈ 1765 nt)
+
+For tiles in earlier superblocks (e.g., tile 1), the 3'WT block still needs to
+carry the entire 3' portion of the gene + cassette:
+  Tile 1's 3'WT = ~4175 nt gene + 1065 nt cassette = 5240 nt total
+
+This is handled by intra-superblock splitting: the 5240 nt 3'WT block is split
+into 3 sub-blocks (~1770 + 1770 + 1700 nt) with BsmBI junction overhangs picked
+from the gene sequence at the split points. All sub-blocks ligate in the same
+one-pot BsmBI reaction alongside the oligo.
+```
+
+### How intra-superblock 3'WT splitting works
+```
+Before splitting (won't synthesize):
+  BsmBI(oh2)—[4175 nt 3'WT gene + 1065 nt cassette]—BsmBI(oh3)  = 5262 nt
+
+After splitting into 3 sub-blocks:
+  Sub-block 1: BsmBI(oh2)—[~1766 nt gene]—BsmBI(jxn_A)           = 1788 nt
+  Sub-block 2: BsmBI(jxn_A)—[~1766 nt gene]—BsmBI(jxn_B)         = 1788 nt
+  Sub-block 3: BsmBI(jxn_B)—[~643 nt gene + 1065 nt cassette]—BsmBI(oh3) = 1730 nt
+
+jxn_A and jxn_B are 4-nt overhangs selected from the gene sequence at codon
+boundaries using OOGGA scoring, checked for collisions with oh2, oh3, and each
+other. They're unique per-tile and participate in the same BsmBI reaction.
+```
+
 ### Code
 ```r
 partition_result <- partition_tile_superblocks(
     tiles = tiles,
     gene_len = 4395,
-    polIII_len = 250,     # or downstream_cassette length
-    max_sub_length = 1778, # 1800 - 22 overhead
+    polIII_len = nchar(downstream_cassette),  # 250 or ~1065
+    max_sub_length = 1778,   # 1800 - 22 overhead
     oh3 = "CACC"
 )
 ```
