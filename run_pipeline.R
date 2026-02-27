@@ -199,7 +199,6 @@ assembly_plan <- plan_assembly(
 tiles <- assembly_plan$tiles
 oh3 <- assembly_plan$oh3
 oh4 <- assembly_plan$oh4
-tile_overhangs <- extract_tile_overhangs(tiles)
 variants <- assign_variants_to_tiles(variants, tiles)
 
 # Filter out gene-edge variants with partial oh1/oh2 overlap (BUG-6)
@@ -322,7 +321,7 @@ qc_result <- run_qc_checks(
   variants        = variants_expanded,
   barcodes        = barcodes,
   tiles           = tiles,
-  tile_overhangs  = tile_overhangs,
+  tile_overhangs  = tiles,
   cds             = gene$cds,
   oh3             = oh3,
   oh4             = oh4,

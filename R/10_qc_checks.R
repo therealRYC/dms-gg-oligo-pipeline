@@ -10,7 +10,7 @@
 #' @param variants Data frame of variants with barcodes
 #' @param barcodes Character vector of barcodes
 #' @param tiles Data frame from partition_tiles()
-#' @param tile_overhangs Data frame from extract_tile_overhangs()
+#' @param tile_overhangs Data frame with oh1_fidelity, oh2_fidelity columns (tiles df works directly)
 #' @param cds Domesticated CDS
 #' @param oh3 Fixed BsmBI overhang
 #' @param oh4 Fixed BsaI overhang

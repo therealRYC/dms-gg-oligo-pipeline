@@ -57,13 +57,12 @@ test_that("design_wt_geneblocks returns blocks and manifests", {
   }
 
   tiles <- partition_tiles(cds, 150)
-  tile_ohs <- extract_tile_overhangs(tiles)
   oh3 <- "ACTA"
   oh4 <- "GATA"
 
   result <- design_wt_geneblocks(
     cds = cds, polIII = TEST_POLIII,
-    tiles = tiles, tile_overhangs = tile_ohs,
+    tiles = tiles,
     oh3 = oh3, oh4 = oh4,
     paqci_star2 = "AGTC", paqci_star1 = "TCGA"
   )
@@ -94,11 +93,10 @@ test_that("gene blocks have correct enzyme types", {
   }
 
   tiles <- partition_tiles(cds, 150)
-  tile_ohs <- extract_tile_overhangs(tiles)
 
   result <- design_wt_geneblocks(
     cds = cds, polIII = TEST_POLIII,
-    tiles = tiles, tile_overhangs = tile_ohs,
+    tiles = tiles,
     oh3 = "ACTA", oh4 = "GATA",
     paqci_star2 = "AGTC", paqci_star1 = "TCGA"
   )
@@ -144,11 +142,9 @@ test_that("non-final 3'WT sub-blocks have gene_region WITHOUT polIII", {
   tile_size <- compute_max_tile_size(300, 12)
   plan <- plan_assembly(cds, TEST_POLIII, tile_size)
   tiles <- plan$tiles
-  tile_ohs <- extract_tile_overhangs(tiles)
-
   result <- design_wt_geneblocks(
     cds = cds, polIII = TEST_POLIII,
-    tiles = tiles, tile_overhangs = tile_ohs,
+    tiles = tiles,
     oh3 = plan$oh3, oh4 = plan$oh4,
     paqci_star2 = "AGTC", paqci_star1 = "TCGA",
     assembly_plan = plan
@@ -206,11 +202,9 @@ test_that("global boundaries increase block reuse (long gene)", {
   tile_size <- compute_max_tile_size(300, 12)
   plan <- plan_assembly(cds, TEST_POLIII, tile_size)
   tiles <- plan$tiles
-  tile_ohs <- extract_tile_overhangs(tiles)
-
   result <- design_wt_geneblocks(
     cds = cds, polIII = TEST_POLIII,
-    tiles = tiles, tile_overhangs = tile_ohs,
+    tiles = tiles,
     oh3 = plan$oh3, oh4 = plan$oh4,
     paqci_star2 = "AGTC", paqci_star1 = "TCGA",
     assembly_plan = plan
@@ -267,11 +261,10 @@ setup_geneblocks <- function(cds_raw, polIII = TEST_POLIII,
     config = list(min_geneblock_length = min_block_length)
   )
   tiles <- plan$tiles
-  tile_ohs <- extract_tile_overhangs(tiles)
 
   result <- design_wt_geneblocks(
     cds = cds, polIII = polIII,
-    tiles = tiles, tile_overhangs = tile_ohs,
+    tiles = tiles,
     oh3 = plan$oh3, oh4 = plan$oh4,
     paqci_star2 = "AGTC", paqci_star1 = "TCGA",
     max_block_length = max_block_length,
