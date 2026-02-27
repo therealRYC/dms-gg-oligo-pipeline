@@ -470,6 +470,46 @@ partition_result <- partition_tile_superblocks(
 )
 ```
 
+### Cassette splitting (for very long downstream cassettes)
+
+When the downstream cassette itself exceeds the synthesis limit (~1778 nt content), the partition planner sets `cassette_needs_splitting = TRUE` and skips the normal Phase 2 cassette budget adjustment. The actual splitting happens later in `design_wt_geneblocks()` via `find_cassette_split_points()`.
+
+**Example**: Suppose you add a GFP reporter (720 nt) + IRES (589 nt) to the intergene elements, giving:
+```
+Cassette = GFP (720) + IRES (589) + WPRE (592) + bGH_polyA (225) + PolIII (250) = 2376 nt
+```
+
+This exceeds 1778 nt, so it can't fit in a single gene block. The pipeline automatically splits it:
+
+```
+Before splitting (won't synthesize):
+  BsmBI(oh2)—[3'WT gene + 2376 nt cassette]—BsmBI(oh3)
+
+After cassette splitting (example: last tile, no gene content):
+  Cassette fragment 1: BsmBI(oh2)—[~1170 nt cassette]—BsmBI(cass_jxn)  = ~1192 nt
+  Cassette fragment 2: BsmBI(cass_jxn)—[~1206 nt cassette]—BsmBI(oh3)   = ~1228 nt
+
+cass_jxn is a 4-nt overhang selected from within the cassette sequence at a
+position with high OOGGA fidelity score, checked for collisions with oh2, oh3,
+and any gene superblock junction overhangs.
+```
+
+After BsmBI ligation, the cassette is reconstructed seamlessly — the junction overhangs are consumed, producing an uninterrupted cassette + barcode.
+
+With gene content in the last sub-block, the split looks like:
+```
+  Gene sub-block:      BsmBI(oh2)—[3'WT gene]—BsmBI(gene_cass_oh)
+  Cassette fragment 1: BsmBI(gene_cass_oh)—[cassette part 1]—BsmBI(cass_jxn)
+  Cassette fragment 2: BsmBI(cass_jxn)—[cassette part 2]—BsmBI(oh3)
+```
+
+**Key points:**
+- Split points are chosen at any nt position within the cassette (not restricted to codon boundaries, since the cassette is non-coding)
+- Uses the same OOGGA scoring as gene superblock junctions
+- Cassette fragments appear in the output as `bsmbi_cassette_tile*` blocks
+- QC check 16 validates all cassette fragments are within synthesis limits
+- Fully backward compatible: cassettes ≤ 1778 nt (like the default WPRE + bGH polyA + PolIII = 1067 nt) are never split
+
 ---
 
 ### Step 6e: Variant-to-Tile Assignment

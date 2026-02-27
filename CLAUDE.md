@@ -55,6 +55,9 @@ The gene is divided into tiles. Each tile position has a different oligo + gene 
 ### Superblocks
 For long genes, WT gene blocks may exceed the ~1800 bp synthesis limit for gene fragments. In that case, blocks are split into "superblocks" — sub-blocks connected by additional unique BsmBI overhangs within the same one-pot Level 1 reaction.
 
+### Cassette Splitting
+For very long downstream cassettes (>~1700 nt total, i.e., intergene elements + PolIII exceed the synthesis limit), the cassette itself is split across multiple BsmBI-connected sub-blocks in the same Level 1b reaction. Split points within the cassette are chosen at positions with high-fidelity BsmBI overhangs, using the same OOGGA scoring as gene superblock junctions. After ligation, the cassette is reconstructed seamlessly — the BsmBI junction overhangs are consumed during ligation, leaving an uninterrupted cassette sequence. This is handled automatically: users add elements to `intergene_elements` and the pipeline adapts.
+
 ### Oligo Length Budget (Twist max = 300 nt)
 The tile size is determined by subtracting fixed overhead (enzyme sites, barcode, spacers) from 300 nt. Approximate tile size: ~200-250 nt (~67-83 codons), depending on tile type.
 
