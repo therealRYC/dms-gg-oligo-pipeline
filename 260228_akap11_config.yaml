@@ -1,0 +1,20 @@
+gene_fasta: "data/AKAP11_NM_016248_CDS.fasta"
+polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGATAATTAGAATTAATTTGACTGTAAACACAAAGATATTAGTACAAAATACGTGACGTAGAAAGTAATAATTTCTTGGGTAGTTTGCAGTTTTTAATACGACTCACTATAGGGACTATCATATGCTTACCGTAACTTGAAAGTATTTCGATTTCTTGGCTTTATATATCTTGTGGAAAGGACGAAACACCG"
+max_oligo_length: 300
+max_geneblock_length: 1800
+barcode_length: 20
+min_hamming_distance: 3
+barcode_prefix_length: 12
+barcode_gc_range: [0.25, 0.75]
+barcode_max_homopolymer: 4
+barcodes_per_variant: 10
+overhang_fidelity_threshold: 0.95
+search_window_K: 15
+auto_domesticate: true
+paqci_star2: "AGTC"
+paqci_star1: "TCGA"
+boundary_method: "dp"
+multi_k_search: true
+simulate_assembly: true
+simulation_samples_per_tile: 3
+output_dir: "260228_AKAP11_output"
