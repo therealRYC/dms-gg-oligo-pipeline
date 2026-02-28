@@ -111,6 +111,30 @@
   - Both options produce the same physical result (more BsmBI fragments in the same reaction). Option 3 is cleaner architecturally.
 - **Current workaround:** None. Pipeline will produce oversized gene blocks if cassette is too large.
 
+### BUG-007: BsaI superblock junction overhang collides with tile boundary oh1
+- **File:** `R/06_overhang_selection.R` (`partition_tile_superblocks`, Phase 4 collision detection)
+- **Status:** OPEN — confirmed via assembly simulation trace
+- **Discovered:** AKAP11 pipeline run (2026-02-28), assembly simulation failures in tiles 21 and 24
+- **What:** When the superblock partition places a boundary at a tile whose `oh2_seq` matches the `oh1_seq` of a tile in a later superblock, the BsaI ligation for that later tile fails. Two fragments in the BsaI reaction have the same `oh_5` overhang, causing `ligate_fragments()` to throw `"Ambiguous ligation: 2 fragments match oh_5 = 'ACCA'"`.
+- **Root cause:** `partition_tile_superblocks()` Phase 4 checks SB boundary overhangs for collisions against:
+  1. `oh3` (BsmBI-level collision)
+  2. Other SB boundary overhangs (BsmBI-level collision)
+
+  But it does NOT check against tile `oh1_seq` values that will share the same BsaI reaction. The SB boundary's `oh2_seq` becomes a BsaI junction overhang (connecting sub-blocks in the 5'WT region). If a tile's `oh1_seq` matches this junction overhang, the oligo fragment and the junction sub-block fragment both expose the same `oh_5`, creating ambiguous ligation.
+- **Specific AKAP11 case:**
+  - SB boundary at tile 17: `oh2_seq = ACCA` (junction between sub2 and sub3 of 5'WT BsaI blocks)
+  - Tile 21: `oh1_seq = ACCA` → collision in BsaI reaction (2 fragments with `oh_5 = ACCA`)
+  - Tile 24: `oh1_seq = ACCA` → same collision
+  - Scope: ALL variants in tiles 21 (codons 1389-1429, 8,200 oligos) and tile 24 (codons 1568-1637, 14,000 oligos) = 22,200 oligos (5.8% of pool)
+- **Fix:** In Phase 4 collision detection, add check:
+  ```
+  for each SB boundary bi with junction_oh = tiles$oh2_seq[sb_end_tiles[bi]]:
+    for each tile t in superblocks AFTER bi:
+      if tiles$oh1_seq[t] == junction_oh → COLLISION
+  ```
+  When detected, use existing shift-boundary-±1-tile resolution logic. Also add reverse-complement collision check (`oh1_seq == RC(junction_oh)`).
+- **Affected files:** `R/06_overhang_selection.R` (Phase 4 of `partition_tile_superblocks`)
+
 ### BUG-005: Tile 20 AKAP11 3'WT block oversized — global split dropped incorrectly
 - **File:** `R/06_overhang_selection.R` (`assign_global_boundaries_to_tiles`)
 - **Status:** OPEN — confirmed via trace, not yet investigated
