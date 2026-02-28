@@ -1504,7 +1504,10 @@ oh_collides <- function(oh_a, oh_b) {
 #' @param max_sub_length Maximum gene content per sub-block in nt
 #'   (typically max_block_length - block_overhead, e.g. 1800 - 22 = 1778)
 #' @param oh3 Optional oh3 overhang for collision checking. NULL skips
-#'   collision detection.
+#'   oh3 collision detection.
+#' @param oh4 Optional oh4 overhang for collision checking. NULL skips
+#'   oh4 collision detection. When provided, SB boundary overhangs are
+#'   also checked against oh4 (BsaI-level collision).
 #' @param oh_fidelity Optional fidelity data frame (reserved for future use)
 #' @param hf_set Optional HF overhang set (reserved for future use)
 #' @return List with:
@@ -1516,6 +1519,7 @@ oh_collides <- function(oh_a, oh_b) {
 partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
                                        max_sub_length,
                                        oh3 = NULL,
+                                       oh4 = NULL,
                                        oh_fidelity = NULL,
                                        hf_set = NULL) {
   n_tiles <- nrow(tiles)
@@ -1640,12 +1644,12 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
   # =========================================================================
   # Phase 4: Overhang collision detection and resolution
   # =========================================================================
-  # SB boundary overhangs must not collide with oh3 or with each other.
+  # SB boundary overhangs must not collide with oh3, oh4, each other, or
+  # tile oh1_seq values in later superblocks (BUG-007: BsaI-level collision).
   # If a collision is detected, try shifting the boundary ±1 tile.
   n_collisions <- 0L
 
-  if (n_sb >= 2L && !is.null(oh3)) {
-    oh3_rc <- reverse_complement(oh3)
+  if (n_sb >= 2L) {
 
     for (bi in seq_len(n_sb - 1L)) {
       boundary_tile <- sb_end_tiles[bi]
@@ -1654,12 +1658,12 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
       # --- Check for collision ---
       has_collision <- FALSE
 
-      # vs oh3
-      if (oh_collides(boundary_oh, oh3)) {
+      # vs oh3 (BsmBI-level)
+      if (!is.null(oh3) && oh_collides(boundary_oh, oh3)) {
         has_collision <- TRUE
       }
 
-      # vs other SB boundary OHs
+      # vs other SB boundary OHs (BsmBI-level)
       if (!has_collision) {
         for (bj in seq_len(n_sb - 1L)) {
           if (bj == bi) next
@@ -1671,12 +1675,39 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
         }
       }
 
+      # vs tile oh1_seq in later superblocks (BsaI-level — BUG-007)
+      # The SB boundary OH becomes a BsaI junction overhang for tiles whose
+      # 5'WT region spans past this boundary. If it matches a tile's oh1_seq,
+      # the BsaI reaction has ambiguous ligation (two frags with same oh_5).
+      if (!has_collision) {
+        boundary_pos <- tiles$end_nt[boundary_tile]
+        for (t in seq_len(n_tiles)) {
+          if (tiles$start_nt[t] > boundary_pos &&
+              oh_collides(boundary_oh, tiles$oh1_seq[t])) {
+            has_collision <- TRUE
+            break
+          }
+        }
+      }
+
+      # vs oh4 (BsaI-level — helper-to-oligo junction)
+      if (!has_collision && !is.null(oh4)) {
+        if (oh_collides(boundary_oh, oh4)) {
+          has_collision <- TRUE
+        }
+      }
+
       if (!has_collision) next
 
       n_collisions <- n_collisions + 1L
 
-      # --- Try shifting boundary ±1 tile ---
-      shift_candidates <- c(boundary_tile - 1L, boundary_tile + 1L)
+      # --- Try shifting boundary (expanding search: ±1, ±2, ..., ±5) ---
+      max_shift <- min(5L, n_tiles - 1L)
+      shift_candidates <- seq(max(boundary_tile - max_shift, 1L),
+                              min(boundary_tile + max_shift, n_tiles - 1L))
+      shift_candidates <- shift_candidates[shift_candidates != boundary_tile]
+      # Sort by distance from original (prefer minimal displacement)
+      shift_candidates <- shift_candidates[order(abs(shift_candidates - boundary_tile))]
       resolved <- FALSE
 
       for (new_bt in shift_candidates) {
@@ -1708,7 +1739,7 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
         new_oh <- tiles$oh2_seq[new_bt]
         new_has_collision <- FALSE
 
-        if (oh_collides(new_oh, oh3)) new_has_collision <- TRUE
+        if (!is.null(oh3) && oh_collides(new_oh, oh3)) new_has_collision <- TRUE
 
         if (!new_has_collision) {
           for (bj in seq_len(n_sb - 1L)) {
@@ -1719,6 +1750,23 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
               break
             }
           }
+        }
+
+        # vs tile oh1_seq in later superblocks (BUG-007)
+        if (!new_has_collision) {
+          new_boundary_pos <- tiles$end_nt[new_bt]
+          for (t in seq_len(n_tiles)) {
+            if (tiles$start_nt[t] > new_boundary_pos &&
+                oh_collides(new_oh, tiles$oh1_seq[t])) {
+              new_has_collision <- TRUE
+              break
+            }
+          }
+        }
+
+        # vs oh4 (BsaI-level)
+        if (!new_has_collision && !is.null(oh4)) {
+          if (oh_collides(new_oh, oh4)) new_has_collision <- TRUE
         }
 
         if (!new_has_collision) {
@@ -2159,7 +2207,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     gene_len = gene_len,
     polIII_len = polIII_len,
     max_sub_length = max_block_length - block_overhead,
-    oh3 = oh3
+    oh3 = oh3,
+    oh4 = oh4
   )
 
   # Convert partition to legacy all_splits format for downstream consumers
