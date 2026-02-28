@@ -83,34 +83,6 @@ test_that("assign_variants_to_tiles assigns all variants", {
   expect_false(any(is.na(variants$tile_id)))
 })
 
-test_that("compute_superblock_boundaries returns empty for short genes", {
-  cds <- TEST_GENE_SEQ  # 300 nt — well under 1800 limit
-  tiles <- partition_tiles(cds, 150)
-
-  boundaries <- compute_superblock_boundaries(cds, tiles, polIII_len = 250)
-  expect_equal(nrow(boundaries), 0)
-})
-
-test_that("compute_superblock_boundaries returns boundaries for long genes", {
-  # 2100 nt gene + 250 nt PolIII + 22 overhead = 2372 > 1800
-  cds <- TEST_LONG_GENE_SEQ
-  tile_size <- compute_max_tile_size(300, 12)
-  tiles <- partition_tiles(cds, tile_size)
-
-  boundaries <- compute_superblock_boundaries(
-    cds, tiles, polIII_len = 250, max_block_length = 1800
-  )
-
-  # Should have at least one boundary
-
-  expect_true(nrow(boundaries) > 0)
-  # All boundary positions should be valid
-  expect_true(all(boundaries$junction_nt > 0))
-  expect_true(all(boundaries$junction_nt < nchar(cds)))
-  # Junction overhangs should be 4 nt
-  expect_true(all(nchar(boundaries$junction_oh) == 4))
-})
-
 test_that("partition_tiles covers long gene completely with overlap", {
   cds <- TEST_LONG_GENE_SEQ
   tile_size <- compute_max_tile_size(300, 12)

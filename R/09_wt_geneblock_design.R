@@ -189,24 +189,21 @@ build_cassette_subblocks <- function(cassette_seq, oh_5, oh_3_final,
 #' @param cds Character string of domesticated CDS
 #' @param polIII Character string of PolIII promoter sequence
 #' @param tiles Data frame from partition_tiles() or search_tile_boundaries()
-#' @param tile_overhangs Data frame from extract_tile_overhangs() (optional if assembly_plan given)
+#' @param tile_overhangs Unused legacy parameter, kept for backward compatibility
 #' @param oh3 Fixed BsmBI overhang (PolIII-barcode junction)
 #' @param oh4 Fixed BsaI overhang (barcode-helper junction)
 #' @param paqci_star2 PaqCI** overhang (5' end of insert in helper plasmid)
 #' @param paqci_star1 PaqCI* overhang (3' end of insert)
-#' @param superblock_boundaries Data frame from compute_superblock_boundaries() (legacy)
 #' @param max_block_length Maximum gene block synthesis length (default 1800)
 #' @param fidelity_threshold Overhang fidelity threshold for superblock splitting
-#' @param assembly_plan Optional assembly_plan from plan_assembly(); when provided,
-#'   uses pre-computed superblock splits (gene-derived, HF-optimized) instead of
-#'   legacy apply_superblock_splitting
+#' @param assembly_plan assembly_plan from plan_assembly(); provides pre-computed
+#'   superblock splits (gene-derived, HF-optimized)
 #' @return List with:
 #'   - blocks: data frame of gene blocks to order (deduplicated)
 #'   - tile_manifests: data frame describing per-tile reaction contents
 #'   - helper_plasmid: data frame describing helper plasmid insert
 design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                                  oh3, oh4, paqci_star2, paqci_star1,
-                                 superblock_boundaries = NULL,
                                  max_block_length = MAX_GENEBLOCK_LENGTH,
                                  min_block_length = MIN_GENEBLOCK_LENGTH,
                                  fidelity_threshold = DEFAULT_FIDELITY_THRESHOLD,
@@ -234,14 +231,11 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
   # Use the promoter-derived spacer for BsmBI sites with oh3 as 3' overhang
   oh3_spacer <- if (!is.null(assembly_plan)) assembly_plan$oh3_spacer else NULL
 
-  # If assembly_plan is provided, extract superblock splits in old format
+  # Extract superblock splits from assembly_plan
   use_precomputed_splits <- !is.null(assembly_plan)
 
   if (use_precomputed_splits) {
     ap_splits <- assembly_plan$superblock_splits
-    # Convert assembly_plan splits to old-format superblock_boundaries
-    # for 5'WT blocks: filter by block_type == "bsai_5wt"
-    # for 3'WT blocks: filter by block_type == "bsmbi_3wt"
     sb_5wt <- if (nrow(ap_splits) > 0) {
       ap_splits[ap_splits$block_type == "bsai_5wt", , drop = FALSE]
     } else {
@@ -256,14 +250,6 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       data.frame(
         split_nt = integer(0), junction_oh = character(0),
         tile_id = integer(0), stringsAsFactors = FALSE
-      )
-    }
-  } else {
-    if (is.null(superblock_boundaries)) {
-      superblock_boundaries <- data.frame(
-        boundary_id = integer(0), after_tile_id = integer(0),
-        junction_nt = integer(0), junction_oh = character(0),
-        fidelity_score = numeric(0), stringsAsFactors = FALSE
       )
     }
   }
@@ -289,14 +275,6 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           sb_junction_nt <- integer(0)
           sb_junction_oh <- character(0)
         }
-      } else {
-        sb_in_region <- superblock_boundaries[
-          superblock_boundaries$junction_nt >= wt_5prime_start &
-            superblock_boundaries$junction_nt <= wt_5prime_end, ,
-          drop = FALSE
-        ]
-        sb_junction_nt <- sb_in_region$junction_nt
-        sb_junction_oh <- sb_in_region$junction_oh
       }
 
       if (length(sb_junction_nt) == 0) {
@@ -1074,7 +1052,6 @@ apply_superblock_splitting <- function(blocks, cds, polIII, oh3,
     # Select junction overhangs
     n_junctions <- n_subblocks - 1L
     junction_ohs <- select_superblock_overhangs(
-      cds, polIII,
       c(existing_ohs, oh3),
       n_junctions, fidelity_threshold
     )

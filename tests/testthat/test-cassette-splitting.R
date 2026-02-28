@@ -178,11 +178,9 @@ test_that("design_wt_geneblocks handles oversized cassette (last tile)", {
     downstream_cassette = big_cassette
   )
   tiles <- plan$tiles
-  tile_ohs <- extract_tile_overhangs(tiles)
-
   result <- design_wt_geneblocks(
     cds = cds, polIII = TEST_POLIII,
-    tiles = tiles, tile_overhangs = tile_ohs,
+    tiles = tiles,
     oh3 = plan$oh3, oh4 = plan$oh4,
     paqci_star2 = "AGTC", paqci_star1 = "TCGA",
     assembly_plan = plan
@@ -222,11 +220,9 @@ test_that("normal cassette (1067 nt) is NOT split", {
   plan <- plan_assembly(cds, TEST_POLIII, tile_size)
 
   tiles <- plan$tiles
-  tile_ohs <- extract_tile_overhangs(tiles)
-
   result <- design_wt_geneblocks(
     cds = cds, polIII = TEST_POLIII,
-    tiles = tiles, tile_overhangs = tile_ohs,
+    tiles = tiles,
     oh3 = plan$oh3, oh4 = plan$oh4,
     paqci_star2 = "AGTC", paqci_star1 = "TCGA",
     assembly_plan = plan

@@ -205,29 +205,21 @@ test_that("validate_fixed_overhangs catches invalid inputs", {
   expect_error(validate_fixed_overhangs("AAAA", "AAAA")) # identical
 })
 
-test_that("manual oh3/oh4 are accepted via select_fixed_overhangs", {
-  cu <- builtin_human_codon_usage()
-  cds <- TEST_GENE_SEQ
-  tiles <- partition_tiles(cds, 150)
-  tile_ohs <- extract_tile_overhangs(tiles)
-
-  result <- select_fixed_overhangs(cds, TEST_POLIII, tile_ohs,
-    manual_oh3 = "ACTA", manual_oh4 = "GATA"
-  )
-  expect_equal(result$oh3, "ACTA")
-  expect_equal(result$oh4, "GATA")
+test_that("manual oh3/oh4 are validated by validate_fixed_overhangs", {
+  # validate_fixed_overhangs is used by plan_assembly; test it directly
+  expect_silent(validate_fixed_overhangs("ACTA", "GATA"))
+  expect_error(validate_fixed_overhangs("ACTA", "ACTA")) # identical
+  expect_error(validate_fixed_overhangs("AAAA", "GATA")) # homopolymer
 })
 
-test_that("extract_tile_overhangs works with search_tile_boundaries output", {
+test_that("tiles from search_tile_boundaries have overhang fidelity columns", {
   cds <- TEST_GENE_SEQ
   tiles <- search_tile_boundaries(cds, 150)
-  tile_ohs <- extract_tile_overhangs(tiles)
 
-  expect_equal(nrow(tile_ohs), nrow(tiles))
-  expect_true(all(nchar(tile_ohs$oh1_seq) == 4))
-  expect_true(all(nchar(tile_ohs$oh2_seq) == 4))
-  expect_true(all(!is.na(tile_ohs$oh1_fidelity)))
-  expect_true(all(!is.na(tile_ohs$oh2_fidelity)))
+  expect_true(all(nchar(tiles$oh1_seq) == 4))
+  expect_true(all(nchar(tiles$oh2_seq) == 4))
+  expect_true(all(!is.na(tiles$oh1_fidelity)))
+  expect_true(all(!is.na(tiles$oh2_fidelity)))
 })
 
 test_that("plan_assembly handles long gene with superblocking", {
@@ -486,16 +478,6 @@ test_that("oh3 and oh4 are never homopolymers (long gene)", {
   expect_false(plan$oh4 %in% HOMOPOLYMER_4NT,
     info = paste("oh4 =", plan$oh4, "should not be a homopolymer")
   )
-})
-
-test_that("select_fixed_overhangs excludes homopolymers", {
-  cds <- TEST_GENE_SEQ
-  tiles <- partition_tiles(cds, 150)
-  tile_ohs <- extract_tile_overhangs(tiles)
-
-  result <- select_fixed_overhangs(cds, TEST_POLIII, tile_ohs)
-  expect_false(result$oh3 %in% HOMOPOLYMER_4NT)
-  expect_false(result$oh4 %in% HOMOPOLYMER_4NT)
 })
 
 # =============================================================================

@@ -80,7 +80,7 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   tiles <- assembly_plan$tiles
   oh3 <- assembly_plan$oh3
   oh4 <- assembly_plan$oh4
-  tile_overhangs <- extract_tile_overhangs(tiles)
+  tile_overhangs <- tiles
   variants <- assign_variants_to_tiles(variants, tiles)
 
   # Filter gene-edge variants with partial oh overlap (BUG-6)
@@ -296,7 +296,7 @@ test_that("full pipeline runs on long test gene with superblocking", {
   tiles <- assembly_plan$tiles
   oh3 <- assembly_plan$oh3
   oh4 <- assembly_plan$oh4
-  tile_overhangs <- extract_tile_overhangs(tiles)
+  tile_overhangs <- tiles
   variants <- assign_variants_to_tiles(variants, tiles)
 
   # Filter gene-edge variants with partial oh overlap (BUG-6)
@@ -503,7 +503,7 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   tiles <- assembly_plan$tiles
   oh3 <- assembly_plan$oh3
   oh4 <- assembly_plan$oh4
-  tile_overhangs <- extract_tile_overhangs(tiles)
+  tile_overhangs <- tiles
   variants <- assign_variants_to_tiles(variants, tiles)
 
   # Filter gene-edge variants with partial oh overlap (BUG-6)
