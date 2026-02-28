@@ -1,5 +1,5 @@
 # Created: 2026-02-20
-# Last updated: 2026-02-26 — Fix BUG-006: replace greedy HF set with Potapov Table 1 Set 3
+# Last updated: 2026-02-28 — Add OPT-001 through OPT-005 (palindrome blacklist, Kozak junction, joint optimization)
 
 # Bug Inventory — DMS GG Oligo Pipeline
 
@@ -166,6 +166,93 @@
   - **Recommendation:** Option B adds genuine value because: (1) HF sets encode pairwise interactions not captured by individual fidelity, (2) HF sets were experimentally validated, (3) bonus is most valuable for freely-chosen overhangs (oh3, oh4, SB junctions).
   - **Decision (2026-02-26):** Option B confirmed. Score = `P_fid(oh) × P_eff(oh) × (1 + w_hf × in_HF)` where w_hf=0.5 default. Implementation in worktree `260226-oogga-scoring`. See `Plans/260226_overhang-architecture-redesign.md` Task C for full implementation plan.
   - References: Potapov et al. 2018 (PMID 30335370), Pryor et al. 2020 (PMC7467295), OOGGA (bioRxiv 10.1101/2025.06.16.659877).
+
+## Future Optimizations
+
+### OPT-001: Gene-end overhang — place BsmBI junction in 3' cassette instead of last codon
+- **Status:** IDEA — to explore later
+- **What:** Currently, the last tile's oh2 is forced to be the last 4 nt of the CDS (gene-derived). If that 4-mer happens to be a palindrome or low-fidelity overhang (e.g., TTAA), there's no way to avoid it. The idea is to shift the BsmBI junction a few nucleotides downstream into the 3' cassette (WPRE, polyA, or PolIII), giving more overhang choices.
+- **How it would work:**
+  - Oligo carries `[last codons of gene] + [first few nt of cassette]`
+  - Trailing WT block starts from that cassette position onward
+  - The oh2 becomes a cassette-derived 4-mer instead of gene-derived
+- **Trade-offs:**
+  - (+) Gene-independent overhang choice at the 3' end
+  - (+) Can avoid palindromic/low-fidelity overhangs at the gene terminus
+  - (-) Slightly increases oligo length for trailing tile (a few extra nt of cassette sequence)
+  - (-) Tiling module (`05_tiling.R`) would need to know about the cassette sequence
+  - (-) Only helps the very last tile
+- **Implementation:** Extend `precompute_boundary_scores()` to score a virtual boundary at `gene_len + offset` for small offsets into the cassette. Requires passing cassette sequence to the tiling module. The DP would then naturally pick the best position (gene-end or cassette-start) based on overhang quality.
+
+### OPT-002: Gene-start overhang — place BsaI junction in Kozak sequence instead of ATG
+- **Status:** IDEA — to explore later
+- **What:** Currently, the first tile's oh1 (= oh_L) is forced to be the first 4 nt of the CDS, which is always ATG + first nt of codon 2 (gene-dependent). Moving the BsaI junction upstream into the Kozak consensus sequence (part of the destination vector backbone) could provide a gene-independent, high-quality overhang.
+- **Kozak consensus:** Standard mammalian Kozak is `GCCACCATGG` (positions -6 to +4 relative to A of ATG).
+- **Candidate overhangs from Kozak:**
+
+  | Position | Overhang | GC% | Palindromic? | Notes |
+  |----------|----------|-----|-------------|-------|
+  | -3 to +1 | **ACCA** | 50% | No | **Best candidate.** Balanced GC, good fidelity, splits cleanly between Kozak and ATG. Oligo carries `ACCA` + `TG` + [tile]. |
+  | -2 to +2 | CCAT | 50% | No | Good. Splits ATG across junction (reconstructed by ligation). |
+  | -6 to -3 | GCCA | 75% | No | Appears in published HF sets. High GC. |
+  | -5 to -2 | CCAC | 75% | No | Risk of cross-talk with CACC. |
+  | -4 to -1 | CACC | 75% | No | **Avoid.** Experimentally shown to have very low ligation efficiency (~234/100k in Strzelecki et al. 2024 NAR). |
+  | -1 to +3 | CATG | 50% | **YES** | **Avoid.** Palindromic — self-ligation. |
+
+- **Advantages:**
+  - oh_L becomes gene-independent and universal (same overhang for all genes)
+  - Can pick a high-fidelity, non-palindromic overhang (ACCA recommended)
+  - Eliminates the ATG"N" variability that currently affects BsaI reaction set fidelity
+- **Disadvantages:**
+  - Oligo carries 2-6 extra nt of fixed Kozak sequence, reducing tile budget
+  - Assumes standard GCCACC Kozak in the destination vector — non-standard Kozaks would cause mismatches
+  - PaqCI site positioning must be upstream of the Kozak junction
+  - Kozak is typically part of the backbone, not the gene insert — architectural implications for Level 2
+- **References:** Kozak 1987; Strzelecki et al. 2024 NAR (ligation efficiency data); Potapov et al. 2018 (fidelity data).
+- **Implementation:** Add a config option `junction_mode: "gene_start" | "kozak"`. When "kozak", define oh_L from the configured Kozak sequence rather than `substring(cds, 1, 4)`. Requires Kozak sequence as a config parameter.
+
+### OPT-003: Blacklist palindromic overhangs from boundary selection
+- **Status:** READY TO IMPLEMENT
+- **What:** Palindromic 4-nt overhangs (sequence = reverse complement) are problematic for Golden Gate assembly because they enable self-circularization and inverted-insertion products. None of the 16 palindromes appear in the Potapov HF Set 3, and under BsmBI-specific conditions, 7 of 16 have fidelity < 0.60 (worst: CGCG = 0.404). The current T4 ligase-based scoring dramatically overestimates their performance (e.g., GATC shows 0.950 in T4 but 0.582 under BsmBI), so most palindromes escape the existing -5.0 low-fidelity penalty.
+- **The 16 palindromes:** AATT, ATAT, ACGT, AGCT, TATA, TTAA, TGCA, TCGA, CATG, CTAG, CCGG, CGCG, GATC, GTAC, GCGC, GGCC
+- **BsmBI fidelity of worst palindromes:** CGCG (0.404), GCGC (0.432), GGCC (0.454), AGCT (0.512), CCGG (0.564), GATC (0.582), GTAC (0.584)
+- **Planned implementation:**
+  1. Add `PALINDROMIC_4NT` constant in `constants.R` (all 16 palindromes)
+  2. Hard blacklist for freely-chosen overhangs (oh3, oh4, SB junctions) — same treatment as homopolymers
+  3. Heavy penalty (-10.0) in `precompute_boundary_scores()` for boundaries where oh1 or oh2 is palindromic
+  4. Add palindrome check in superblock junction scoring (`09_wt_geneblock_design.R`)
+- **Impact on boundary selection:** Only 7-14% of codon boundaries have a palindromic oh. Every 31-codon window tested has 24+ palindrome-free positions. No boundary selection failures expected.
+- **Also consider:** Blacklisting/penalizing CG-rich non-palindromic overhangs with BsmBI fidelity < 0.50 (27 additional overhangs, e.g., CGCC: 0.355, CCGC: 0.378, CACC: 0.417). These are almost as bad as palindromes under BsmBI conditions.
+- **Related:** Consider switching scoring from built-in T4 ligase data to BsmBI-specific pairwise data (`data/neb_overhang_fidelity/bsmbi_overhangs.rds`) for more accurate boundary scoring.
+
+### OPT-004: Configurable DP K-range with diminishing-returns stopping
+- **Status:** READY TO IMPLEMENT
+- **What:** The DP multi-K search currently hardcodes K_ideal +/- 2 (3 values tested). The `search_window_K` config parameter is only used by the greedy method. Observed data shows average score per boundary monotonically increases with K (more tiles = more chances to cherry-pick high-quality junctions), but the rate of improvement declines. Both GRIN2A and AKAP11 show ~6.7% improvement at first step, ~1.7-2.7% at second step — still increasing at the edge of the search window.
+- **Planned implementation:**
+  1. New config parameter `dp_k_range: 5` (default 5, meaning K_ideal +/- 5)
+  2. In `search_tile_boundaries_dp()`, replace hardcoded +/- 2 with configurable range
+  3. Add diminishing-returns stop: if avg score improvement drops below 0.5% from K to K+1, stop expanding upward (prefer fewer gene blocks when fidelity gain is marginal)
+  4. When two K values produce similar avg scores, prefer the K that produces fewer gene blocks (lower cost/complexity)
+- **Trade-off:** More tiles = more gene blocks to synthesize = more cost. The stopping criterion balances assembly fidelity against experimental complexity.
+
+### OPT-005: Joint tile-boundary + superblock optimization (replace tile shifts)
+- **Status:** DESIGN PHASE — preferred fix for BUG-007 collisions
+- **What:** Currently, tile boundaries (Phase 1 DP) and superblock partitioning (Phase 3 greedy) are independent. If a SB boundary's oh2 collides with an oh1 in a later SB, the only recourse is shifting ±5 tiles (unreliable, no guarantees). This should be replaced with a joint optimization that prevents collisions by construction.
+- **Why tile shifts should be removed:** The shift approach has zero guarantees — it's a heuristic that may or may not find a non-colliding alternative within ±5 tiles. For AKAP11, it failed to resolve the ACCA collision. The fundamental problem is that tile boundaries were chosen without knowledge of superblock structure.
+- **Proposed approach — Iterative DP with SB-aware blacklisting:**
+  1. Run standard tile boundary DP for each K → get optimal boundaries
+  2. Simulate greedy SB partitioning on those boundaries (deterministic, O(n))
+  3. Check for collisions: SB boundary oh2 vs oh1 values in later SBs
+  4. If collision found: identify the colliding oh2 value, blacklist all boundary positions where oh2 equals that value (set `boundary_valid[b] = FALSE`), re-run DP
+  5. Iterate until collision-free or max iterations (5) reached
+  6. Across all K values, prefer the collision-free solution with best avg score
+- **Alternative — True joint DP (more elegant, higher complexity):**
+  - Extend DP state to `(boundary_k, codon_position, nt_since_last_sb_break)`
+  - When cumulative nt exceeds SB threshold, current position becomes SB boundary → check oh2 against all oh1 in gene
+  - State space: O(K * n_codons * max_sub_length/3) ≈ O(K * n * 593)
+  - For AKAP11: ~28M states — feasible but requires careful R implementation
+- **Decision:** Start with iterative DP + blacklisting (simpler, reuses existing code). Move to full joint DP if iterative produces suboptimal results.
+- **Replaces:** The ±5 tile shift logic in `partition_tile_superblocks()` Phase 4 (lines 1704-1777).
 
 ## Verified NOT Bugs
 
