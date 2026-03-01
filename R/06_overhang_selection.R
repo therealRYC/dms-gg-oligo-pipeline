@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-01 — Fix BsmBI-level SB boundary collision: check boundary oh2 vs earlier tile oh2
+# Last updated: 2026-03-01 — Backwards-sweep SB partitioning: cassette-aware, balanced superblocks
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -1588,86 +1588,84 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
   }
 
   # =========================================================================
-  # Phase 1: Forward greedy partitioning
+  # Phases 1+2: Backwards-sweep cassette-aware partitioning
   # =========================================================================
-  # Accumulate tiles left-to-right. When adding the next tile would cause the
-  # current SB's gene content to exceed max_sub_length, close the current SB
-  # and start a new one.
+  # The last SB must accommodate both gene content AND the downstream cassette
+  # (polIII_len) within max_sub_length. The old approach (forward greedy +
+  # Phase 2 fixup) created unbalanced partitions — e.g., a 1-tile SB4 in
+  # AKAP11 when the cassette forced Phase 2 to split the last greedy SB.
   #
-  # Gene content of SB_i = right_boundary_nt - left_boundary_nt, where:
-  #   - left_boundary = 0 for first SB, tiles[prev_end_tile].end_nt otherwise
-  #   - right_boundary = tiles[end_tile].end_nt for non-last, gene_len for last
-  sb_end_tiles <- integer(0) # end_tile index for each SB
-  prev_boundary_nt <- 0L # left boundary (nt) of current SB
-  current_start_tile <- 1L
+  # New algorithm:
+  #   Step 1 (backwards): Walk from the last tile backwards, accumulating
+  #          tiles into the last SB until gene_content + polIII_len would
+  #          exceed max_sub_length. This naturally sizes the last SB to fit
+  #          the cassette with maximum tile count.
+  #   Step 2 (forward greedy): Partition the remaining tiles (gene-only,
+  #          no cassette overhead) using the standard forward greedy.
+  #
+  # When cassette_needs_splitting is TRUE (cassette alone > max_sub_length),
+  # the cassette will be split into separate BsmBI fragments downstream
+  # by find_cassette_split_points(). In that case, skip the backwards step
+  # and partition the entire gene with forward greedy (no cassette budget).
 
-  for (i in seq_len(n_tiles)) {
-    # Gene content of current SB if we include tile i
-    content <- tiles$end_nt[i] - prev_boundary_nt
+  sb_end_tiles <- integer(0)
 
-    if (content > max_sub_length && i > current_start_tile) {
-      # Close current SB at tile i-1 (tile i would overflow)
-      sb_end_tiles <- c(sb_end_tiles, i - 1L)
-      prev_boundary_nt <- tiles$end_nt[i - 1L]
-      current_start_tile <- i
-    }
-  }
-  # Close the last SB
-  sb_end_tiles <- c(sb_end_tiles, n_tiles)
-
-  # =========================================================================
-  # Phase 2: Adjust last SB for polIII/cassette budget
-  # =========================================================================
-  # The last SB's gene block includes the PolIII cassette. Its orderable
-  # length = gene_content + polIII_len, which must be <= max_sub_length.
-  # If it doesn't fit, split tiles from the last SB into a new penultimate SB.
-  # This is a soft constraint: if no partition can fit polIII (e.g., single
-  # tile's gene region + polIII > max_sub_length), proceed anyway.
-  n_sb <- length(sb_end_tiles)
   if (polIII_len > 0L && !cassette_needs_splitting) {
-    # Normal case: cassette fits in one block, optimize gene content in last SB
-    last_left_nt <- if (n_sb >= 2L) tiles$end_nt[sb_end_tiles[n_sb - 1L]] else 0L
-    last_gene_content <- gene_len - last_left_nt
+    # --- Step 1: Backwards sweep to find last SB ---
+    # Walk from last tile backwards. The last SB's total budget is
+    # gene_content + cassette <= max_sub_length, where gene_content =
+    # gene_len - left_boundary_nt.
+    last_sb_first_tile <- n_tiles  # start with just the last tile
+    for (t in rev(seq_len(n_tiles))) {
+      # If this tile starts the last SB, gene_content = gene_len - gene_start
+      gene_start <- if (t == 1L) 0L else tiles$end_nt[t - 1L]
+      gene_content_candidate <- gene_len - gene_start
+      if (gene_content_candidate + polIII_len <= max_sub_length) {
+        last_sb_first_tile <- t
+      } else {
+        break  # adding more tiles would overflow
+      }
+    }
 
-    while (last_gene_content + polIII_len > max_sub_length) {
-      last_start_tile <- if (n_sb >= 2L) sb_end_tiles[n_sb - 1L] + 1L else 1L
-      last_end_tile <- sb_end_tiles[n_sb]
-
-      # Can't split a single-tile last SB further — accept and move on
-      if (last_start_tile == last_end_tile) break
-
-      # Find the earliest split tile where the remaining gene + polIII fits
-      found_split <- FALSE
-      for (split_at in seq(last_start_tile, last_end_tile - 1L)) {
-        remaining <- gene_len - tiles$end_nt[split_at]
-        if (remaining + polIII_len <= max_sub_length) {
-          # Also verify the new penultimate SB fits
-          new_penult_content <- tiles$end_nt[split_at] - last_left_nt
-          if (new_penult_content <= max_sub_length) {
-            # Insert new boundary: replace [..., last_end] with [..., split_at, last_end]
-            sb_end_tiles <- c(sb_end_tiles[-n_sb], split_at, last_end_tile)
-            found_split <- TRUE
-            break
-          }
+    # --- Step 2: Forward greedy on tiles 1..(last_sb_first_tile - 1) ---
+    if (last_sb_first_tile > 1L) {
+      prefix_end <- last_sb_first_tile - 1L
+      prev_boundary_nt <- 0L
+      current_start_tile <- 1L
+      for (i in seq_len(prefix_end)) {
+        content <- tiles$end_nt[i] - prev_boundary_nt
+        if (content > max_sub_length && i > current_start_tile) {
+          sb_end_tiles <- c(sb_end_tiles, i - 1L)
+          prev_boundary_nt <- tiles$end_nt[i - 1L]
+          current_start_tile <- i
         }
       }
-
-      if (!found_split) break # No valid split exists — accept oversized last SB
-
-      # Recompute for next iteration
-      n_sb <- length(sb_end_tiles)
-      last_left_nt <- tiles$end_nt[sb_end_tiles[n_sb - 1L]]
-      last_gene_content <- gene_len - last_left_nt
+      # Close the prefix SB
+      sb_end_tiles <- c(sb_end_tiles, prefix_end)
     }
-  } else if (polIII_len > 0L && cassette_needs_splitting) {
-    # Cassette is oversized — it will be split into separate BsmBI fragments
-    # by design_wt_geneblocks(). For partition purposes, treat the last SB as
-    # needing only gene content (no cassette budget), since the cassette will
-    # be in its own sub-blocks. Skip the normal Phase 2 adjustment.
-    cli::cli_alert_info(paste0(
-      "Skipping Phase 2 cassette budget adjustment — ",
-      "cassette will be split into separate fragments."
-    ))
+    # Close the last (cassette-carrying) SB
+    sb_end_tiles <- c(sb_end_tiles, n_tiles)
+
+  } else {
+    # No cassette budget, or cassette will be split separately.
+    # Pure forward greedy on all tiles.
+    if (cassette_needs_splitting) {
+      cli::cli_alert_info(paste0(
+        "Cassette will be split into separate fragments — ",
+        "partitioning gene-only (no cassette budget in last SB)."
+      ))
+    }
+    prev_boundary_nt <- 0L
+    current_start_tile <- 1L
+    for (i in seq_len(n_tiles)) {
+      content <- tiles$end_nt[i] - prev_boundary_nt
+      if (content > max_sub_length && i > current_start_tile) {
+        sb_end_tiles <- c(sb_end_tiles, i - 1L)
+        prev_boundary_nt <- tiles$end_nt[i - 1L]
+        current_start_tile <- i
+      }
+    }
+    sb_end_tiles <- c(sb_end_tiles, n_tiles)
   }
 
   # =========================================================================
