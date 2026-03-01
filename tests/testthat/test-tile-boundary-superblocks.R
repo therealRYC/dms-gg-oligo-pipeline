@@ -1025,22 +1025,20 @@ test_that("9c: large cassette forces extra superblock when attached", {
   expect_gte(result$n_superblocks, result_no_cassette$n_superblocks)
 })
 
-test_that("9d: cassette exceeding max_sub alone triggers error or warning", {
-  # If polIII_len > max_sub_length, no partition can work with cassette attached
-  # The function should error or warn
+test_that("9d: cassette exceeding max_sub alone is flagged for splitting", {
+  # If polIII_len > max_sub_length, the cassette is too large for a single block
+  # but partition_tile_superblocks flags it for downstream cassette splitting
+  # (find_cassette_split_points will handle it in design_wt_geneblocks).
   tiles <- make_test_tiles(18, gene_seq = TEST_LONG_GENE_SEQ)
   gene_len <- nchar(TEST_LONG_GENE_SEQ)
 
   impossible_cassette <- TEST_MAX_SUB + 100L # larger than any single block
 
-  expect_error(
-    partition_tile_superblocks(
-      tiles = tiles,
-      gene_len = gene_len,
-      polIII_len = impossible_cassette,
-      max_sub_length = TEST_MAX_SUB
-    ),
-    regexp = "cassette|polIII|exceeds",
-    info = "Should error when cassette alone exceeds max_sub_length"
+  result <- partition_tile_superblocks(
+    tiles = tiles,
+    gene_len = gene_len,
+    polIII_len = impossible_cassette,
+    max_sub_length = TEST_MAX_SUB
   )
+  expect_true(result$cassette_needs_splitting)
 })

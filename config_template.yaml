@@ -16,7 +16,7 @@ polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGAT
 
 # --- Intergene Elements ---
 # Sequence elements placed between the gene 3' end and the PolIII promoter.
-# Common elements: WPRE (mRNA stability/export), bGH polyA (polyadenylation).
+# These are from the pTK4-GFP vector (Addgene): WPRE + spacer + hGH polyA.
 #
 # Each element has a name and a sequence. Elements are concatenated in order
 # and placed between the gene and PolIII promoter in the BsmBI gene blocks.
@@ -24,7 +24,7 @@ polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGAT
 # superblock splitting handles it automatically.
 #
 # Final construct layout:
-#   [Gene] — [WPRE] — [bGH_polyA] — [PolIII] — [Barcode]
+#   [Gene] — [WPRE] — [spacer] — [hGH_polyA] — [PolIII] — [Barcode]
 #
 # To run WITHOUT intergene elements (PolIII directly after gene), comment out
 # or delete the intergene_elements section below.
@@ -34,11 +34,14 @@ polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGAT
 # additional BsmBI junctions. No user action required.
 intergene_elements:
   - name: "WPRE"
-    sequence: "AATCAACCTCTGGATTACAAAATTTGTGAAAGATTGACTGGTATTCTTAACTATGTTGCTCCTTTTACGCTATGTGGATACGCTGCTTTAATGCCTTTGTATCATGCTATTGCTTCCCGTATGGCTTTCATTTTCTCCTCCTTGTATAAATCCTGGTTGCTGTCTCTTTATGAGGAGTTGTGGCCCGTTGTCAGGCAACGTGGCGTGGTGTGCACTGTGTTTGCTGACGCAACCCCCACTGGTTGGGGCATTGCCACCACCTGTCAGCTCCTTTCCGGGACTTTCGCTTTCCCCCTCCCTATTGCCACGGCGGAACTCATCGCCGCCTGCCTTGCCCGCTGCTGGACAGGGGCTCGGCTGTTGGGCACTGACAATTCCGTGGTGTTGTCGGGGAAATCATCGTCCTTTCCTTGGCTGCTCGCCTGTGTTGCCACCTGGATTCTGCGCGGGACGTCCTTCTGCTACGTCCCTTCGGCCCTCAATCCAGCGGACCTTCCTTCCCGCGGCCTGCTGCCGGCTCTGCGGCCTCTTCCGCGTCTTCGCCTTCGCCCTCAGACGAGTCGGATCTCCCTTTGGGCCGCCTCCCCGCCTG"
-    # 592 nt — WHV8 tripartite element (Zufferey 1999). Standard in pLenti/CROPseq vectors.
-  - name: "bGH_polyA"
-    sequence: "CTGTGCCTTCTAGTTGCCAGCCATCTGTTGTTTGCCCCTCCCCCGTGCCTTCCTTGACCCTGGAAGGTGCCACTCCCACTGTCCTTTCCTAATAAAATGAGGAAATTGCATCGCATTGTCTGAGTAGGTGTCATTCTATTCTGGGGGGTGGGGTGGGGCAGGACAGCAAGGGGGAGGATTGGGAAGACAATAGCAGGCATGCTGGGGATGCGGTGGGCTCTATGG"
-    # 225 nt — bovine growth hormone polyA signal. Standard in pcDNA3.1/lentiviral vectors.
+    sequence: "AATCAACCTCTGGATTACAAAATTTGTGAAAGATTGACTGGTATTCTTAACTATGTTGCTCCTTTTACGCTATGTGGATACGCTGCTTTAATGCCTTTGTATCATGCTATTGCTTCCCGTATGGCTTTCATTTTCTCCTCCTTGTATAAATCCTGGTTGCTGTCTCTTTATGAGGAGTTGTGGCCCGTTGTCAGGCAACGTGGCGTGGTGTGCACTGTGTTTGCTGACGCAACCCCCACTGGTTGGGGCATTGCCACCACCTGTCAGCTCCTTTCCGGGACTTTCGCTTTCCCCCTCCCTATTGCCACGGCGGAACTCATCGCCGCCTGCCTTGCCCGCTGCTGGACAGGGGCTCGGCTGTTGGGCACTGACAATTCCGTGGTGTTGTCGGGGAAATCATCGTCCTTTCCTTGGCTGCTCGCCTATGTTGCCACCTGGATTCTGCGCGGGACGTCCTTCTGCTACGTCCCTTCGGCCCTCAATCCAGCGGACCTTCCTTCCCGCGGCCTGCTGCCGGCTCTGCGGCCTCTTCCGCGTCTTCGCCTTCGCCCTCAGACGAGTCGGATCTCCCTTTGGGCCGCCTCCCCGC"
+    # 589 nt — WPRE from pTK4-GFP (Addgene). WHV post-transcriptional regulatory element.
+  - name: "spacer"
+    sequence: "ATCGATACCGAGCGCTGGTCGACAGATCTAC"
+    # 31 nt — Spacer between WPRE and hGH polyA, from pTK4-GFP.
+  - name: "hGH_polyA"
+    sequence: "GGGTGGCATCCCTGTGACCCCTCCCCAGTGCCTCTCCTGGCCCTGGAAGTTGCCACTCCAGTGCCCACCAGCCTTGTCCTAATAAAATTAAGTTGCATCATTTTGTCTGACTAGGTGTCCTTCTATAATATTATGGGGTGGAGGGGGGTGGTATGGAGCAAGGGGCAAGTTGGGAAGACAACCTGTAGGGCCTGCGGGGTCTATTGGGAACCAAGCTGGAGTGCAGTGGCACAATCTTGGCTCACTGCAATCTCCGCCTCCTGGGTTCAAGCGATTCTCCTGCCTCAGCCTCCCGAGTTGTTGGGATTCCAGGCATGCATGACCAGGCTCAGCTAATTTTTGTTTTTTTGGTAGAGACGGGGTTTCACCATATTGGCCAGGCTGGTCTCCAACTCCTAATCTCAGGTGATCTACCCACCTTGGCCTCCCAAATTGCTGGGATTACAGGCGTGAACCACTGCTCCCTTCCCTGTCCTT"
+    # 477 nt — Human growth hormone polyA signal, from pTK4-GFP (Addgene).
 
 # --- Codon Usage Table (optional) ---
 # By default, the pipeline uses the built-in CoCoPUTs human codon usage table
@@ -89,8 +92,11 @@ overhang_fidelity_threshold: 0.95          # Min fidelity score for auto-selecte
 boundary_method: "dp"                        # "dp" (default) or "greedy". DP uses dynamic programming
                                              # to find globally optimal tile boundaries; greedy uses a
                                              # local forward search within +/- search_window_K codons.
-multi_k_search: true                         # Try multiple tile counts (K-2 to K+2) to find the
-                                             # tiling with best average overhang quality. Default true.
+multi_k_search: true                         # Try multiple tile counts to find the tiling with best
+                                             # average overhang quality. Default true.
+dp_k_range: 5                                # Search K_ideal +/- dp_k_range tile counts (default 5).
+                                             # Larger values explore more options but take longer.
+                                             # Search stops early when avg score gain < 0.5%.
 
 # --- Fixed Overhangs for 3-Enzyme Assembly ---
 # oh3: 4-nt BsmBI overhang at PolIII-barcode junction (same for all tiles)

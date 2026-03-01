@@ -102,6 +102,21 @@ DEFAULT_MIN_HAMMING_FLOOR <- 2L # Floor for auto-adjustment when capacity is tig
 # strand. Barcodes transcribed by PolIII (U6) must not contain TTTT.
 POLIII_TERM_SEQ <- "TTTT"
 
+# --- Palindromic 4-nt overhangs ---
+# Sequence equals its own reverse complement (e.g., TTAA = RC(TTAA)).
+# Palindromic overhangs are problematic for Golden Gate assembly:
+#   - Enable self-circularization and inverted-insertion products
+#   - Under BsmBI conditions, 7 of 16 have fidelity < 0.60
+#   - None appear in Potapov HF Set 3
+# Treatment: hard blacklist for freely-chosen overhangs (oh3, oh4, SB junctions);
+# heavy penalty (-10.0) for gene-derived boundary overhangs (oh1, oh2).
+PALINDROMIC_4NT <- c(
+  "AATT", "ATAT", "ACGT", "AGCT",
+  "TATA", "TTAA", "TGCA", "TCGA",
+  "CATG", "CTAG", "CCGG", "CGCG",
+  "GATC", "GTAC", "GCGC", "GGCC"
+)
+
 # --- Overhang Fidelity Threshold ---
 # Based on NEB Ligase Fidelity data (Potapov et al. 2018, 37C, 18h)
 # Fidelity = M[X][RC(X)] / sum(M[X][*]) (correct Watson-Crick pairing)

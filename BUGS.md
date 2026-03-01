@@ -216,10 +216,13 @@
 - **What:** Palindromic 4-nt overhangs (sequence = reverse complement) are problematic for Golden Gate assembly because they enable self-circularization and inverted-insertion products. None of the 16 palindromes appear in the Potapov HF Set 3, and under BsmBI-specific conditions, 7 of 16 have fidelity < 0.60 (worst: CGCG = 0.404). The current T4 ligase-based scoring dramatically overestimates their performance (e.g., GATC shows 0.950 in T4 but 0.582 under BsmBI), so most palindromes escape the existing -5.0 low-fidelity penalty.
 - **The 16 palindromes:** AATT, ATAT, ACGT, AGCT, TATA, TTAA, TGCA, TCGA, CATG, CTAG, CCGG, CGCG, GATC, GTAC, GCGC, GGCC
 - **BsmBI fidelity of worst palindromes:** CGCG (0.404), GCGC (0.432), GGCC (0.454), AGCT (0.512), CCGG (0.564), GATC (0.582), GTAC (0.584)
+- **Two-tier handling (penalty vs blacklist):**
+  - **Gene-derived overhangs (oh1, oh2 at tile boundaries):** HEAVY PENALTY (-10.0) but NOT impossible. A gene could end in TAA (stop codon) making the last tile's oh2 = TTAA (palindrome). Since gene-derived overhangs can't be changed, we penalize but still allow them as a last resort.
+  - **Freely-chosen overhangs (oh3, oh4, SB junction selections):** HARD BLACKLIST. Same treatment as homopolymers. These overhangs are chosen by the pipeline, so palindromes can always be avoided.
 - **Planned implementation:**
   1. Add `PALINDROMIC_4NT` constant in `constants.R` (all 16 palindromes)
-  2. Hard blacklist for freely-chosen overhangs (oh3, oh4, SB junctions) — same treatment as homopolymers
-  3. Heavy penalty (-10.0) in `precompute_boundary_scores()` for boundaries where oh1 or oh2 is palindromic
+  2. Hard blacklist for freely-chosen overhangs (oh3, oh4, SB junctions) — same treatment as `HOMOPOLYMER_4NT`
+  3. Heavy penalty (-10.0) in `precompute_boundary_scores()` for boundaries where oh1 or oh2 is palindromic — penalty makes DP avoid them, but doesn't make them impossible when no alternative exists
   4. Add palindrome check in superblock junction scoring (`09_wt_geneblock_design.R`)
 - **Impact on boundary selection:** Only 7-14% of codon boundaries have a palindromic oh. Every 31-codon window tested has 24+ palindrome-free positions. No boundary selection failures expected.
 - **Also consider:** Blacklisting/penalizing CG-rich non-palindromic overhangs with BsmBI fidelity < 0.50 (27 additional overhangs, e.g., CGCC: 0.355, CCGC: 0.378, CACC: 0.417). These are almost as bad as palindromes under BsmBI conditions.
