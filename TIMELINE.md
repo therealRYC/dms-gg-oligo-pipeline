@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-02 13:56:56 | 146 commits | 2026-01-29 to 2026-03-02
+> Auto-generated on 2026-03-02 14:03:04 | 147 commits | 2026-01-29 to 2026-03-02
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-02
 
+- Add R analysis scripts for overhang fidelity comparison
 - Add tatapov-to-CSV conversion with Pryor 2020 cross-validation
 - Add BUG-008: overhang scoring mixes data from different conditions
 - Update README config table and BUGS.md with implemented fixes
