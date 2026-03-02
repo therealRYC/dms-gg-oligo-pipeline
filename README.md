@@ -73,12 +73,19 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 |-----------|---------|-------------|
 | `max_oligo_length` | 300 | Twist oligo pool maximum (nt) |
 | `max_geneblock_length` | 1800 | Gene fragment synthesis maximum (nt) |
-| `barcode_length` | 20 | Total barcode length (nt) |
-| `min_hamming_distance` | 3 | Minimum Hamming distance between variant prefixes |
+| `barcode_length` | 20 | Total barcode length (nt); set to `"auto"` for auto-sizing |
 | `barcode_prefix_length` | 12 | Prefix length for Hamming-constrained region (nt) |
+| `min_hamming_distance` | 3 | Minimum Hamming distance between variant prefixes |
 | `barcodes_per_variant` | 10 | Number of unique barcodes per variant |
+| `barcode_gc_range` | [0.25, 0.75] | Acceptable GC content range for barcodes |
+| `barcode_max_homopolymer` | 4 | Maximum homopolymer run length in barcodes |
 | `boundary_method` | `"dp"` | `"dp"` (global optimum) or `"greedy"` (local search) |
+| `multi_k_search` | `true` | Try multiple tile counts to find best overhang quality |
+| `dp_k_range` | 5 | Search K_ideal +/- this many tile counts; stops early when gain < 0.5% |
 | `overhang_fidelity_threshold` | 0.95 | Minimum fidelity for auto-selected overhangs |
+| `auto_domesticate` | `true` | Automatically apply silent mutations to remove enzyme sites |
+| `simulate_assembly` | `false` | Run in-silico GG assembly simulation after design |
+| `simulation_samples_per_tile` | 1 | Variants per tile to simulate (when `simulate_assembly` is true) |
 
 ## Outputs
 
@@ -133,7 +140,8 @@ dms-gg-oligo-pipeline/
 ├── configs/                    # Pre-built gene-specific configs
 │   ├── grin2a.yaml             # GRIN2A (1464 codons)
 │   ├── akap11.yaml             # AKAP11 (1902 codons)
-│   └── trio.yaml               # TRIO (3098 codons)
+│   ├── trio.yaml               # TRIO (3098 codons)
+│   └── grin2a_long_cassette.yaml  # GRIN2A + P2A-EGFP (2133 nt cassette, split test)
 ├── R/
 │   ├── constants.R             # Enzyme definitions, synthesis limits, AA alphabet
 │   ├── utils.R                 # Shared helpers (reverse complement, GC content, etc.)
@@ -154,7 +162,7 @@ dms-gg-oligo-pipeline/
 │   └── 13_gg_simulator.R      # In-silico Golden Gate assembly simulator
 ├── data/
 │   ├── human_codon_usage.rds   # CoCoPUTs human codon usage table (Alexaki et al. 2019)
-│   ├── neb_overhang_fidelity/  # Potapov 2018 ligation fidelity matrices (BsaI, BsmBI)
+│   ├── neb_overhang_fidelity/  # Overhang fidelity data (see Data Sources below)
 │   ├── GRIN2A_NM_000833_CDS.fasta
 │   ├── AKAP11_NM_016248_CDS.fasta
 │   ├── TRIO_NM_007118_CDS.fasta
@@ -190,15 +198,34 @@ RUN_SLOW_TESTS=true Rscript -e 'testthat::test_dir("tests/testthat")'
 
 ## Validated Genes
 
-The pipeline has been validated on three genes of increasing size (barcodes_per_variant=1):
+The pipeline has been validated on three genes of increasing size plus a cassette-splitting test case. All runs used `barcodes_per_variant=1` (single barcode per variant) for fast validation:
 
 | Gene | Accession | Codons | Variants | Oligos | Gene Blocks | Tiles | Runtime |
 |------|-----------|--------|----------|--------|-------------|-------|---------|
 | GRIN2A | NM_000833 | 1,465 | 29,220 | 29,220 | 51 | 25 | ~4 min |
 | AKAP11 | NM_016248 | 1,902 | 37,960 | 37,960 | 64 | 31 | ~7 min |
 | TRIO | NM_007118 | 3,098 | 61,880 | 61,880 | 98 | 47 | ~8 min |
+| GRIN2A + P2A-EGFP | NM_000833 | 1,465 | 29,220 | 29,220 | 64 | 25 | ~4 min |
 
-Pre-built configs for each gene are in `configs/`. Runtimes measured on WSL2 with bpv=1; at bpv=10, expect ~10x longer for barcode generation.
+Pre-built configs for each gene are in `configs/`. Runtimes measured on WSL2 with `barcodes_per_variant=1`. At `barcodes_per_variant=10`, expect approximately 10x longer runtimes due to barcode generation and oligo assembly scaling (e.g., GRIN2A: ~45 min, AKAP11: ~77 min).
+
+The GRIN2A + P2A-EGFP test case (`configs/grin2a_long_cassette.yaml`) validates cassette splitting: the downstream cassette (P2A-EGFP + WPRE + spacer + hGH polyA = 2133 nt) exceeds the 1800 nt synthesis limit and is automatically split into 2 BsmBI-connected fragments.
+
+## Overhang Fidelity Data
+
+The `data/neb_overhang_fidelity/` directory contains pre-processed ligation fidelity data from two publications:
+
+| File | Source | Conditions | Description |
+|------|--------|------------|-------------|
+| `potapov_18h_overhangs.rds` | Potapov et al. 2018 | T4 ligase, 37°C, 18h | Individual fidelity for all 256 4-nt overhangs |
+| `potapov_18h_pairwise.rds` | Potapov et al. 2018 | T4 ligase, 37°C, 18h | 256x256 pairwise ligation matrix |
+| `bsai_overhangs.rds` | Pryor et al. 2020 | BsaI, 37°C, 5min/60°C cycling | BsaI enzyme-specific individual fidelity |
+| `bsai_pairwise.rds` | Pryor et al. 2020 | BsaI, 37°C, 5min/60°C cycling | BsaI enzyme-specific 256x256 pairwise matrix |
+| `bsmbi_overhangs.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | BsmBI enzyme-specific individual fidelity |
+| `bsmbi_pairwise.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | BsmBI enzyme-specific 256x256 pairwise matrix |
+| `high_fidelity_sets.rds` | Potapov et al. 2018 | T4, 25°C, 18h (SA-optimized) | Potapov Table 1 Set 3 (25 overhangs, 95.8% set fidelity) |
+
+The pipeline's OOGGA-based scoring uses BsmBI-specific data for individual fidelity (`P_fid`) and T4 data for efficiency (`P_eff`), with a bonus for overhangs in the Potapov HF Set 3. See `Plans/260226_overhang-architecture-redesign.md` for the full scoring formula.
 
 ## References
 

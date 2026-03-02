@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-02 07:59:03 | 143 commits | 2026-01-29 to 2026-03-02
+> Auto-generated on 2026-03-02 08:12:27 | 144 commits | 2026-01-29 to 2026-03-02
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-02
 
+- Update README config table and BUGS.md with implemented fixes
 - Add long cassette test config (GRIN2A + P2A-EGFP, 2133nt cassette)
 
 ### 2026-03-01
