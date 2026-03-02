@@ -104,6 +104,45 @@
 
 ## Open Bugs
 
+### BUG-008: Overhang scoring mixes data sources from different experimental conditions
+- **File:** `R/06_overhang_selection.R` (`oogga_score`, `precompute_boundary_scores`), `data/neb_overhang_fidelity/`
+- **Status:** OPEN — data provenance audit needed before deciding fix
+- **What:** The OOGGA-based overhang scoring formula draws P_fid, P_eff, and HF set bonus from three different experimental conditions, meaning the composite score doesn't correspond to any single experimentally-measured system.
+- **Current scoring formula:** `Score = P_fid(oh) * P_eff(oh) * (1 + w_hf * in_HF)`
+  - `P_fid` = `M[X][RC(X)] / sum(M[X][*])` — drawn from **BsmBI-specific cycling data** (Pryor 2020, BsmBI-v2, 42°C/16°C, 30 cycles)
+  - `P_eff` = `M[X][RC(X)] / max_Y(M[Y][RC(Y)])` — drawn from **T4 DNA Ligase static data** (Potapov 2018, 37°C, 18h)
+  - `in_HF` = membership in Potapov Table 1 Set 3 — optimized under **T4 DNA Ligase static conditions** (25°C, 18h)
+- **Why P_eff uses T4 instead of BsmBI:** BsmBI-specific data has very compressed dynamic range (nearly all overhangs have very low absolute ligation counts). P_eff computed from BsmBI data provides no discrimination between overhangs. T4 data has much higher signal and better separates overhangs by efficiency. This is a pragmatic workaround, not principled.
+- **Why this matters:** The three conditions (BsmBI cycling 42°C, T4 static 37°C, T4 static 25°C) produce different ligation profiles. Pryor 2020 showed cycling GG conditions produce higher mismatch frequencies and less A/T bias than static T4 ligation. Mixing them creates a composite heuristic that may not accurately predict actual assembly fidelity.
+- **Data provenance of all files in `data/neb_overhang_fidelity/`:**
+  | File | Source | Conditions | Used for |
+  |------|--------|------------|----------|
+  | `potapov_18h_overhangs.rds` | Potapov 2018 | T4, 37°C, 18h static | P_eff computation |
+  | `potapov_18h_pairwise.rds` | Potapov 2018 | T4, 37°C, 18h static | (pairwise matrix — synthetic Hamming model, NOT experimental) |
+  | `bsai_overhangs.rds` | Pryor 2020 | BsaI-HFv2, 37°C/16°C cycling | Not currently used in scoring |
+  | `bsai_pairwise.rds` | Pryor 2020 | BsaI-HFv2, 37°C/16°C cycling | (pairwise matrix — synthetic Hamming model) |
+  | `bsmbi_overhangs.rds` | Pryor 2020 | BsmBI-v2, 42°C/16°C cycling | P_fid computation |
+  | `bsmbi_pairwise.rds` | Pryor 2020 | BsmBI-v2, 42°C/16°C cycling | (pairwise matrix — synthetic Hamming model) |
+  | `high_fidelity_sets.rds` | Potapov 2018 Table 1 | T4, 25°C, 18h (SA-optimized) | HF set bonus |
+- **Pairwise matrices are synthetic:** All `*_pairwise.rds` files use a Hamming-distance model (generated in `data-raw/generate_data.R`), NOT experimental pairwise ligation data. Real pairwise matrices are available in the Pryor 2020 supplementary tables (S1-S5) but have not been imported.
+- **What NEB tools do:**
+  - **NEB Ligase Fidelity Viewer / GetSet / SplitSet:** Now offer BOTH T4 static (Potapov 2018) AND enzyme-specific cycling (Pryor 2020) data as user-selectable conditions. Users are advised to match dataset to their protocol (Sikkema et al. 2023, Current Protocols).
+  - **GetSet uses context-dependent set fidelity:** `p(O_i) = M[O_i][RC(O_i)] / sum_{j in S}(M[O_i][j])` where S = only overhangs in the current set. Our pipeline uses context-independent fidelity (all 256 in denominator), same as OOGGA.
+  - **OOGGA uses only Potapov 2018 T4 data**, NOT enzyme-specific data.
+- **Key finding from Pryor 2020:** "The choice among commonly used Type IIS restriction enzymes that generate the same overhang structure did not considerably impact assembly fidelity and bias" — fidelity is predominantly determined by T4 DNA Ligase, not the restriction enzyme. The main difference is **static T4 vs cycling GG conditions**, not BsaI vs BsmBI.
+- **Candidate fixes (to evaluate after finding supplementary tables):**
+  - **Option A — Standardize on T4 static (Potapov 2018):** Use T4 37°C/18h for both P_fid and P_eff. This is what OOGGA does and what the HF sets were optimized against. Simple, consistent, and NEB's stated default. Disadvantage: slightly less condition-matched to actual cycling GG protocol.
+  - **Option B — Standardize on BsmBI cycling (Pryor 2020):** Download Pryor 2020 S2 Table, compute both P_fid and P_eff from BsmBI cycling matrix. Most condition-matched to our actual assembly protocol (BsmBI at 42°C/16°C). Challenge: P_eff may have poor discrimination due to compressed dynamic range; HF sets would need re-derivation.
+  - **Option C — Cycling data for P_fid, T4 for P_eff + HF (current, formalized):** Keep the mixed approach but document it explicitly and verify the composite score correlates with actual assembly success. Least disruptive.
+  - **Option D — Import real pairwise matrices:** Replace synthetic Hamming-model pairwise data with actual experimental 256x256 matrices from Pryor 2020 supplementary. Enables context-dependent set fidelity (like NEB GetSet). Most accurate but highest implementation effort.
+- **Action needed:** Download Pryor 2020 supplementary tables (S1-S5, available from PLOS ONE article PMC7467295). Compare BsmBI cycling fidelity rankings to T4 rankings. If top ~25 overhangs are largely the same, Option A (standardize on T4) is safest. If rankings differ significantly, Option B or D warranted.
+- **References:**
+  - Potapov et al. 2018. ACS Synth Bio 7(11):2665-2674. PMID: 30335370
+  - Pryor et al. 2020. PLOS ONE 15(9):e0238592. PMID: 32877448. PMC7467295
+  - Sikkema et al. 2023. Current Protocols 3(9):e882. PMID: 37755329
+  - Mukundan & Madhusudhan 2025. bioRxiv 10.1101/2025.06.16.659877 (preprint)
+  - `tatapov` Python library (Edinburgh Genome Foundry) — repackages both Potapov/Pryor datasets
+
 ### BUG-003: Boundary codon mutations blanket-skipped (partial fix possible)
 - **File:** `run_pipeline.R:177-188`, `R/04_mutation_design.R`, `R/05_tiling.R:176-180`
 - **Status:** DEFERRED — workaround in place (F9 blanket skip), partial fix planned
