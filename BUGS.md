@@ -106,7 +106,7 @@
 
 ### BUG-008: Overhang scoring mixes data sources from different experimental conditions
 - **File:** `R/06_overhang_selection.R` (`oogga_score`, `precompute_boundary_scores`), `R/constants.R` (`DEFAULT_HF_BONUS_WEIGHT`), `data/neb_overhang_fidelity/`
-- **Status:** FIX PLANNED — standardize on BsmBI cycling P_fid only, drop P_eff and HF bonus
+- **Status:** FIX PLANNED — standardize on BsmBI cycling for both P_fid and P_eff, drop HF bonus
 - **What:** The OOGGA-based overhang scoring formula draws P_fid, P_eff, and HF set bonus from three different experimental conditions, meaning the composite score doesn't correspond to any single experimentally-measured system.
 - **Current scoring formula:** `Score = P_fid(oh) * P_eff(oh) * (1 + w_hf * in_HF)`
   - `P_fid` = `M[X][RC(X)] / sum(M[X][*])` — drawn from **BsmBI-specific cycling data** (Pryor 2020, BsmBI-v2, 42°C/16°C, 30 cycles)
@@ -122,50 +122,57 @@ Side-by-side comparison of T4 25°C/18h, BsaI cycling, and BsmBI cycling fidelit
 2. **T4 static overestimates fidelity** vs cycling for most overhangs, especially palindromes (2 palindromes pass 0.95 under T4, 0 under BsmBI).
 3. **Cycling zeros reflect real biology**, not sequencing depth artifacts. The restriction enzyme re-cuts misligated products during cycling, genuinely eliminating misligations that occur under T4-only static. NEB's GetSet tool uses cycling data directly and reports ~20 overhangs achieve perfect fidelity under BsmBI cycling (Pryor 2020). Both matrices are sparse (T4: 86% zeros, BsmBI: 94% zeros).
 4. **HF set bonus adds no value under cycling conditions.** SA optimization shows any reasonable 25-overhang set achieves ~1.0 set fidelity under BsmBI cycling — pairwise cross-ligation is negligible. The HF set bonus was designed to encode pairwise compatibility information, but cycling conditions already handle this biologically.
-5. **P_eff from T4 is unprincipled.** P_eff was sourced from T4 because BsmBI had "compressed dynamic range." But if P_fid under BsmBI already captures the relevant signal, adding a T4-derived efficiency metric just re-introduces the wrong experimental condition.
+5. **BsmBI P_eff has good dynamic range** (SD = 0.153, range 0.28–1.00), comparable to T4 P_eff (SD = 0.143, range 0.05–1.00). The earlier claim that BsmBI P_eff had "compressed dynamic range" was wrong. P_eff captures real yield information that P_fid misses — e.g., TTAA has P_fid = 0.945 (high accuracy) but P_eff = 0.298 (terrible yield), making it a high-fidelity bottleneck. Under BsmBI, Spearman(P_fid, P_eff) = 0.728 — correlated but with substantial independent signal.
+6. **P_eff from T4 was unprincipled.** Now that BsmBI P_eff is confirmed to have adequate dynamic range, there is no reason to source P_eff from a different experimental condition.
 
-#### Fix plan: Simplify to BsmBI cycling P_fid only
+#### Fix plan: Standardize on BsmBI cycling for both P_fid and P_eff, drop HF bonus
 
-**New scoring formula:** `Score = P_fid_bsmbi(oh)`
+**New scoring formula:** `Score = P_fid_bsmbi(oh) * P_eff_bsmbi(oh)`
 
-This is a dramatic simplification. The DP scores candidate gene split points by the BsmBI cycling individual fidelity of their 4-nt overhang — the single metric most relevant to actual assembly conditions. Penalties for palindromes, homopolymers, and low-fidelity overhangs remain unchanged (they use the same P_fid values).
+Both metrics computed from the same BsmBI cycling 256×256 matrix. P_fid captures accuracy (fraction of correct ligations). P_eff captures yield (correct ligation count relative to best overhang). The product rewards overhangs that are both accurate AND efficient. Penalties for palindromes, homopolymers, and low-fidelity overhangs remain unchanged.
 
 **Rationale:**
 - Matches our actual experimental conditions (BsmBI cycling protocol)
 - More conservative than T4 (overhangs that pass BsmBI thresholds will perform at least as well in practice)
 - NEB recommends matching dataset to protocol (Sikkema et al. 2023)
-- Eliminates data-source mixing entirely — one matrix, one metric
+- Eliminates data-source mixing entirely — one matrix, two derived metrics
 - Under cycling, pairwise misligation is negligible for well-chosen overhangs, so HF set bonus adds no discriminating power
+- P_eff adds real signal: identifies overhangs like TTAA that are high-fidelity but low-yield
 
 **What changes:**
 
 | Component | Current | New | File(s) |
 |-----------|---------|-----|---------|
-| `oogga_score()` | `P_fid * P_eff * (1 + w_hf * in_HF)` | `P_fid` | `R/06_overhang_selection.R` |
-| `eff_lookup` | Computed from T4 Potapov matrix | **Remove entirely** | `R/06_overhang_selection.R` |
+| `oogga_score()` | `P_fid_bsmbi * P_eff_t4 * (1 + w_hf * in_HF)` | `P_fid_bsmbi * P_eff_bsmbi` | `R/06_overhang_selection.R` |
+| `eff_lookup` | Computed from T4 Potapov pairwise matrix | **Compute from BsmBI cycling matrix** | `R/06_overhang_selection.R` |
 | `hf_set` / `load_high_fidelity_set()` | Potapov Table 1 Set 3 | **Remove from scoring** (keep data file for reference) | `R/06_overhang_selection.R` |
 | `DEFAULT_HF_BONUS_WEIGHT` | 0.5 | **Remove** | `R/constants.R` |
-| `compute_overhang_efficiency()` | Computes P_eff from pairwise matrix | **Remove** | `R/06_overhang_selection.R` |
-| `load_pairwise_matrix()` calls | T4 + BsaI + BsmBI Hamming-model matrices | **Remove from scoring path** | `R/06_overhang_selection.R` |
+| `compute_overhang_efficiency()` | Uses T4 pairwise matrix | **Rewrite to use BsmBI cycling matrix** | `R/06_overhang_selection.R` |
+| `load_pairwise_matrix()` calls | T4 + BsaI + BsmBI Hamming-model matrices | **Load only BsmBI cycling matrix** (for P_eff) | `R/06_overhang_selection.R` |
 | `potapov_18h_pairwise.rds` | Used for P_eff | **No longer loaded during scoring** | `data/neb_overhang_fidelity/` |
 | Config `hf_bonus_weight` | User-configurable | **Remove param** | `config_template.yaml`, `R/00_config.R` |
 
+**Data source for P_eff:** The BsmBI cycling matrix is already available as `data/neb_overhang_fidelity/bsmbi_pairwise.rds`. However, this file currently contains a **synthetic Hamming-distance model**, NOT the real experimental data. The real BsmBI cycling 256×256 matrix has been extracted from tatapov/Pryor 2020 and validated (see `260302_overhang_fidelity_comparison/data/bsmbi_cycling_matrix.csv`). **Action: import the real BsmBI matrix** as an RDS and use it for both P_fid and P_eff computation.
+
 **Functions to modify in `R/06_overhang_selection.R`:**
-1. **`oogga_score()`** → Simplify to just return `fid_lookup[oh]` (or rename to `overhang_score()`). Remove `eff_lookup`, `hf_set`, `w_hf` params.
-2. **`precompute_boundary_scores()`** → Remove `eff_lookup`, `hf_set`, and `bsai_matrix` params. Keep palindrome/homopolymer/low-fidelity penalties (these use BsmBI P_fid directly).
-3. **`search_tile_boundaries_dp()`** → Remove `eff_lookup` passthrough.
-4. **`find_best_superblock_splits()`** → Remove `eff_lookup` and `hf_set` from scoring.
-5. **`find_cassette_split_points()`** → Remove `eff_lookup` and `hf_set` from scoring.
-6. **`plan_assembly()`** → Remove `potapov_matrix`, `eff_lookup`, `hf_set` loading. Keep `oh_fidelity` (BsmBI).
-7. **`select_oh3_oh4()`** → Remove HF set preference logic; select by BsmBI P_fid only.
-8. **`compute_overhang_efficiency()`** → Delete function.
+1. **`oogga_score()`** → Simplify to `fid_lookup[oh] * eff_lookup[oh]`. Remove `hf_set`, `w_hf` params. Rename to `overhang_score()`.
+2. **`compute_overhang_efficiency()`** → Rewrite to take the BsmBI cycling matrix. Same formula: `P_eff(X) = M[X][RC(X)] / max_Y(M[Y][RC(Y)])`.
+3. **`precompute_boundary_scores()`** → Remove `hf_set` and `bsai_matrix` params. Keep `eff_lookup` (now sourced from BsmBI). Keep palindrome/homopolymer/low-fidelity penalties.
+4. **`search_tile_boundaries_dp()`** → Keep `eff_lookup` passthrough (now BsmBI-sourced).
+5. **`find_best_superblock_splits()`** → Remove `hf_set` from scoring; keep `eff_lookup`.
+6. **`find_cassette_split_points()`** → Remove `hf_set` from scoring; keep `eff_lookup`.
+7. **`plan_assembly()`** → Replace `potapov_matrix` loading with BsmBI matrix loading for P_eff. Remove `hf_set` from scoring path. Keep `oh_fidelity` (BsmBI) for P_fid.
+8. **`select_oh3_oh4()`** → Remove HF set preference logic; rank by `P_fid * P_eff` (both BsmBI).
+
+**Data file changes:**
+- **Import real BsmBI matrix:** Convert `260302_overhang_fidelity_comparison/data/bsmbi_cycling_matrix.csv` to `data/neb_overhang_fidelity/bsmbi_cycling_pairwise.rds` (real 256×256 experimental matrix from Pryor 2020)
+- **Keep existing files** for reference but stop loading synthetic Hamming-model pairwise matrices during scoring
 
 **Functions/data to keep (read-only reference):**
-- `load_high_fidelity_set()` — keep the function and data for documentation/comparison, but don't use in scoring
-- `load_pairwise_matrix()` — keep for potential future use (context-dependent set fidelity), but don't call during scoring
-- `data/neb_overhang_fidelity/*.rds` — keep all data files; they're small and useful for analysis
+- `load_high_fidelity_set()` — keep for documentation/comparison, don't use in scoring
+- `data/neb_overhang_fidelity/*.rds` — keep all existing files; they're small and useful for analysis
 
-**Tests to update:** Any test that passes `eff_lookup`, `hf_set`, or `w_hf` to scoring functions. Tests that check HF bonus behavior should be removed or replaced with tests verifying pure P_fid scoring.
+**Tests to update:** Any test that passes `hf_set` or `w_hf` to scoring functions. Tests that check HF bonus behavior should be removed or replaced with tests verifying `P_fid * P_eff` scoring. Tests using `eff_lookup` should verify the BsmBI source.
 
 **Existing penalties (UNCHANGED):**
 - Palindrome penalty: -10.0 for gene-derived overhangs (oh1, oh2) that are palindromic
