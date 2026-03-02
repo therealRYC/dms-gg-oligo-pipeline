@@ -1,23 +1,26 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-01 — Remove deprecated builtin_high_fidelity_overhangs alias
+# Last updated: 2026-03-02 — BUG-008: standardize scoring on BsmBI cycling P_fid * P_eff, drop HF bonus
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
 # Integrates tiling and overhang selection into a single planning system.
 # Instead of fixing tile boundaries geometrically and then scoring overhangs,
 # this module dynamically searches candidate boundary positions for ones where
-# the gene-derived overhangs fall within a pre-validated high-fidelity (HF) set
-# (Potapov 2018, Table 1 Set 3 — 25 overhangs, 95.8% predicted set fidelity).
+# the gene-derived overhangs score highest under BsmBI cycling conditions.
+#
+# Overhang scoring (BUG-008):
+#   Score = P_fid_bsmbi(oh) * P_eff_bsmbi(oh)
+# Both from BsmBI cycling matrix (Pryor et al. 2020). HF set bonus dropped.
 #
 # In the 3-enzyme architecture:
 # - oh1 (BsaI) and oh2 (BsmBI) are gene-derived at tile boundaries — optimized by boundary search
-# - oh3 is a fixed BsmBI overhang (same for all tiles) — selected from HF set
-# - oh4 is a fixed BsaI overhang (same for all tiles) — selected from HF set
+# - oh3 is a fixed BsmBI overhang (same for all tiles) — derived from promoter or score-selected
+# - oh4 is a fixed BsaI overhang (same for all tiles) — score-selected
 # - Superblock junction overhangs are gene-derived at split positions — optimized by split search
 #
 # Key references:
 #   Potapov et al. 2018, ACS Synth Bio — 256x256 ligation fidelity matrices, HF overhang sets
-#   Pryor et al. 2020, PLOS ONE — Enzyme-specific (BsaI, BsmBI) pairwise matrices
+#   Pryor et al. 2020, PLOS ONE — Enzyme-specific (BsaI, BsmBI) cycling pairwise matrices
 
 # =============================================================================
 # CONSTANTS
@@ -324,21 +327,21 @@ compute_set_fidelity <- function(overhangs, pairwise_matrix) {
 }
 
 # =============================================================================
-# OOGGA-STYLE SCORING
+# OVERHANG SCORING (BUG-008 fix)
 # =============================================================================
-# Scoring based on OOGGA (Mukundan & Madhusudhan 2025):
-#   score = P_fid(oh) * P_eff(oh) * (1 + w_hf * in_HF)
-# P_fid = M[X][RC(X)] / sum(M[X][*])  — individual fidelity (context-independent)
-# P_eff = M[X][RC(X)] / max(diag(M))  — relative ligation efficiency
-# w_hf  = bonus for Potapov Table 1 HF set membership (default 0.5)
+# Both metrics from BsmBI cycling matrix (Pryor et al. 2020):
+#   Score = P_fid_bsmbi(oh) * P_eff_bsmbi(oh)
+# P_fid = M[X][RC(X)] / sum(M[X][*])      — individual fidelity (accuracy)
+# P_eff = M[X][RC(X)] / max_Y(M[Y][RC(Y)])  — relative ligation efficiency (yield)
+# HF set bonus dropped: pairwise misligation negligible under cycling conditions.
 
 #' Compute relative ligation efficiency for all 256 overhangs
 #'
 #' Efficiency measures how much correct product you get (yield), distinct from
 #' fidelity (what fraction of product is correct). Extracted from the diagonal
-#' of the Potapov 256x256 pairwise ligation matrix: P_eff(X) = M[X][RC(X)] / max(diag(M)).
+#' of the 256x256 pairwise ligation matrix: P_eff(X) = M[X][X] / max(diag(M)).
 #'
-#' @param pairwise_matrix Named 256x256 matrix from load_pairwise_matrix().
+#' @param pairwise_matrix Named 256x256 matrix (diagonal = correct ligation).
 #'   M[X,Y] = ligation frequency of overhang X with RC(Y). Diagonal M[X,X]
 #'   gives the correct Watson-Crick ligation count.
 #' @return Named numeric vector of length 256 (overhang -> efficiency in [0, 1],
@@ -358,30 +361,31 @@ compute_overhang_efficiency <- function(pairwise_matrix) {
   eff
 }
 
-#' Compute OOGGA-style overhang score with HF set bonus
+#' Compute overhang score from BsmBI cycling fidelity and efficiency
 #'
-#' Combines ligation fidelity (P_fid) and efficiency (P_eff) multiplicatively,
-#' with an additive bonus for membership in the Potapov Table 1 high-fidelity set.
-#' This biases selection toward experimentally validated overhangs that have both
-#' high individual quality AND low cross-reactivity in multi-fragment assemblies.
+#' Combines ligation fidelity (P_fid) and efficiency (P_eff) multiplicatively.
+#' Both metrics sourced from BsmBI cycling data (Pryor et al. 2020), matching
+#' actual assembly conditions.
 #'
-#' Score = P_fid(oh) * P_eff(oh) * (1 + w_hf * in_HF)
+#' Score = P_fid(oh) * P_eff(oh)
 #'
 #' @param oh Character, 4-nt overhang sequence
 #' @param fid_lookup Named numeric vector (overhang -> fidelity, i.e. P_fid)
 #' @param eff_lookup Named numeric vector (overhang -> efficiency, i.e. P_eff)
-#' @param hf_set Character vector of Potapov Table 1 HF overhangs
-#' @param w_hf Numeric, HF bonus weight (default DEFAULT_HF_BONUS_WEIGHT = 0.5).
-#'   A value of 0.5 means HF overhangs get 1.5x their base score.
 #' @return Numeric score (higher is better)
-oogga_score <- function(oh, fid_lookup, eff_lookup, hf_set,
-                        w_hf = DEFAULT_HF_BONUS_WEIGHT) {
+overhang_score <- function(oh, fid_lookup, eff_lookup) {
   # Look up P_fid; fall back to 0.5 for unknown overhangs (conservative default)
   fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else 0.5
   # Look up P_eff; fall back to 0.5 for unknown overhangs
   eff <- if (oh %in% names(eff_lookup)) unname(eff_lookup[oh]) else 0.5
-  in_hf <- oh %in% hf_set
-  fid * eff * (1 + w_hf * in_hf)
+  fid * eff
+}
+
+#' @rdname overhang_score
+#' @description Legacy alias for overhang_score (backward compatibility).
+oogga_score <- function(oh, fid_lookup, eff_lookup, hf_set = character(0),
+                        w_hf = 0) {
+  overhang_score(oh, fid_lookup, eff_lookup)
 }
 
 # =============================================================================
@@ -398,14 +402,14 @@ oogga_score <- function(oh, fid_lookup, eff_lookup, hf_set,
 #' @param cds Domesticated gene sequence
 #' @param max_mutable_nt Max mutable region size in nt (from compute_max_tile_size)
 #' @param min_mutable_nt Min mutable region size in nt (default: max/3, floor 81)
-#' @param hf_set Character vector of high-fidelity overhangs
 #' @param oh_fidelity Data frame with overhang + fidelity columns
+#' @param eff_lookup Named numeric vector of overhang efficiencies (P_eff)
 #' @param search_window_K Search window: +/- K codons around ideal boundary
 #' @return Data frame with tile info including oh1/oh2 and HF membership
 search_tile_boundaries <- function(cds, max_mutable_nt,
                                    min_mutable_nt = NULL,
-                                   hf_set = NULL,
                                    oh_fidelity = NULL,
+                                   eff_lookup = NULL,
                                    search_window_K = 15L) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
@@ -414,8 +418,12 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
     min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
     min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L # codon boundary
   }
-  if (is.null(hf_set)) hf_set <- load_high_fidelity_set()
   if (is.null(oh_fidelity)) oh_fidelity <- load_overhang_fidelity("BsmBI")
+  if (is.null(eff_lookup)) {
+    # Load BsmBI cycling pairwise matrix and compute efficiency
+    bsmbi_pw <- load_pairwise_matrix("BsmBI")
+    eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+  }
 
   # Create lookup for individual fidelity
   fid_lookup <- oh_fidelity$fidelity
@@ -439,8 +447,8 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
       end_nt = gene_len,
       oh1_seq = oh1,
       oh2_seq = oh2,
-      oh1_in_hf = oh1 %in% hf_set,
-      oh2_in_hf = oh2 %in% hf_set,
+      oh1_in_hf = oh1 %in% POTAPOV_TABLE1_SET3_25,
+      oh2_in_hf = oh2 %in% POTAPOV_TABLE1_SET3_25,
       oh1_fidelity = unname(oh1_fid),
       oh2_fidelity = unname(oh2_fid),
       tile_seq = cds,
@@ -479,13 +487,12 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
       oh1_pos <- B * 3L + 1L
       oh1_seq <- substring(cds, oh1_pos, oh1_pos + 3L)
 
-      oh2_in <- oh2_seq %in% hf_set
-      oh1_in <- oh1_seq %in% hf_set
-      oh2_fid <- if (oh2_seq %in% names(fid_lookup)) fid_lookup[oh2_seq] else 0.5
-      oh1_fid <- if (oh1_seq %in% names(fid_lookup)) fid_lookup[oh1_seq] else 0.5
-
-      # Composite score: HF membership (10 pts each) + fidelity tiebreaker
-      score <- 10 * (oh2_in + oh1_in) + unname(oh2_fid) + unname(oh1_fid)
+      oh2_in <- oh2_seq %in% POTAPOV_TABLE1_SET3_25
+      oh1_in <- oh1_seq %in% POTAPOV_TABLE1_SET3_25
+      # Score = P_fid * P_eff for each boundary overhang (BUG-008)
+      oh2_score <- overhang_score(oh2_seq, fid_lookup, eff_lookup)
+      oh1_score <- overhang_score(oh1_seq, fid_lookup, eff_lookup)
+      score <- oh2_score + oh1_score
 
       candidates[[length(candidates) + 1L]] <- list(
         pos = B, oh2 = oh2_seq, oh1_next = oh1_seq,
@@ -521,7 +528,7 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
       break
     }
 
-    # Fallback: relax HF requirement, just pick best valid size
+    # Fallback: relax constraints, pick best valid size
     if (!picked) {
       for (cand in candidates) {
         tile_before_size <- (cand$pos - prev_end) * 3L
@@ -593,8 +600,8 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
     tiles$end_nt[i] <- en
     tiles$oh1_seq[i] <- oh1
     tiles$oh2_seq[i] <- oh2
-    tiles$oh1_in_hf[i] <- oh1 %in% hf_set
-    tiles$oh2_in_hf[i] <- oh2 %in% hf_set
+    tiles$oh1_in_hf[i] <- oh1 %in% POTAPOV_TABLE1_SET3_25
+    tiles$oh2_in_hf[i] <- oh2 %in% POTAPOV_TABLE1_SET3_25
     tiles$oh1_fidelity[i] <- oh1_fid
     tiles$oh2_fidelity[i] <- oh2_fid
     tiles$tile_seq[i] <- substring(cds, sn, en)
@@ -621,16 +628,11 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
 #' Precompute boundary scores for all valid codon positions
 #'
 #' For each codon position b in the gene, extract the gene-derived overhangs
-#' (oh1, oh2) and compute a composite OOGGA-style score:
-#'   score = oogga_score(oh1) + oogga_score(oh2) + pairwise_bonus(oh1, oh_L) + penalty
-#'
-#' The pairwise bonus uses context-dependent set fidelity for oh1 with oh_L in the
-#' BsaI reaction, which is MORE accurate than OOGGA's context-independent approach.
+#' (oh1, oh2) and compute a composite score:
+#'   score = overhang_score(oh1) + overhang_score(oh2) + penalty
 #'
 #' @param cds Domesticated gene sequence
-#' @param hf_set Character vector of high-fidelity overhangs
 #' @param oh_fidelity Data frame with overhang + fidelity columns
-#' @param bsai_matrix 256x256 BsaI pairwise ligation matrix (or NULL)
 #' @param eff_lookup Named numeric vector (overhang -> efficiency from
 #'   compute_overhang_efficiency()). If NULL, efficiency is treated as 1.0.
 #' @param blacklisted_oh2 Character vector of oh2 sequences to invalidate
@@ -640,8 +642,7 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
 #'   computed at the EXTENDED tile end (b + overlap_codons), not at the core
 #'   boundary (b). Default 0 (no overlap, oh2 at core boundary).
 #' @return List with vectors: oh1_seq, oh2_seq, score, valid (all length n_codons)
-precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
-                                       bsai_matrix = NULL,
+precompute_boundary_scores <- function(cds, oh_fidelity,
                                        eff_lookup = NULL,
                                        blacklisted_oh2 = NULL,
                                        overlap_codons = 0L) {
@@ -695,31 +696,18 @@ precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
     }
     valid[b] <- TRUE
 
-    oh1_in <- oh1 %in% hf_set
-    oh2_in <- oh2 %in% hf_set
+    oh1_in <- oh1 %in% POTAPOV_TABLE1_SET3_25
+    oh2_in <- oh2 %in% POTAPOV_TABLE1_SET3_25
     oh1_hf[b] <- oh1_in
     oh2_hf[b] <- oh2_in
 
-    # OOGGA-style base scores for both gene-derived overhangs
-    oh1_base <- oogga_score(oh1, fid_lookup, eff_lookup, hf_set)
-    oh2_base <- oogga_score(oh2, fid_lookup, eff_lookup, hf_set)
-
-    # oh1 pairwise fidelity bonus with oh_L (BsaI reaction context).
-    # This is context-dependent scoring — more accurate than OOGGA's
-    # context-independent P_fid, so we add it as a bonus on top.
-    if (!is.null(bsai_matrix) && oh1 %in% rownames(bsai_matrix) &&
-      oh_L %in% rownames(bsai_matrix)) {
-      sf <- compute_set_fidelity(c(oh_L, oh1), bsai_matrix)
-      oh1_pw_bonus <- sf$set_fidelity
-    } else {
-      oh1_pw_bonus <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else 0.5
-    }
+    # Base scores: P_fid * P_eff (both from BsmBI cycling, BUG-008)
+    oh1_base <- overhang_score(oh1, fid_lookup, eff_lookup)
+    oh2_base <- overhang_score(oh2, fid_lookup, eff_lookup)
 
     # Low-fidelity safety floor: penalize boundaries where either overhang
-    # has very low individual fidelity (< 0.50 under BsmBI/BsaI conditions).
-    # The threshold was 0.80 when using built-in T4 data, but under enzyme-
-    # specific GG conditions only ~50 overhangs exceed 0.80, so we use 0.50
-    # to catch the truly awful CG-rich overhangs (CGCC: 0.35, CCGC: 0.38).
+    # has very low individual fidelity (< 0.50 under BsmBI cycling conditions).
+    # Catches truly awful CG-rich overhangs (CGCC: 0.35, CCGC: 0.38).
     fid_penalty <- 0.0
     oh1_ind_fid <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else 0.5
     oh2_ind_fid <- if (oh2 %in% names(fid_lookup)) unname(fid_lookup[oh2]) else 0.5
@@ -733,7 +721,7 @@ precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
       palindrome_penalty <- -10.0
     }
 
-    scores[b] <- oh1_base + oh2_base + oh1_pw_bonus + fid_penalty + palindrome_penalty
+    scores[b] <- oh1_base + oh2_base + fid_penalty + palindrome_penalty
   }
 
   precomp_elapsed <- (proc.time() - precomp_start)[["elapsed"]]
@@ -865,9 +853,7 @@ dp_solve_k <- function(K, n_codons, min_codons, max_codons,
 #' @param cds Domesticated gene sequence
 #' @param max_mutable_nt Max mutable region size in nt (from compute_max_tile_size)
 #' @param min_mutable_nt Min mutable region size in nt (default: max/3, floor 81)
-#' @param hf_set Character vector of high-fidelity overhangs
 #' @param oh_fidelity Data frame with overhang + fidelity columns
-#' @param bsai_matrix BsaI 256x256 pairwise ligation matrix (for oh1 scoring)
 #' @param multi_k Logical: try multiple tile counts? (default TRUE)
 #' @param dp_k_range Integer: search K_ideal +/- dp_k_range (default 5).
 #'   Larger values explore more tile counts but take longer.
@@ -878,9 +864,7 @@ dp_solve_k <- function(K, n_codons, min_codons, max_codons,
 #' @return Data frame with tile info (same format as search_tile_boundaries)
 search_tile_boundaries_dp <- function(cds, max_mutable_nt,
                                       min_mutable_nt = NULL,
-                                      hf_set = NULL,
                                       oh_fidelity = NULL,
-                                      bsai_matrix = NULL,
                                       multi_k = TRUE,
                                       dp_k_range = 5L,
                                       k_range = NULL,
@@ -894,11 +878,7 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
     min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
     min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
   }
-  if (is.null(hf_set)) hf_set <- load_high_fidelity_set()
   if (is.null(oh_fidelity)) oh_fidelity <- load_overhang_fidelity("BsmBI")
-  if (is.null(bsai_matrix)) {
-    bsai_matrix <- tryCatch(load_pairwise_matrix("BsaI"), error = function(e) NULL)
-  }
 
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
@@ -934,8 +914,8 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
       end_nt = gene_len,
       oh1_seq = oh1,
       oh2_seq = oh2,
-      oh1_in_hf = oh1 %in% hf_set,
-      oh2_in_hf = oh2 %in% hf_set,
+      oh1_in_hf = oh1 %in% POTAPOV_TABLE1_SET3_25,
+      oh2_in_hf = oh2 %in% POTAPOV_TABLE1_SET3_25,
       oh1_fidelity = unname(oh1_fid),
       oh2_fidelity = unname(oh2_fid),
       tile_seq = cds,
@@ -946,7 +926,7 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
 
   # Precompute scores for all boundary positions
   # Pass overlap_codons so oh2 is computed at the EXTENDED tile end
-  precomp <- precompute_boundary_scores(cds, hf_set, oh_fidelity, bsai_matrix,
+  precomp <- precompute_boundary_scores(cds, oh_fidelity,
     eff_lookup = eff_lookup,
     blacklisted_oh2 = blacklisted_oh2,
     overlap_codons = overlap_codons
@@ -1019,7 +999,7 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
   if (is.null(best_result)) {
     cli::cli_alert_warning("DP found no valid solution; falling back to greedy search.")
     return(search_tile_boundaries(
-      cds, max_mutable_nt, min_mutable_nt, hf_set, oh_fidelity
+      cds, max_mutable_nt, min_mutable_nt, oh_fidelity, eff_lookup
     ))
   }
 
@@ -1083,8 +1063,8 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
     tiles$end_nt[i] <- en
     tiles$oh1_seq[i] <- oh1
     tiles$oh2_seq[i] <- oh2
-    tiles$oh1_in_hf[i] <- oh1 %in% hf_set
-    tiles$oh2_in_hf[i] <- oh2 %in% hf_set
+    tiles$oh1_in_hf[i] <- oh1 %in% POTAPOV_TABLE1_SET3_25
+    tiles$oh2_in_hf[i] <- oh2 %in% POTAPOV_TABLE1_SET3_25
     tiles$oh1_fidelity[i] <- oh1_fid
     tiles$oh2_fidelity[i] <- oh2_fid
     tiles$tile_seq[i] <- substring(cds, sn, en)
@@ -1124,14 +1104,13 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
 #' Optimize superblock split positions for oversized gene blocks (greedy)
 #'
 #' Greedy search for split positions within the block where the gene-derived
-#' junction overhang scores highest under OOGGA-style scoring.
+#' junction overhang scores highest.
 #'
 #' @param cds Full domesticated gene sequence
 #' @param block_start_nt Start position in gene (1-based)
 #' @param block_end_nt End position in gene (1-based)
 #' @param max_sub_length Max synthesis length for sub-blocks
 #' @param existing_ohs Overhangs already committed in this reaction
-#' @param hf_set High-fidelity overhang set
 #' @param oh_fidelity Fidelity data frame
 #' @param search_window Search window in codons (default 50)
 #' @param extra_content_length Additional content appended to the last sub-block
@@ -1142,7 +1121,7 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
 #' @return Data frame with split positions and junction overhangs
 optimize_split_points <- function(cds, block_start_nt, block_end_nt,
                                   max_sub_length, existing_ohs,
-                                  hf_set, oh_fidelity,
+                                  oh_fidelity,
                                   search_window = 50L,
                                   extra_content_length = 0L,
                                   eff_lookup = NULL) {
@@ -1198,9 +1177,9 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 
         if (junction_oh %in% local_existing) next # collision
 
-        in_hf <- junction_oh %in% hf_set
+        in_hf <- junction_oh %in% POTAPOV_TABLE1_SET3_25
         fid <- if (junction_oh %in% names(fid_lookup)) unname(fid_lookup[junction_oh]) else 0.5
-        score <- oogga_score(junction_oh, fid_lookup, eff_lookup, hf_set)
+        score <- overhang_score(junction_oh, fid_lookup, eff_lookup)
 
         if (score > best$score) {
           best <- list(pos = split_nt, oh = junction_oh, in_hf = in_hf, fid = fid, score = score)
@@ -1248,13 +1227,12 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 
 #' DP-optimize superblock split positions within a gene region
 #'
-#' Finds the set of split positions maximizing total OOGGA-style junction score,
+#' Finds the set of split positions maximizing total junction score,
 #' using exactly K splits (where K = minimum splits needed for all sub-blocks
 #' to fit within max_sub_length). Uses a layered DP analogous to dp_solve_k()
 #' for tile boundaries.
 #'
-#' OOGGA scoring per candidate:
-#'   score(p) = P_fid(oh) * P_eff(oh) * (1 + w_hf * in_HF)
+#' Scoring per candidate: score(p) = P_fid(oh) * P_eff(oh) (BsmBI cycling)
 #'
 #' Constraint: every sub-block's gene content <= max_sub_length nt, where
 #' the last sub-block also carries extra_content_length (e.g., PolIII).
@@ -1268,7 +1246,6 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 #'   (e.g., PolIII promoter length for 3'WT blocks). Default 0.
 #' @param exclude_ohs Character vector of overhangs to exclude (already committed
 #'   in the same GG reaction — e.g., oh3 + all oh2 values for BsmBI)
-#' @param hf_set High-fidelity overhang set
 #' @param oh_fidelity Fidelity data frame (overhang + fidelity columns)
 #' @param min_sub_length Minimum gene content per sub-block (default 0, no minimum).
 #'   When > 0, the DP rejects transitions that produce sub-blocks shorter than this.
@@ -1280,7 +1257,7 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 #' @return Data frame with split_nt, junction_oh, junction_in_hf, junction_fidelity
 dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
                                        max_sub_length, extra_content_length = 0L,
-                                       exclude_ohs, hf_set, oh_fidelity,
+                                       exclude_ohs, oh_fidelity,
                                        min_sub_length = 0L,
                                        tile_boundary_nts = integer(0),
                                        eff_lookup = NULL) {
@@ -1360,11 +1337,11 @@ dp_solve_superblock_splits <- function(cds, region_start_nt, region_end_nt,
     }
     cand_valid[ci] <- TRUE
 
-    in_hf <- oh %in% hf_set
+    in_hf <- oh %in% POTAPOV_TABLE1_SET3_25
     fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else 0.5
     cand_in_hf[ci] <- in_hf
     cand_fid[ci] <- fid
-    cand_score[ci] <- oogga_score(oh, fid_lookup, eff_lookup, hf_set)
+    cand_score[ci] <- overhang_score(oh, fid_lookup, eff_lookup)
 
     # Soft penalty: prefer splits away from tile boundaries.
     # When a global split falls just inside a narrow tile's WT region, it creates
@@ -1559,7 +1536,6 @@ oh_collides <- function(oh_a, oh_b) {
 #'   oh4 collision detection. When provided, SB boundary overhangs are
 #'   also checked against oh4 (BsaI-level collision).
 #' @param oh_fidelity Optional fidelity data frame (reserved for future use)
-#' @param hf_set Optional HF overhang set (reserved for future use)
 #' @return List with:
 #'   \item{n_superblocks}{Integer, number of superblocks}
 #'   \item{superblocks}{Data frame: sb_id, start_tile, end_tile, gene_content}
@@ -1570,8 +1546,7 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
                                        max_sub_length,
                                        oh3 = NULL,
                                        oh4 = NULL,
-                                       oh_fidelity = NULL,
-                                       hf_set = NULL) {
+                                       oh_fidelity = NULL) {
   n_tiles <- nrow(tiles)
 
   # --- Input validation ---
@@ -2050,21 +2025,21 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
   }
 
-  # Load data (pairwise matrices loaded early for DP scoring)
-  # Use BsmBI-specific fidelity for boundary scoring (OPT-003): BsmBI is the
-  # bottleneck enzyme (more overhangs per reaction) and is slightly more
-  # conservative than BsaI (r=0.976 between them). The built-in T4 ligase data
-  # dramatically overestimates fidelity under GG conditions (206/256 overhangs
-  # appear >0.80 under T4 but are <0.80 under BsmBI).
-  hf_set <- load_high_fidelity_set()
+  # Load data
+  # BsmBI cycling fidelity (Pryor 2020) for boundary scoring — matches actual
+  # assembly conditions and is more conservative than T4 static data.
+  hf_set <- load_high_fidelity_set() # informational only, not used in scoring
   oh_fidelity <- load_overhang_fidelity("BsmBI")
+
+  # Load real BsmBI cycling 256x256 matrix for P_eff computation (BUG-008).
+  # This replaces the old T4 Potapov matrix — both P_fid and P_eff now come
+  # from the same experimental condition (BsmBI cycling, Pryor et al. 2020).
+  bsmbi_cycling_matrix <- load_pairwise_matrix("bsmbi_cycling")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_cycling_matrix)
+
+  # Pairwise matrices for Phase 6 validation (set fidelity per reaction)
   bsai_matrix <- load_pairwise_matrix("BsaI")
   bsmbi_matrix <- load_pairwise_matrix("BsmBI")
-
-  # Compute OOGGA efficiency metric from the generic Potapov pairwise matrix.
-  # P_eff(X) = M[X][RC(X)] / max(diag(M)) — relative ligation efficiency.
-  potapov_matrix <- load_pairwise_matrix("potapov_18h")
-  eff_lookup <- compute_overhang_efficiency(potapov_matrix)
 
   # Phase 1-3: Search tile boundaries (with iterative SB-aware refinement, OPT-005)
   #
@@ -2086,14 +2061,12 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     }
 
     if (boundary_method == "dp") {
-      if (sb_iter == 1L) cli::cli_h3("Searching tile boundaries for HF overhangs (DP optimizer)")
+      if (sb_iter == 1L) cli::cli_h3("Searching tile boundaries (DP optimizer)")
       tiles <- search_tile_boundaries_dp(
         cds = cds,
         max_mutable_nt = max_mutable_nt,
         min_mutable_nt = min_mutable_nt,
-        hf_set = hf_set,
         oh_fidelity = oh_fidelity,
-        bsai_matrix = bsai_matrix,
         multi_k = multi_k,
         dp_k_range = dp_k_range,
         overlap_codons = overlap_codons,
@@ -2101,13 +2074,13 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         blacklisted_oh2 = if (length(blacklisted_oh2) > 0) blacklisted_oh2 else NULL
       )
     } else {
-      if (sb_iter == 1L) cli::cli_h3("Searching tile boundaries for HF overhangs (greedy)")
+      if (sb_iter == 1L) cli::cli_h3("Searching tile boundaries (greedy)")
       tiles <- search_tile_boundaries(
         cds = cds,
         max_mutable_nt = max_mutable_nt,
         min_mutable_nt = min_mutable_nt,
-        hf_set = hf_set,
         oh_fidelity = oh_fidelity,
+        eff_lookup = eff_lookup,
         search_window_K = search_window_K
       )
       # Greedy doesn't support blacklisting — can't iterate
@@ -2124,8 +2097,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     fid_lookup_iter <- oh_fidelity$fidelity
     names(fid_lookup_iter) <- oh_fidelity$overhang
 
-    # Quick oh3/oh4 selection for collision check (same logic as below, but
-    # we need these before we can check SB collisions)
+    # Quick oh3/oh4 selection for collision check (same logic as Phase 4 below,
+    # but we need these before we can check SB collisions)
     oh3_iter <- NULL
     oh4_iter <- NULL
     if (!is.null(manual_oh3) && !is.null(manual_oh4)) {
@@ -2140,19 +2113,24 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         !(promoter_derived_iter$oh3 %in% PALINDROMIC_4NT)) {
         oh3_iter <- promoter_derived_iter$oh3
       } else {
-        oh3_cands <- hf_set[!(hf_set %in% oh3_exclude)]
+        # Rank by P_fid * P_eff (BUG-008: no HF preference)
+        oh3_cands <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.50]
+        oh3_cands <- oh3_cands[!(oh3_cands %in% oh3_exclude)]
         oh3_cands <- oh3_cands[!(oh3_cands %in% HOMOPOLYMER_4NT)]
         oh3_cands <- oh3_cands[!(oh3_cands %in% PALINDROMIC_4NT)]
         if (length(oh3_cands) > 0) {
-          oh3_iter <- oh3_cands[which.max(unname(fid_lookup_iter[oh3_cands]))]
+          oh3_scores <- unname(fid_lookup_iter[oh3_cands]) * unname(eff_lookup[oh3_cands])
+          oh3_iter <- oh3_cands[which.max(oh3_scores)]
         }
       }
       oh4_exclude <- unique(c(all_oh1, vapply(all_oh1, reverse_complement, character(1))))
-      oh4_cands <- hf_set[!(hf_set %in% oh4_exclude)]
+      oh4_cands <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.50]
+      oh4_cands <- oh4_cands[!(oh4_cands %in% oh4_exclude)]
       oh4_cands <- oh4_cands[!(oh4_cands %in% HOMOPOLYMER_4NT)]
       oh4_cands <- oh4_cands[!(oh4_cands %in% PALINDROMIC_4NT)]
       if (length(oh4_cands) > 0) {
-        oh4_iter <- oh4_cands[which.max(unname(fid_lookup_iter[oh4_cands]))]
+        oh4_scores <- unname(fid_lookup_iter[oh4_cands]) * unname(eff_lookup[oh4_cands])
+        oh4_iter <- oh4_cands[which.max(oh4_scores)]
       }
     }
 
@@ -2277,60 +2255,39 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         " (fidelity=", round(oh3_fid, 3), ")"
       ))
     } else {
-      # Promoter-derived oh3 not usable — fall back to HF set selection
+      # Promoter-derived oh3 not usable — fall back to score-based selection
       if (is.null(promoter_derived)) {
-        cli::cli_alert_warning("PolIII promoter too short for oh3 derivation. Falling back to HF set.")
+        cli::cli_alert_warning("PolIII promoter too short for oh3 derivation. Falling back to score-based selection.")
       } else {
         cli::cli_alert_warning(paste0(
           "Promoter-derived oh3=", promoter_derived$oh3,
-          " collides with oh2, is homopolymer, or is palindromic. Falling back to HF set."
+          " collides with oh2, is homopolymer, or is palindromic. Falling back to score-based selection."
         ))
       }
-      strategy_used <- "hf_set"
-      oh3_candidates <- hf_set[!(hf_set %in% oh3_exclude)]
+      strategy_used <- "score_based"
+      # Select by P_fid * P_eff (BUG-008: no HF set preference)
+      oh3_candidates <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.50]
+      oh3_candidates <- oh3_candidates[!(oh3_candidates %in% oh3_exclude)]
       oh3_candidates <- oh3_candidates[!(oh3_candidates %in% HOMOPOLYMER_4NT)]
       oh3_candidates <- oh3_candidates[!(oh3_candidates %in% PALINDROMIC_4NT)]
 
-      if (length(oh3_candidates) > 0) {
-        oh3_fids <- unname(fid_lookup[oh3_candidates])
-        oh3 <- oh3_candidates[which.max(oh3_fids)]
-        oh3_in_hf <- TRUE
-      } else {
-        cli::cli_alert_warning("No HF-set oh3 candidate available. Using pairwise fallback.")
-        strategy_used <- "pairwise_matrix"
-        all_ohs <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.90]
-        all_ohs <- all_ohs[!(all_ohs %in% oh3_exclude)]
-        all_ohs <- all_ohs[!(all_ohs %in% HOMOPOLYMER_4NT)]
-        all_ohs <- all_ohs[!(all_ohs %in% PALINDROMIC_4NT)]
-        if (length(all_ohs) == 0) stop("Cannot find any valid oh3 candidate.")
-        oh3_fids <- unname(fid_lookup[all_ohs])
-        oh3 <- all_ohs[which.max(oh3_fids)]
-        oh3_in_hf <- FALSE
-      }
+      if (length(oh3_candidates) == 0) stop("Cannot find any valid oh3 candidate.")
+      oh3_scores <- unname(fid_lookup[oh3_candidates]) * unname(eff_lookup[oh3_candidates])
+      oh3 <- oh3_candidates[which.max(oh3_scores)]
+      oh3_in_hf <- oh3 %in% hf_set
     }
 
-    # --- oh4: auto-select from HF set (unchanged logic) ---
+    # --- oh4: auto-select by P_fid * P_eff (BUG-008: no HF preference) ---
     oh4_exclude <- unique(c(all_oh1, vapply(all_oh1, reverse_complement, character(1))))
-    oh4_candidates <- hf_set[!(hf_set %in% oh4_exclude)]
+    oh4_candidates <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.50]
+    oh4_candidates <- oh4_candidates[!(oh4_candidates %in% oh4_exclude)]
     oh4_candidates <- oh4_candidates[!(oh4_candidates %in% HOMOPOLYMER_4NT)]
     oh4_candidates <- oh4_candidates[!(oh4_candidates %in% PALINDROMIC_4NT)]
 
-    if (length(oh4_candidates) > 0) {
-      oh4_fids <- unname(fid_lookup[oh4_candidates])
-      oh4 <- oh4_candidates[which.max(oh4_fids)]
-      oh4_in_hf <- TRUE
-    } else {
-      cli::cli_alert_warning("No HF-set oh4 candidate available. Using pairwise fallback.")
-      if (strategy_used != "pairwise_matrix") strategy_used <- "hf_set"
-      all_ohs <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.90]
-      all_ohs <- all_ohs[!(all_ohs %in% oh4_exclude)]
-      all_ohs <- all_ohs[!(all_ohs %in% HOMOPOLYMER_4NT)]
-      all_ohs <- all_ohs[!(all_ohs %in% PALINDROMIC_4NT)]
-      if (length(all_ohs) == 0) stop("Cannot find any valid oh4 candidate.")
-      oh4_fids <- unname(fid_lookup[all_ohs])
-      oh4 <- all_ohs[which.max(oh4_fids)]
-      oh4_in_hf <- FALSE
-    }
+    if (length(oh4_candidates) == 0) stop("Cannot find any valid oh4 candidate.")
+    oh4_scores <- unname(fid_lookup[oh4_candidates]) * unname(eff_lookup[oh4_candidates])
+    oh4 <- oh4_candidates[which.max(oh4_scores)]
+    oh4_in_hf <- oh4 %in% hf_set
   }
 
   cli::cli_alert_success(paste0(

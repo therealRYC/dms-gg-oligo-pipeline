@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-02 14:53:27 | 152 commits | 2026-01-29 to 2026-03-02
+> Auto-generated on 2026-03-02 15:11:40 | 153 commits | 2026-01-29 to 2026-03-02
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-02
 
+- BUG-008: remove hf_set from scoring paths, use overhang_score throughout
 - Update BUG-008 fix plan: use BsmBI cycling for both P_fid and P_eff
 - Update BUG-008 with fix plan: simplify to BsmBI cycling P_fid only
 - Correct README recommendation: use BsmBI cycling data
