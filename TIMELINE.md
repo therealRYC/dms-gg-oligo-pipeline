@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-02 15:15:21 | 154 commits | 2026-01-29 to 2026-03-02
+> Auto-generated on 2026-03-02 15:20:42 | 155 commits | 2026-01-29 to 2026-03-02
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-02
 
+- Mark BUG-008 as FIXED in BUGS.md
 - Update tests for BUG-008: remove hf_set from function calls, update scoring tests
 - BUG-008: remove hf_set from scoring paths, use overhang_score throughout
 - Update BUG-008 fix plan: use BsmBI cycling for both P_fid and P_eff
