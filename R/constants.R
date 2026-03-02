@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-26 — Add DEFAULT_HF_BONUS_WEIGHT for OOGGA scoring
+# Last updated: 2026-03-02 — Remove DEFAULT_HF_BONUS_WEIGHT; update scoring formula (BUG-008)
 # constants.R — Enzyme definitions, synthesis limits, amino acid alphabet
 # DMS Golden Gate Oligo Pipeline
 
@@ -125,13 +125,13 @@ PALINDROMIC_4NT <- c(
 # 0.85 threshold gives ~224 overhangs
 DEFAULT_FIDELITY_THRESHOLD <- 0.95
 
-# --- OOGGA Scoring Weights ---
-# Based on OOGGA (Mukundan & Madhusudhan 2025) scoring approach:
-#   score = P_fid(oh) * P_eff(oh) * (1 + w_hf * in_HF)
-# P_fid = individual fidelity (context-independent, from Potapov 2018)
-# P_eff = relative ligation efficiency (diagonal / max diagonal)
-# w_hf  = bonus weight for membership in Potapov Table 1 HF set
-DEFAULT_HF_BONUS_WEIGHT <- 0.5
+# --- Overhang Scoring (BUG-008 fix) ---
+# Scoring formula: Score = P_fid_bsmbi(oh) * P_eff_bsmbi(oh)
+# Both metrics from the BsmBI cycling 256x256 matrix (Pryor et al. 2020):
+#   P_fid = M[X][RC(X)] / sum(M[X][*])    — individual fidelity (accuracy)
+#   P_eff = M[X][RC(X)] / max_Y(M[Y][RC(Y)]) — relative ligation efficiency (yield)
+# HF set bonus dropped: under cycling conditions, pairwise misligation is
+# negligible and any 25-OH set achieves ~1.0 set fidelity.
 
 # --- Barcodes Per Variant ---
 DEFAULT_BARCODES_PER_VARIANT <- 10L
