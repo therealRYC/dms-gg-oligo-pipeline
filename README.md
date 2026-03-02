@@ -112,7 +112,7 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 3. **Enzyme site scan** (`02_enzyme_site_scan.R`) -- Find endogenous BsaI/BsmBI/PaqCI sites, suggest silent mutations for domestication
 4. **Codon table** (`03_codon_table.R`) -- Human codon usage table, preferred codon lookup
 5. **Mutation design** (`04_mutation_design.R`) -- Generate all single-AA substitutions + stops using preferred human codons
-6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- DP optimizer for tile boundary placement maximizing overhang quality; oh3/oh4 auto-selection from NEB high-fidelity sets; superblock split-point optimization
+6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- DP optimizer for tile boundary placement maximizing overhang quality (P_fid * P_eff from BsmBI cycling data); oh3/oh4 auto-selection by score ranking; superblock split-point optimization
 7. **Barcode design** (`07_barcode_design.R`) -- Unified hierarchical prefix-suffix barcodes with Hamming distance guarantee on prefixes
 8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles)
 9. **Gene block design** (`09_wt_geneblock_design.R`) -- WT gene blocks with correct flanking enzyme sites; superblock splitting for fragments >1800 bp
@@ -125,7 +125,7 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 
 **Mutation strategy**: Fully specified codons (no degenerate NNK/NNS). Each oligo encodes exactly one mutation using the most-preferred human codon.
 
-**Tile boundary optimization**: A dynamic programming optimizer searches all valid codon-boundary positions to find tile placements where gene-derived overhangs have high ligation fidelity (Potapov et al. 2018 NEB data). Supports multi-K search across different tile counts.
+**Tile boundary optimization**: A dynamic programming optimizer searches all valid codon-boundary positions to find tile placements where gene-derived overhangs have high ligation fidelity and efficiency. Scoring uses BsmBI cycling data (Pryor et al. 2020): `Score = P_fid * P_eff`, where P_fid measures accuracy and P_eff measures relative ligation yield. Supports multi-K search across different tile counts.
 
 **Barcode design**: Unified hierarchical prefix-suffix mode -- each variant gets a unique high-Hamming-distance prefix (12 nt), extended with filtered random suffixes to the full barcode length (20 nt). Cross-variant Hamming distance is guaranteed by the prefix; within-variant replicates differ only in their suffix. Configurable `barcodes_per_variant` (default 10) for experimental replication. Prefixes that create enzyme sites at junction boundaries are automatically filtered.
 
@@ -222,10 +222,11 @@ The `data/neb_overhang_fidelity/` directory contains pre-processed ligation fide
 | `bsai_overhangs.rds` | Pryor et al. 2020 | BsaI, 37°C, 5min/60°C cycling | BsaI enzyme-specific individual fidelity |
 | `bsai_pairwise.rds` | Pryor et al. 2020 | BsaI, 37°C, 5min/60°C cycling | BsaI enzyme-specific 256x256 pairwise matrix |
 | `bsmbi_overhangs.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | BsmBI enzyme-specific individual fidelity |
-| `bsmbi_pairwise.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | BsmBI enzyme-specific 256x256 pairwise matrix |
+| `bsmbi_pairwise.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | BsmBI enzyme-specific 256x256 pairwise matrix (Hamming model) |
+| `bsmbi_cycling_pairwise.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | **Real experimental** 256x256 matrix (used for scoring) |
 | `high_fidelity_sets.rds` | Potapov et al. 2018 | T4, 25°C, 18h (SA-optimized) | Potapov Table 1 Set 3 (25 overhangs, 95.8% set fidelity) |
 
-The pipeline's OOGGA-based scoring uses BsmBI-specific data for individual fidelity (`P_fid`) and T4 data for efficiency (`P_eff`), with a bonus for overhangs in the Potapov HF Set 3. See `Plans/260226_overhang-architecture-redesign.md` for the full scoring formula.
+**Overhang scoring formula**: `Score = P_fid(oh) * P_eff(oh)`, where both metrics come from the BsmBI cycling matrix (Pryor et al. 2020). P_fid measures ligation accuracy (fraction of correct pairings) and P_eff measures relative ligation yield (correct count vs. best overhang). This matches the actual assembly conditions (BsmBI cycling protocol) and is more conservative than T4 static data. See `260302_overhang_fidelity_comparison/` for the full analysis.
 
 ## References
 
