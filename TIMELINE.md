@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-02 14:36:49 | 150 commits | 2026-01-29 to 2026-03-02
+> Auto-generated on 2026-03-02 14:46:14 | 151 commits | 2026-01-29 to 2026-03-02
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-02
 
+- Update BUG-008 with fix plan: simplify to BsmBI cycling P_fid only
 - Correct README recommendation: use BsmBI cycling data
 - Add overhang fidelity comparison results and summary README
 - Add WPRE/PolIII insulation design document
