@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-02 08:27:35 | 145 commits | 2026-01-29 to 2026-03-02
+> Auto-generated on 2026-03-02 13:56:56 | 146 commits | 2026-01-29 to 2026-03-02
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-02
 
+- Add tatapov-to-CSV conversion with Pryor 2020 cross-validation
 - Add BUG-008: overhang scoring mixes data from different conditions
 - Update README config table and BUGS.md with implemented fixes
 - Add long cassette test config (GRIN2A + P2A-EGFP, 2133nt cassette)
