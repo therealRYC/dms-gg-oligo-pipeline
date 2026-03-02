@@ -15,8 +15,9 @@ The pipeline generates all 19 amino acid substitutions + 1 stop codon at every p
 
 The final construct in the plasmid:
 ```
-[Backbone]--PaqCI**--[Full gene with one mutation]--[PolIII promoter]--[Barcode]--PaqCI*--[Backbone]
+[Backbone]--PaqCI**--[Gene w/ mutation]--[Intergene elements]--[PolIII]--[Barcode]--PaqCI*--[Backbone]
 ```
+Intergene elements (e.g., WPRE, hGH polyA) are optional and configured per experiment.
 
 Every oligo in the pool has the same universal structure regardless of tile position:
 ```
@@ -35,12 +36,14 @@ Rscript -e 'install.packages("BiocManager")'
 Rscript -e 'install.packages(c("yaml", "readr", "data.table", "cli", "testthat", "rmarkdown"))'
 Rscript -e 'BiocManager::install(c("Biostrings", "DNABarcodes"))'
 
-# Copy and edit config
+# Copy and edit config (or use a pre-built one from configs/)
 cp config_template.yaml my_config.yaml
 # Edit my_config.yaml with your gene FASTA path and parameters
 
 # Run
 Rscript run_pipeline.R my_config.yaml
+# Or use a pre-built config:
+Rscript run_pipeline.R configs/grin2a.yaml
 ```
 
 ## Quick Start (RStudio / IDE)
@@ -126,8 +129,11 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 ```
 dms-gg-oligo-pipeline/
 ├── run_pipeline.R              # Master entry point
-├── config_template.yaml        # Annotated config template
-├── dmsggoligo.Rproj            # RStudio project file
+├── config_template.yaml        # Annotated config template with all parameters
+├── configs/                    # Pre-built gene-specific configs
+│   ├── grin2a.yaml             # GRIN2A (1464 codons)
+│   ├── akap11.yaml             # AKAP11 (1902 codons)
+│   └── trio.yaml               # TRIO (3098 codons)
 ├── R/
 │   ├── constants.R             # Enzyme definitions, synthesis limits, AA alphabet
 │   ├── utils.R                 # Shared helpers (reverse complement, GC content, etc.)
@@ -139,6 +145,7 @@ dms-gg-oligo-pipeline/
 │   ├── 05_tiling.R             # Gene partitioning into tiles
 │   ├── 06_overhang_selection.R # DP boundary optimizer + overhang selection
 │   ├── 07_barcode_design.R     # Programmed barcode generation (unified hierarchical)
+│   ├── 07b_linear_codes.R      # GF(4) Hamming code prefix generation (d <= 3)
 │   ├── 08_oligo_assembly.R     # Full oligo sequence construction (universal structure)
 │   ├── 09_wt_geneblock_design.R# WT gene block + superblock design
 │   ├── 10_qc_checks.R         # Comprehensive QC validation
@@ -149,19 +156,19 @@ dms-gg-oligo-pipeline/
 │   ├── human_codon_usage.rds   # CoCoPUTs human codon usage table (Alexaki et al. 2019)
 │   ├── neb_overhang_fidelity/  # Potapov 2018 ligation fidelity matrices (BsaI, BsmBI)
 │   ├── GRIN2A_NM_000833_CDS.fasta
-│   ├── SLC6A1_NM_003042_CDS.fasta
-│   └── AKAP11_NM_016248_CDS.fasta
-├── examples/                   # Example pipeline configs
-│   └── *.yaml                  # GRIN2A overhang verification configs
-├── Plans/                      # Design notes and planning docs (project history)
-├── scripts/                    # Helper scripts
-│   ├── generate_grin2a_cds.R   # Generate GRIN2A test FASTA
-│   ├── generate_slc6a1_cds.R   # Generate SLC6A1 test FASTA
-│   ├── generate_akap11_cds.R   # Generate AKAP11 test FASTA
-│   └── validate_gga.py         # Python cross-validator for GG assembly correctness
-├── tests/testthat/             # Unit + integration tests
+│   ├── AKAP11_NM_016248_CDS.fasta
+│   ├── TRIO_NM_007118_CDS.fasta
+│   └── SLC6A1_NM_003042_CDS.fasta
+├── tools/
+│   └── update_timeline.sh      # Auto-generates TIMELINE.md from git history
+├── tests/testthat/             # Unit + integration tests (~6100 tests)
+├── Plans/                      # Current design docs and planning references
+├── archive/                    # Superseded plans, old configs, helper scripts
+├── TIMELINE.md                 # Auto-generated project timeline with milestones
+├── BUGS.md                     # Known bugs and status tracking
 ├── DESCRIPTION                 # R package metadata
-└── CLAUDE.md                   # Detailed project context and design rationale
+├── CLAUDE.md                   # Detailed project context and design rationale
+└── dmsggoligo.Rproj            # RStudio project file
 ```
 
 ## Dependencies
@@ -181,8 +188,21 @@ For the full test suite including slow integration tests (TRIO gene, ~9 kb):
 RUN_SLOW_TESTS=true Rscript -e 'testthat::test_dir("tests/testthat")'
 ```
 
+## Validated Genes
+
+The pipeline has been validated on three genes of increasing size (barcodes_per_variant=1):
+
+| Gene | Accession | Codons | Variants | Oligos | Gene Blocks | Tiles | Runtime |
+|------|-----------|--------|----------|--------|-------------|-------|---------|
+| GRIN2A | NM_000833 | 1,465 | 29,220 | 29,220 | 51 | 25 | ~4 min |
+| AKAP11 | NM_016248 | 1,902 | 37,960 | 37,960 | 64 | 31 | ~7 min |
+| TRIO | NM_007118 | 3,098 | 61,880 | 61,880 | 98 | 47 | ~8 min |
+
+Pre-built configs for each gene are in `configs/`. Runtimes measured on WSL2 with bpv=1; at bpv=10, expect ~10x longer for barcode generation.
+
 ## References
 
 - Potapov et al. (2018). Comprehensive Profiling of Four Base Overhang Ligation Fidelity by T4 DNA Ligase. *ACS Synth Bio* 7(11):2665-2674
 - Pryor et al. (2020). Enabling one-pot Golden Gate assemblies of unprecedented complexity. *PLOS ONE*
+- Alexaki et al. (2019). Codon and Codon-Pair Usage Tables (CoCoPUTs): Facilitating Genetic Variation Analyses and Recombinant Gene Design. *J Mol Biol* 431(13):2434-2441
 - Mukundan & Madhusudhan (2025). OOGGA: Overhang Optimizer for Golden Gate Assembly. *bioRxiv* 10.1101/2025.06.16.659877

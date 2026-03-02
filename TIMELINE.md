@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-01 20:52:53 | 141 commits | 2026-01-29 to 2026-03-01
+> Auto-generated on 2026-03-01 21:41:02 | 142 commits | 2026-01-29 to 2026-03-01
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-01
 
+- Update README for repo cleanup, configs, and validated genes
 - Add polIII promoter and intergene elements to gene configs
 - Add gene-specific config files for GRIN2A, AKAP11, and TRIO
 - Add TIMELINE.md with auto-update script and post-commit hook
