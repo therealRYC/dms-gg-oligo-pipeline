@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-27 — Allow oversized cassettes in partition_tile_superblocks(); expose cassette_needs_splitting flag
+# Last updated: 2026-03-01 — Backwards-sweep SB partitioning: cassette-aware, balanced superblocks
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -417,7 +417,7 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
     min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L # codon boundary
   }
   if (is.null(hf_set)) hf_set <- load_high_fidelity_set()
-  if (is.null(oh_fidelity)) oh_fidelity <- builtin_overhang_fidelity()
+  if (is.null(oh_fidelity)) oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   # Create lookup for individual fidelity
   fid_lookup <- oh_fidelity$fidelity
@@ -635,10 +635,18 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
 #' @param bsai_matrix 256x256 BsaI pairwise ligation matrix (or NULL)
 #' @param eff_lookup Named numeric vector (overhang -> efficiency from
 #'   compute_overhang_efficiency()). If NULL, efficiency is treated as 1.0.
+#' @param blacklisted_oh2 Character vector of oh2 sequences to invalidate
+#'   (OPT-005: SB-aware blacklisting). Boundaries where oh2 is in this set
+#'   are marked invalid. Default NULL (no blacklisting).
+#' @param overlap_codons Integer, tile overlap (rightward extension). oh2 is
+#'   computed at the EXTENDED tile end (b + overlap_codons), not at the core
+#'   boundary (b). Default 0 (no overlap, oh2 at core boundary).
 #' @return List with vectors: oh1_seq, oh2_seq, score, valid (all length n_codons)
 precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
                                        bsai_matrix = NULL,
-                                       eff_lookup = NULL) {
+                                       eff_lookup = NULL,
+                                       blacklisted_oh2 = NULL,
+                                       overlap_codons = 0L) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
   oh_L <- substring(cds, 1, 4)
@@ -664,16 +672,26 @@ precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
   precomp_start <- proc.time()
 
   for (b in seq_len(n_codons - 1L)) {
-    oh2_pos <- b * 3L
-    oh1_pos <- oh2_pos + 1L
-    oh2 <- substring(cds, oh2_pos - 3L, oh2_pos)
+    # oh1 is at the start of the NEXT tile (core boundary + 1), unchanged by overlap
+    oh1_pos <- b * 3L + 1L
     oh1 <- substring(cds, oh1_pos, oh1_pos + 3L)
+    # oh2 is at the EXTENDED tile end (core boundary + overlap_codons).
+    # Tiles extend rightward by overlap_codons, capped at gene end.
+    oh2_codon <- min(b + overlap_codons, n_codons)
+    oh2_pos <- oh2_codon * 3L
+    oh2 <- substring(cds, oh2_pos - 3L, oh2_pos)
 
     oh1_seq[b] <- oh1
     oh2_seq[b] <- oh2
 
     # Hard constraint: oh1 must not collide with oh_L in BsaI reaction
     if (oh1 == oh_L || oh1 == oh_L_rc) {
+      valid[b] <- FALSE
+      next
+    }
+    # OPT-005: blacklisted oh2 values (SB boundary collision prevention)
+    if (!is.null(blacklisted_oh2) &&
+        (oh2 %in% blacklisted_oh2 || reverse_complement(oh2) %in% blacklisted_oh2)) {
       valid[b] <- FALSE
       next
     }
@@ -700,15 +718,24 @@ precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
     }
 
     # Low-fidelity safety floor: penalize boundaries where either overhang
-    # has very low individual fidelity (< 0.80). The multiplicative OOGGA
-    # score already penalizes low-fidelity overhangs, but this explicit
-    # penalty provides a hard safety threshold.
+    # has very low individual fidelity (< 0.50 under BsmBI/BsaI conditions).
+    # The threshold was 0.80 when using built-in T4 data, but under enzyme-
+    # specific GG conditions only ~50 overhangs exceed 0.80, so we use 0.50
+    # to catch the truly awful CG-rich overhangs (CGCC: 0.35, CCGC: 0.38).
     fid_penalty <- 0.0
     oh1_ind_fid <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else 0.5
     oh2_ind_fid <- if (oh2 %in% names(fid_lookup)) unname(fid_lookup[oh2]) else 0.5
-    if (oh1_ind_fid < 0.80 || oh2_ind_fid < 0.80) fid_penalty <- -5.0
+    if (oh1_ind_fid < 0.50 || oh2_ind_fid < 0.50) fid_penalty <- -5.0
 
-    scores[b] <- oh1_base + oh2_base + oh1_pw_bonus + fid_penalty
+    # Palindrome penalty (OPT-003): palindromic overhangs enable self-ligation
+    # and inverted insertion. Heavy penalty but not impossible — a gene ending
+    # in TAA forces oh2 = TTAA (palindrome), which we can't avoid.
+    palindrome_penalty <- 0.0
+    if (oh1 %in% PALINDROMIC_4NT || oh2 %in% PALINDROMIC_4NT) {
+      palindrome_penalty <- -10.0
+    }
+
+    scores[b] <- oh1_base + oh2_base + oh1_pw_bonus + fid_penalty + palindrome_penalty
   }
 
   precomp_elapsed <- (proc.time() - precomp_start)[["elapsed"]]
@@ -844,8 +871,9 @@ dp_solve_k <- function(K, n_codons, min_codons, max_codons,
 #' @param oh_fidelity Data frame with overhang + fidelity columns
 #' @param bsai_matrix BsaI 256x256 pairwise ligation matrix (for oh1 scoring)
 #' @param multi_k Logical: try multiple tile counts? (default TRUE)
-#' @param k_range Integer vector of K values to try (NULL = auto)
-#' @param search_window_K Unused (kept for interface compatibility)
+#' @param dp_k_range Integer: search K_ideal +/- dp_k_range (default 5).
+#'   Larger values explore more tile counts but take longer.
+#' @param k_range Integer vector of K values to try (NULL = auto from dp_k_range)
 #' @param overlap_codons Number of overlap codons between adjacent tiles
 #' @param eff_lookup Named numeric vector (overhang -> efficiency). If NULL,
 #'   efficiency is treated as 1.0 for all overhangs.
@@ -856,10 +884,11 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
                                       oh_fidelity = NULL,
                                       bsai_matrix = NULL,
                                       multi_k = TRUE,
+                                      dp_k_range = 5L,
                                       k_range = NULL,
-                                      search_window_K = NULL,
                                       overlap_codons = 4L,
-                                      eff_lookup = NULL) {
+                                      eff_lookup = NULL,
+                                      blacklisted_oh2 = NULL) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
 
@@ -868,7 +897,7 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
     min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
   }
   if (is.null(hf_set)) hf_set <- load_high_fidelity_set()
-  if (is.null(oh_fidelity)) oh_fidelity <- builtin_overhang_fidelity()
+  if (is.null(oh_fidelity)) oh_fidelity <- load_overhang_fidelity("BsmBI")
   if (is.null(bsai_matrix)) {
     bsai_matrix <- tryCatch(load_pairwise_matrix("BsaI"), error = function(e) NULL)
   }
@@ -918,8 +947,11 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
   }
 
   # Precompute scores for all boundary positions
+  # Pass overlap_codons so oh2 is computed at the EXTENDED tile end
   precomp <- precompute_boundary_scores(cds, hf_set, oh_fidelity, bsai_matrix,
-    eff_lookup = eff_lookup
+    eff_lookup = eff_lookup,
+    blacklisted_oh2 = blacklisted_oh2,
+    overlap_codons = overlap_codons
   )
 
   # Determine K range to search (use effective_max_codons for boundary spacing)
@@ -928,7 +960,8 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
     if (multi_k) {
       K_min <- max(1L, ceiling(n_codons / effective_max_codons) - 1L)
       K_max <- floor(n_codons / min_codons) - 1L
-      k_range <- seq(max(K_min, K_ideal - 2L), min(K_max, K_ideal + 2L))
+      k_range <- seq(max(K_min, K_ideal - dp_k_range),
+                     min(K_max, K_ideal + dp_k_range))
       k_range <- k_range[k_range >= 1L]
     } else {
       k_range <- K_ideal
@@ -941,10 +974,14 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
     min(k_range), ", ", max(k_range), "]"
   ))
 
-  # Run DP for each K, track best
+  # Run DP for each K, track best (OPT-004: diminishing returns stopping)
+  # When avg score improvement drops below 0.5% from K to K+1 AND K > K_ideal,
+  # stop expanding upward — prefer fewer gene blocks when fidelity gain is marginal.
   best_result <- NULL
   best_avg_score <- -Inf
   k_results <- list()
+  prev_avg <- -Inf
+  diminishing_stop_pct <- 0.005  # 0.5% threshold
 
   dp_start <- proc.time()
   for (K in k_range) {
@@ -960,6 +997,19 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
         best_result <- result
         best_result$K <- K
       }
+      # Diminishing returns check: only stop when K is above K_ideal
+      # (we always want to explore smaller K values fully)
+      if (K > K_ideal && is.finite(prev_avg) && prev_avg > 0) {
+        improvement <- (avg - prev_avg) / prev_avg
+        if (improvement < diminishing_stop_pct) {
+          cli::cli_alert_info(sprintf(
+            "Stopping K search at K=%d: avg score improvement %.2f%% < %.1f%% threshold",
+            K, improvement * 100, diminishing_stop_pct * 100
+          ))
+          break
+        }
+      }
+      prev_avg <- avg
     }
   }
 
@@ -1504,7 +1554,10 @@ oh_collides <- function(oh_a, oh_b) {
 #' @param max_sub_length Maximum gene content per sub-block in nt
 #'   (typically max_block_length - block_overhead, e.g. 1800 - 22 = 1778)
 #' @param oh3 Optional oh3 overhang for collision checking. NULL skips
-#'   collision detection.
+#'   oh3 collision detection.
+#' @param oh4 Optional oh4 overhang for collision checking. NULL skips
+#'   oh4 collision detection. When provided, SB boundary overhangs are
+#'   also checked against oh4 (BsaI-level collision).
 #' @param oh_fidelity Optional fidelity data frame (reserved for future use)
 #' @param hf_set Optional HF overhang set (reserved for future use)
 #' @return List with:
@@ -1516,6 +1569,7 @@ oh_collides <- function(oh_a, oh_b) {
 partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
                                        max_sub_length,
                                        oh3 = NULL,
+                                       oh4 = NULL,
                                        oh_fidelity = NULL,
                                        hf_set = NULL) {
   n_tiles <- nrow(tiles)
@@ -1534,86 +1588,84 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
   }
 
   # =========================================================================
-  # Phase 1: Forward greedy partitioning
+  # Phases 1+2: Backwards-sweep cassette-aware partitioning
   # =========================================================================
-  # Accumulate tiles left-to-right. When adding the next tile would cause the
-  # current SB's gene content to exceed max_sub_length, close the current SB
-  # and start a new one.
+  # The last SB must accommodate both gene content AND the downstream cassette
+  # (polIII_len) within max_sub_length. The old approach (forward greedy +
+  # Phase 2 fixup) created unbalanced partitions — e.g., a 1-tile SB4 in
+  # AKAP11 when the cassette forced Phase 2 to split the last greedy SB.
   #
-  # Gene content of SB_i = right_boundary_nt - left_boundary_nt, where:
-  #   - left_boundary = 0 for first SB, tiles[prev_end_tile].end_nt otherwise
-  #   - right_boundary = tiles[end_tile].end_nt for non-last, gene_len for last
-  sb_end_tiles <- integer(0) # end_tile index for each SB
-  prev_boundary_nt <- 0L # left boundary (nt) of current SB
-  current_start_tile <- 1L
+  # New algorithm:
+  #   Step 1 (backwards): Walk from the last tile backwards, accumulating
+  #          tiles into the last SB until gene_content + polIII_len would
+  #          exceed max_sub_length. This naturally sizes the last SB to fit
+  #          the cassette with maximum tile count.
+  #   Step 2 (forward greedy): Partition the remaining tiles (gene-only,
+  #          no cassette overhead) using the standard forward greedy.
+  #
+  # When cassette_needs_splitting is TRUE (cassette alone > max_sub_length),
+  # the cassette will be split into separate BsmBI fragments downstream
+  # by find_cassette_split_points(). In that case, skip the backwards step
+  # and partition the entire gene with forward greedy (no cassette budget).
 
-  for (i in seq_len(n_tiles)) {
-    # Gene content of current SB if we include tile i
-    content <- tiles$end_nt[i] - prev_boundary_nt
+  sb_end_tiles <- integer(0)
 
-    if (content > max_sub_length && i > current_start_tile) {
-      # Close current SB at tile i-1 (tile i would overflow)
-      sb_end_tiles <- c(sb_end_tiles, i - 1L)
-      prev_boundary_nt <- tiles$end_nt[i - 1L]
-      current_start_tile <- i
-    }
-  }
-  # Close the last SB
-  sb_end_tiles <- c(sb_end_tiles, n_tiles)
-
-  # =========================================================================
-  # Phase 2: Adjust last SB for polIII/cassette budget
-  # =========================================================================
-  # The last SB's gene block includes the PolIII cassette. Its orderable
-  # length = gene_content + polIII_len, which must be <= max_sub_length.
-  # If it doesn't fit, split tiles from the last SB into a new penultimate SB.
-  # This is a soft constraint: if no partition can fit polIII (e.g., single
-  # tile's gene region + polIII > max_sub_length), proceed anyway.
-  n_sb <- length(sb_end_tiles)
   if (polIII_len > 0L && !cassette_needs_splitting) {
-    # Normal case: cassette fits in one block, optimize gene content in last SB
-    last_left_nt <- if (n_sb >= 2L) tiles$end_nt[sb_end_tiles[n_sb - 1L]] else 0L
-    last_gene_content <- gene_len - last_left_nt
+    # --- Step 1: Backwards sweep to find last SB ---
+    # Walk from last tile backwards. The last SB's total budget is
+    # gene_content + cassette <= max_sub_length, where gene_content =
+    # gene_len - left_boundary_nt.
+    last_sb_first_tile <- n_tiles  # start with just the last tile
+    for (t in rev(seq_len(n_tiles))) {
+      # If this tile starts the last SB, gene_content = gene_len - gene_start
+      gene_start <- if (t == 1L) 0L else tiles$end_nt[t - 1L]
+      gene_content_candidate <- gene_len - gene_start
+      if (gene_content_candidate + polIII_len <= max_sub_length) {
+        last_sb_first_tile <- t
+      } else {
+        break  # adding more tiles would overflow
+      }
+    }
 
-    while (last_gene_content + polIII_len > max_sub_length) {
-      last_start_tile <- if (n_sb >= 2L) sb_end_tiles[n_sb - 1L] + 1L else 1L
-      last_end_tile <- sb_end_tiles[n_sb]
-
-      # Can't split a single-tile last SB further — accept and move on
-      if (last_start_tile == last_end_tile) break
-
-      # Find the earliest split tile where the remaining gene + polIII fits
-      found_split <- FALSE
-      for (split_at in seq(last_start_tile, last_end_tile - 1L)) {
-        remaining <- gene_len - tiles$end_nt[split_at]
-        if (remaining + polIII_len <= max_sub_length) {
-          # Also verify the new penultimate SB fits
-          new_penult_content <- tiles$end_nt[split_at] - last_left_nt
-          if (new_penult_content <= max_sub_length) {
-            # Insert new boundary: replace [..., last_end] with [..., split_at, last_end]
-            sb_end_tiles <- c(sb_end_tiles[-n_sb], split_at, last_end_tile)
-            found_split <- TRUE
-            break
-          }
+    # --- Step 2: Forward greedy on tiles 1..(last_sb_first_tile - 1) ---
+    if (last_sb_first_tile > 1L) {
+      prefix_end <- last_sb_first_tile - 1L
+      prev_boundary_nt <- 0L
+      current_start_tile <- 1L
+      for (i in seq_len(prefix_end)) {
+        content <- tiles$end_nt[i] - prev_boundary_nt
+        if (content > max_sub_length && i > current_start_tile) {
+          sb_end_tiles <- c(sb_end_tiles, i - 1L)
+          prev_boundary_nt <- tiles$end_nt[i - 1L]
+          current_start_tile <- i
         }
       }
-
-      if (!found_split) break # No valid split exists — accept oversized last SB
-
-      # Recompute for next iteration
-      n_sb <- length(sb_end_tiles)
-      last_left_nt <- tiles$end_nt[sb_end_tiles[n_sb - 1L]]
-      last_gene_content <- gene_len - last_left_nt
+      # Close the prefix SB
+      sb_end_tiles <- c(sb_end_tiles, prefix_end)
     }
-  } else if (polIII_len > 0L && cassette_needs_splitting) {
-    # Cassette is oversized — it will be split into separate BsmBI fragments
-    # by design_wt_geneblocks(). For partition purposes, treat the last SB as
-    # needing only gene content (no cassette budget), since the cassette will
-    # be in its own sub-blocks. Skip the normal Phase 2 adjustment.
-    cli::cli_alert_info(paste0(
-      "Skipping Phase 2 cassette budget adjustment — ",
-      "cassette will be split into separate fragments."
-    ))
+    # Close the last (cassette-carrying) SB
+    sb_end_tiles <- c(sb_end_tiles, n_tiles)
+
+  } else {
+    # No cassette budget, or cassette will be split separately.
+    # Pure forward greedy on all tiles.
+    if (cassette_needs_splitting) {
+      cli::cli_alert_info(paste0(
+        "Cassette will be split into separate fragments — ",
+        "partitioning gene-only (no cassette budget in last SB)."
+      ))
+    }
+    prev_boundary_nt <- 0L
+    current_start_tile <- 1L
+    for (i in seq_len(n_tiles)) {
+      content <- tiles$end_nt[i] - prev_boundary_nt
+      if (content > max_sub_length && i > current_start_tile) {
+        sb_end_tiles <- c(sb_end_tiles, i - 1L)
+        prev_boundary_nt <- tiles$end_nt[i - 1L]
+        current_start_tile <- i
+      }
+    }
+    sb_end_tiles <- c(sb_end_tiles, n_tiles)
   }
 
   # =========================================================================
@@ -1640,12 +1692,12 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
   # =========================================================================
   # Phase 4: Overhang collision detection and resolution
   # =========================================================================
-  # SB boundary overhangs must not collide with oh3 or with each other.
+  # SB boundary overhangs must not collide with oh3, oh4, each other, or
+  # tile oh1_seq values in later superblocks (BUG-007: BsaI-level collision).
   # If a collision is detected, try shifting the boundary ±1 tile.
   n_collisions <- 0L
 
-  if (n_sb >= 2L && !is.null(oh3)) {
-    oh3_rc <- reverse_complement(oh3)
+  if (n_sb >= 2L) {
 
     for (bi in seq_len(n_sb - 1L)) {
       boundary_tile <- sb_end_tiles[bi]
@@ -1654,12 +1706,12 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
       # --- Check for collision ---
       has_collision <- FALSE
 
-      # vs oh3
-      if (oh_collides(boundary_oh, oh3)) {
+      # vs oh3 (BsmBI-level)
+      if (!is.null(oh3) && oh_collides(boundary_oh, oh3)) {
         has_collision <- TRUE
       }
 
-      # vs other SB boundary OHs
+      # vs other SB boundary OHs (BsmBI-level)
       if (!has_collision) {
         for (bj in seq_len(n_sb - 1L)) {
           if (bj == bi) next
@@ -1671,64 +1723,57 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
         }
       }
 
-      if (!has_collision) next
-
-      n_collisions <- n_collisions + 1L
-
-      # --- Try shifting boundary ±1 tile ---
-      shift_candidates <- c(boundary_tile - 1L, boundary_tile + 1L)
-      resolved <- FALSE
-
-      for (new_bt in shift_candidates) {
-        # Must be a valid tile index
-        if (new_bt < 1L || new_bt >= n_tiles) next
-
-        # Must maintain SB ordering: prev_boundary < new_bt < next_boundary
-        prev_end <- if (bi > 1L) sb_end_tiles[bi - 1L] else 0L
-        next_end <- if (bi < n_sb - 1L) sb_end_tiles[bi + 1L] else n_tiles
-        if (new_bt <= prev_end || new_bt >= next_end) next
-
-        # Validate sizing: SB before this boundary
-        left_nt <- if (bi == 1L) 0L else tiles$end_nt[sb_end_tiles[bi - 1L]]
-        new_right <- tiles$end_nt[new_bt]
-        if ((new_right - left_nt) > max_sub_length) next
-
-        # Validate sizing: SB after this boundary
-        if (bi == n_sb - 1L) {
-          # Boundary before the last SB — check polIII constraint
-          after_content <- gene_len - new_right
-          if (polIII_len > 0L && (after_content + polIII_len) > max_sub_length) next
-          if (after_content > max_sub_length) next
-        } else {
-          after_right <- tiles$end_nt[sb_end_tiles[bi + 1L]]
-          if ((after_right - new_right) > max_sub_length) next
-        }
-
-        # Check new OH for collisions
-        new_oh <- tiles$oh2_seq[new_bt]
-        new_has_collision <- FALSE
-
-        if (oh_collides(new_oh, oh3)) new_has_collision <- TRUE
-
-        if (!new_has_collision) {
-          for (bj in seq_len(n_sb - 1L)) {
-            if (bj == bi) next
-            other_oh <- tiles$oh2_seq[sb_end_tiles[bj]]
-            if (oh_collides(new_oh, other_oh)) {
-              new_has_collision <- TRUE
-              break
-            }
+      # vs tile oh1_seq in later superblocks (BsaI-level — BUG-007)
+      # The SB boundary OH becomes a BsaI junction overhang for tiles whose
+      # 5'WT region spans past this boundary. If it matches a tile's oh1_seq,
+      # the BsaI reaction has ambiguous ligation (two frags with same oh_5).
+      if (!has_collision) {
+        boundary_pos <- tiles$end_nt[boundary_tile]
+        for (t in seq_len(n_tiles)) {
+          if (tiles$start_nt[t] > boundary_pos &&
+              oh_collides(boundary_oh, tiles$oh1_seq[t])) {
+            has_collision <- TRUE
+            break
           }
-        }
-
-        if (!new_has_collision) {
-          sb_end_tiles[bi] <- new_bt
-          resolved <- TRUE
-          break
         }
       }
 
-      if (resolved) n_collisions <- n_collisions - 1L
+      # vs oh4 (BsaI-level — helper-to-oligo junction)
+      if (!has_collision && !is.null(oh4)) {
+        if (oh_collides(boundary_oh, oh4)) {
+          has_collision <- TRUE
+        }
+      }
+
+      # vs tile oh2_seq in earlier superblocks (BsmBI-level)
+      # The SB boundary OH becomes a BsmBI junction overhang for tiles whose
+      # 3'WT region spans past this boundary. If it matches a tile's oh2_seq,
+      # the BsmBI reaction has ambiguous ligation (two frags with same oh).
+      # This catches the TGAT-type collision: boundary tile B has oh2=X, and
+      # an earlier tile T also has oh2=X; T's 3'WT region includes B's
+      # position, so both X values appear in T's BsmBI reaction.
+      if (!has_collision) {
+        boundary_pos <- tiles$end_nt[boundary_tile]
+        for (t in seq_len(n_tiles)) {
+          if (t == boundary_tile) next
+          if (tiles$end_nt[t] < boundary_pos &&
+              oh_collides(boundary_oh, tiles$oh2_seq[t])) {
+            has_collision <- TRUE
+            break
+          }
+        }
+      }
+
+      if (!has_collision) next
+
+      n_collisions <- n_collisions + 1L
+      cli::cli_alert_warning(sprintf(
+        "SB boundary %d (tile %d, oh2=%s): collision detected.",
+        bi, boundary_tile, boundary_oh
+      ))
+      # Note: Collision resolution is handled by the iterative DP loop in
+      # plan_assembly() (OPT-005). The old ±5 tile shift heuristic has been
+      # removed — it had zero guarantees and failed on AKAP11's ACCA collision.
     }
 
     # Rebuild superblocks data frame with potentially updated boundaries
@@ -1996,6 +2041,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   manual_oh3 <- config$manual_oh3
   manual_oh4 <- config$manual_oh4
   search_window_K <- config$search_window_K %||% 15L
+  dp_k_range <- config$dp_k_range %||% 5L
   boundary_method <- config$boundary_method %||% "dp"
   multi_k <- config$multi_k %||% TRUE
   overlap_codons <- config$overlap_codons %||% 4L
@@ -2007,8 +2053,13 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   }
 
   # Load data (pairwise matrices loaded early for DP scoring)
+  # Use BsmBI-specific fidelity for boundary scoring (OPT-003): BsmBI is the
+  # bottleneck enzyme (more overhangs per reaction) and is slightly more
+  # conservative than BsaI (r=0.976 between them). The built-in T4 ligase data
+  # dramatically overestimates fidelity under GG conditions (206/256 overhangs
+  # appear >0.80 under T4 but are <0.80 under BsmBI).
   hf_set <- load_high_fidelity_set()
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
   bsai_matrix <- load_pairwise_matrix("BsaI")
   bsmbi_matrix <- load_pairwise_matrix("BsmBI")
 
@@ -2017,33 +2068,173 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   potapov_matrix <- load_pairwise_matrix("potapov_18h")
   eff_lookup <- compute_overhang_efficiency(potapov_matrix)
 
-  # Phase 1-3: Search tile boundaries
-  if (boundary_method == "dp") {
-    cli::cli_h3("Searching tile boundaries for HF overhangs (DP optimizer)")
-    tiles <- search_tile_boundaries_dp(
-      cds = cds,
-      max_mutable_nt = max_mutable_nt,
-      min_mutable_nt = min_mutable_nt,
-      hf_set = hf_set,
-      oh_fidelity = oh_fidelity,
-      bsai_matrix = bsai_matrix,
-      multi_k = multi_k,
-      overlap_codons = overlap_codons,
-      eff_lookup = eff_lookup
+  # Phase 1-3: Search tile boundaries (with iterative SB-aware refinement, OPT-005)
+  #
+  # The iterative approach:
+  # 1. Run tile boundary DP to find optimal boundaries
+  # 2. Select oh3/oh4 from those boundaries
+  # 3. Simulate SB partitioning to check for collisions
+  # 4. If collision: blacklist the colliding oh2, re-run DP, repeat
+  # This replaces the old ±5 tile shift heuristic with a principled DP-based fix.
+  max_sb_iterations <- 5L
+  blacklisted_oh2 <- character(0)
+
+  for (sb_iter in seq_len(max_sb_iterations)) {
+    if (sb_iter > 1L) {
+      cli::cli_h3(paste0("SB-aware refinement iteration ", sb_iter,
+                         " (blacklisted: ", paste(blacklisted_oh2, collapse=", "), ")"))
+    }
+
+    if (boundary_method == "dp") {
+      if (sb_iter == 1L) cli::cli_h3("Searching tile boundaries for HF overhangs (DP optimizer)")
+      tiles <- search_tile_boundaries_dp(
+        cds = cds,
+        max_mutable_nt = max_mutable_nt,
+        min_mutable_nt = min_mutable_nt,
+        hf_set = hf_set,
+        oh_fidelity = oh_fidelity,
+        bsai_matrix = bsai_matrix,
+        multi_k = multi_k,
+        dp_k_range = dp_k_range,
+        overlap_codons = overlap_codons,
+        eff_lookup = eff_lookup,
+        blacklisted_oh2 = if (length(blacklisted_oh2) > 0) blacklisted_oh2 else NULL
+      )
+    } else {
+      if (sb_iter == 1L) cli::cli_h3("Searching tile boundaries for HF overhangs (greedy)")
+      tiles <- search_tile_boundaries(
+        cds = cds,
+        max_mutable_nt = max_mutable_nt,
+        min_mutable_nt = min_mutable_nt,
+        hf_set = hf_set,
+        oh_fidelity = oh_fidelity,
+        search_window_K = search_window_K
+      )
+      # Greedy doesn't support blacklisting — can't iterate
+      if (sb_iter > 1L) {
+        cli::cli_alert_warning("Greedy boundary method does not support SB-aware refinement.")
+        break
+      }
+    }
+
+    # Select oh3/oh4 based on current tiles
+    oh_L <- substring(cds, 1, 4)
+    all_oh1 <- unique(c(oh_L, tiles$oh1_seq))
+    all_oh2 <- unique(tiles$oh2_seq)
+    fid_lookup_iter <- oh_fidelity$fidelity
+    names(fid_lookup_iter) <- oh_fidelity$overhang
+
+    # Quick oh3/oh4 selection for collision check (same logic as below, but
+    # we need these before we can check SB collisions)
+    oh3_iter <- NULL
+    oh4_iter <- NULL
+    if (!is.null(manual_oh3) && !is.null(manual_oh4)) {
+      oh3_iter <- toupper(manual_oh3)
+      oh4_iter <- toupper(manual_oh4)
+    } else {
+      oh3_exclude <- unique(c(all_oh2, vapply(all_oh2, reverse_complement, character(1))))
+      promoter_derived_iter <- derive_oh3_from_promoter(polIII)
+      if (!is.null(promoter_derived_iter) &&
+        !(promoter_derived_iter$oh3 %in% oh3_exclude) &&
+        !(promoter_derived_iter$oh3 %in% HOMOPOLYMER_4NT) &&
+        !(promoter_derived_iter$oh3 %in% PALINDROMIC_4NT)) {
+        oh3_iter <- promoter_derived_iter$oh3
+      } else {
+        oh3_cands <- hf_set[!(hf_set %in% oh3_exclude)]
+        oh3_cands <- oh3_cands[!(oh3_cands %in% HOMOPOLYMER_4NT)]
+        oh3_cands <- oh3_cands[!(oh3_cands %in% PALINDROMIC_4NT)]
+        if (length(oh3_cands) > 0) {
+          oh3_iter <- oh3_cands[which.max(unname(fid_lookup_iter[oh3_cands]))]
+        }
+      }
+      oh4_exclude <- unique(c(all_oh1, vapply(all_oh1, reverse_complement, character(1))))
+      oh4_cands <- hf_set[!(hf_set %in% oh4_exclude)]
+      oh4_cands <- oh4_cands[!(oh4_cands %in% HOMOPOLYMER_4NT)]
+      oh4_cands <- oh4_cands[!(oh4_cands %in% PALINDROMIC_4NT)]
+      if (length(oh4_cands) > 0) {
+        oh4_iter <- oh4_cands[which.max(unname(fid_lookup_iter[oh4_cands]))]
+      }
+    }
+
+    # Trial SB partitioning to check for collisions
+    block_overhead_iter <- 22L
+    trial_partition <- partition_tile_superblocks(
+      tiles = tiles,
+      gene_len = gene_len,
+      polIII_len = polIII_len,
+      max_sub_length = max_block_length - block_overhead_iter,
+      oh3 = oh3_iter,
+      oh4 = oh4_iter
     )
-  } else {
-    cli::cli_h3("Searching tile boundaries for HF overhangs (greedy)")
-    tiles <- search_tile_boundaries(
-      cds = cds,
-      max_mutable_nt = max_mutable_nt,
-      min_mutable_nt = min_mutable_nt,
-      hf_set = hf_set,
-      oh_fidelity = oh_fidelity,
-      search_window_K = search_window_K
-    )
-  }
+
+    if (trial_partition$n_collisions == 0L) {
+      if (sb_iter > 1L) {
+        cli::cli_alert_success(paste0(
+          "SB collision resolved after ", sb_iter, " iteration(s)."
+        ))
+      }
+      break
+    }
+
+    # Collision found — identify the colliding oh2 values
+    # Collisions can be: SB boundary oh2 vs oh1 (BsaI-level),
+    # vs oh3/oh4, vs other SB boundaries, or vs non-boundary tile oh2
+    # whose 3'WT region spans the boundary (BsmBI-level).
+    sbs <- trial_partition$superblocks
+    sb_end_tiles <- sbs$end_tile[seq_len(nrow(sbs) - 1L)]
+    new_blacklist <- character(0)
+
+    for (bi in seq_along(sb_end_tiles)) {
+      boundary_tile <- sb_end_tiles[bi]
+      boundary_oh <- tiles$oh2_seq[boundary_tile]
+      boundary_pos <- tiles$end_nt[boundary_tile]
+
+      # Check if this boundary_oh collides with oh1 in later SBs (BsaI)
+      for (t in seq_len(nrow(tiles))) {
+        if (tiles$start_nt[t] > boundary_pos &&
+            oh_collides(boundary_oh, tiles$oh1_seq[t])) {
+          new_blacklist <- c(new_blacklist, boundary_oh)
+          break
+        }
+      }
+      # Check vs oh2 in earlier tiles whose 3'WT spans the boundary (BsmBI)
+      for (t in seq_len(nrow(tiles))) {
+        if (t == boundary_tile) next
+        if (tiles$end_nt[t] < boundary_pos &&
+            oh_collides(boundary_oh, tiles$oh2_seq[t])) {
+          new_blacklist <- c(new_blacklist, boundary_oh)
+          break
+        }
+      }
+      # Also check vs oh3, other SB boundaries, oh4
+      if (!is.null(oh3_iter) && oh_collides(boundary_oh, oh3_iter)) {
+        new_blacklist <- c(new_blacklist, boundary_oh)
+      }
+      if (!is.null(oh4_iter) && oh_collides(boundary_oh, oh4_iter)) {
+        new_blacklist <- c(new_blacklist, boundary_oh)
+      }
+    }
+
+    new_blacklist <- unique(new_blacklist)
+    new_blacklist <- new_blacklist[!(new_blacklist %in% blacklisted_oh2)]
+
+    if (length(new_blacklist) == 0L) {
+      cli::cli_alert_warning(paste0(
+        "SB collision detected but no new oh2 to blacklist. ",
+        trial_partition$n_collisions, " unresolved collision(s) remain."
+      ))
+      break
+    }
+
+    blacklisted_oh2 <- unique(c(blacklisted_oh2, new_blacklist))
+    cli::cli_alert_info(paste0(
+      "SB collision: blacklisting oh2=", paste(new_blacklist, collapse=", "),
+      ". Re-running DP..."
+    ))
+  } # end sb_iter loop
 
   # Phase 4: Select oh3 (from promoter), oh4 (from HF set)
+  # (Final selection using the collision-free tiles from the loop above)
   cli::cli_h3("Selecting fixed overhangs (oh3, oh4)")
   oh_L <- substring(cds, 1, 4)
 
@@ -2074,7 +2265,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
 
     if (!is.null(promoter_derived) &&
       !(promoter_derived$oh3 %in% oh3_exclude) &&
-      !(promoter_derived$oh3 %in% HOMOPOLYMER_4NT)) {
+      !(promoter_derived$oh3 %in% HOMOPOLYMER_4NT) &&
+      !(promoter_derived$oh3 %in% PALINDROMIC_4NT)) {
       oh3 <- promoter_derived$oh3
       core_polIII <- promoter_derived$core_polIII
       oh3_spacer <- promoter_derived$spacer
@@ -2091,12 +2283,13 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       } else {
         cli::cli_alert_warning(paste0(
           "Promoter-derived oh3=", promoter_derived$oh3,
-          " collides with oh2 or is homopolymer. Falling back to HF set."
+          " collides with oh2, is homopolymer, or is palindromic. Falling back to HF set."
         ))
       }
       strategy_used <- "hf_set"
       oh3_candidates <- hf_set[!(hf_set %in% oh3_exclude)]
       oh3_candidates <- oh3_candidates[!(oh3_candidates %in% HOMOPOLYMER_4NT)]
+      oh3_candidates <- oh3_candidates[!(oh3_candidates %in% PALINDROMIC_4NT)]
 
       if (length(oh3_candidates) > 0) {
         oh3_fids <- unname(fid_lookup[oh3_candidates])
@@ -2108,6 +2301,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         all_ohs <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.90]
         all_ohs <- all_ohs[!(all_ohs %in% oh3_exclude)]
         all_ohs <- all_ohs[!(all_ohs %in% HOMOPOLYMER_4NT)]
+        all_ohs <- all_ohs[!(all_ohs %in% PALINDROMIC_4NT)]
         if (length(all_ohs) == 0) stop("Cannot find any valid oh3 candidate.")
         oh3_fids <- unname(fid_lookup[all_ohs])
         oh3 <- all_ohs[which.max(oh3_fids)]
@@ -2119,6 +2313,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     oh4_exclude <- unique(c(all_oh1, vapply(all_oh1, reverse_complement, character(1))))
     oh4_candidates <- hf_set[!(hf_set %in% oh4_exclude)]
     oh4_candidates <- oh4_candidates[!(oh4_candidates %in% HOMOPOLYMER_4NT)]
+    oh4_candidates <- oh4_candidates[!(oh4_candidates %in% PALINDROMIC_4NT)]
 
     if (length(oh4_candidates) > 0) {
       oh4_fids <- unname(fid_lookup[oh4_candidates])
@@ -2130,6 +2325,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       all_ohs <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.90]
       all_ohs <- all_ohs[!(all_ohs %in% oh4_exclude)]
       all_ohs <- all_ohs[!(all_ohs %in% HOMOPOLYMER_4NT)]
+      all_ohs <- all_ohs[!(all_ohs %in% PALINDROMIC_4NT)]
       if (length(all_ohs) == 0) stop("Cannot find any valid oh4 candidate.")
       oh4_fids <- unname(fid_lookup[all_ohs])
       oh4 <- all_ohs[which.max(oh4_fids)]
@@ -2159,7 +2355,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     gene_len = gene_len,
     polIII_len = polIII_len,
     max_sub_length = max_block_length - block_overhead,
-    oh3 = oh3
+    oh3 = oh3,
+    oh4 = oh4
   )
 
   # Convert partition to legacy all_splits format for downstream consumers
@@ -2378,6 +2575,18 @@ validate_fixed_overhangs <- function(oh3, oh4) {
   if (oh3 == oh4) stop("oh3 and oh4 must be different sequences.")
   if (oh3 == reverse_complement(oh4)) {
     stop("oh3 and oh4 must not be reverse complements of each other.")
+  }
+
+  # Reject homopolymers and palindromes (OPT-003)
+  for (name_val in list(list("oh3", oh3), list("oh4", oh4))) {
+    nm <- name_val[[1]]
+    val <- name_val[[2]]
+    if (val %in% HOMOPOLYMER_4NT) {
+      stop(nm, " is a homopolymer (", val, "); not suitable for Golden Gate assembly.")
+    }
+    if (val %in% PALINDROMIC_4NT) {
+      stop(nm, " is palindromic (", val, "); not suitable for Golden Gate assembly.")
+    }
   }
 
   invisible(NULL)

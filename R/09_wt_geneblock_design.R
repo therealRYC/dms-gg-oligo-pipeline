@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-27 — Add cassette splitting for oversized downstream cassettes (Option A)
+# Last updated: 2026-03-01 — Fix sub-block junction collision: exclude ALL tile oh2 from split exclusion sets
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -254,6 +254,14 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
     }
   }
 
+  # Collect ALL tile oh1/oh2 values for exclusion when computing sub-block split
+
+  # junctions. After deduplication, sub-blocks are shared across tiles, so junction
+  # overhangs must avoid colliding with ANY tile's oh1/oh2 (not just the current
+  # tile's). This prevents ambiguous ligation in per-tile BsaI/BsmBI reactions.
+  all_oh2 <- unique(tiles$oh2_seq)
+  all_oh1 <- unique(tiles$oh1_seq)
+
   for (i in seq_len(n_tiles)) {
     tile <- tiles[i, ]
 
@@ -265,15 +273,14 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       wt_5prime_end <- tile$start_nt - 1L
 
       # Find superblock splits for this region
+      sb_junction_nt <- integer(0)
+      sb_junction_oh <- character(0)
       if (use_precomputed_splits) {
         sb_in_region <- sb_5wt[sb_5wt$tile_id == tile$tile_id, , drop = FALSE]
         # Use split_nt as junction_nt
         if (nrow(sb_in_region) > 0) {
           sb_junction_nt <- sb_in_region$split_nt
           sb_junction_oh <- sb_in_region$junction_oh
-        } else {
-          sb_junction_nt <- integer(0)
-          sb_junction_oh <- character(0)
         }
       }
 
@@ -290,13 +297,12 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             tentative_len, " > ", max_block_length,
             " nt). Computing local split."
           ))
+          # Exclude ALL tiles' oh1 (not just current tile's) because BsaI
+          # sub-blocks are deduplicated and shared across tiles.
+          oh_L_seq <- substring(cds, wt_5prime_start, wt_5prime_start + 3L)
           local_exclude <- unique(c(
-            tile$oh1_seq,
-            substring(cds, wt_5prime_start, wt_5prime_start + 3L),
-            vapply(
-              c(tile$oh1_seq, substring(cds, wt_5prime_start, wt_5prime_start + 3L)),
-              reverse_complement, character(1)
-            )
+            all_oh1, oh4, oh_L_seq,
+            vapply(c(all_oh1, oh4, oh_L_seq), reverse_complement, character(1))
           ))
           local_splits <- optimize_split_points(
             cds = cds,
@@ -450,9 +456,11 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             tentative_len, " > ", max_block_length,
             " nt). Computing local split."
           ))
+          # Exclude ALL tiles' oh2 (not just current tile's) because BsmBI
+          # 3'WT sub-blocks are deduplicated and shared across tiles.
           local_exclude <- unique(c(
-            oh3, tile$oh2_seq,
-            vapply(c(oh3, tile$oh2_seq), reverse_complement, character(1))
+            oh3, all_oh2,
+            vapply(c(oh3, all_oh2), reverse_complement, character(1))
           ))
           local_splits <- optimize_split_points(
             cds = cds,
@@ -483,9 +491,10 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
               "Tile ", tile$tile_id, ": single 3'WT block oversized (",
               single_block_len, " nt) due to large cassette. Splitting cassette."
             ))
+            # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
             cass_exclude <- unique(c(
-              oh3, tile$oh2_seq,
-              vapply(c(oh3, tile$oh2_seq), reverse_complement, character(1))
+              oh3, all_oh2,
+              vapply(c(oh3, all_oh2), reverse_complement, character(1))
             ))
             cass_splits <- find_cassette_split_points(
               cassette_seq = polIII_for_block,
@@ -655,10 +664,10 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         # Pre-compute cassette splits if needed (shared across sub-block loop)
         cassette_splits_df <- NULL
         if (needs_cassette_split) {
-          # Collect existing overhangs for collision avoidance
+          # Exclude ALL tiles' oh2 + internal junctions — blocks shared via dedup
           cass_exclude <- unique(c(
-            oh3, tile$oh2_seq, internal_oh,
-            vapply(c(oh3, tile$oh2_seq, internal_oh), reverse_complement, character(1))
+            oh3, all_oh2, internal_oh,
+            vapply(c(oh3, all_oh2, internal_oh), reverse_complement, character(1))
           ))
           cassette_splits_df <- find_cassette_split_points(
             cassette_seq = polIII_for_block,
@@ -762,9 +771,10 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       if (polIII_block_len > max_block_length && use_precomputed_splits &&
         !is.null(assembly_plan$hf_set_used) && !is.null(assembly_plan$oh_fidelity_used)) {
         # Cassette alone is oversized — split it
+        # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
         cass_exclude <- unique(c(
-          oh3, tile$oh2_seq,
-          vapply(c(oh3, tile$oh2_seq), reverse_complement, character(1))
+          oh3, all_oh2,
+          vapply(c(oh3, all_oh2), reverse_complement, character(1))
         ))
         cass_splits <- find_cassette_split_points(
           cassette_seq = polIII_for_block,

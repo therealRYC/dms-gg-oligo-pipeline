@@ -252,6 +252,7 @@ test_that("generate_prefixes returns list with linear code for d=3", {
 })
 
 test_that("generate_prefixes uses DNABarcodes for d >= 4", {
+  skip_if_not_installed("DNABarcodes")
   # d=4 should fall through to DNABarcodes since linear code only supports d=3
   result <- generate_prefixes(k = 8, min_hamming = 4, n_needed = 5)
 
