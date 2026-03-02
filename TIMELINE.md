@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-02 14:18:05 | 149 commits | 2026-01-29 to 2026-03-02
+> Auto-generated on 2026-03-02 14:36:49 | 150 commits | 2026-01-29 to 2026-03-02
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-02
 
+- Correct README recommendation: use BsmBI cycling data
 - Add overhang fidelity comparison results and summary README
 - Add WPRE/PolIII insulation design document
 - Add R analysis scripts for overhang fidelity comparison

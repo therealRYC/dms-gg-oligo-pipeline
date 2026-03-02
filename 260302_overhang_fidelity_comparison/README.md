@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-02 -->
-<!-- Last updated: 2026-03-02 — Initial analysis of overhang fidelity across conditions -->
+<!-- Last updated: 2026-03-02 — Corrected recommendation: use BsmBI cycling data -->
 
 # Overhang Fidelity Comparison: T4 Static vs Enzyme Cycling
 
@@ -25,10 +25,18 @@ exactly (0 mismatches across 131,072 cells for BsaI + BsmBI).
 ### 1. Cycling data is too sparse for set-level optimization
 
 The BsaI and BsmBI cycling datasets have ~5x fewer total counts than the
-T4 18h dataset. Many off-diagonal (misligation) entries are exactly zero,
-meaning **any reasonable 25-overhang set achieves perfect (1.0000) set
-fidelity** under cycling data. This makes cycling data uninformative for
-HF set optimization — it cannot distinguish good from bad overhang sets.
+T4 18h dataset (median row sum: ~850 vs ~5600). Under cycling, many
+off-diagonal (misligation) entries are zero — and **these zeros likely
+reflect real biology, not insufficient sequencing depth.** In a cycling
+protocol the restriction enzyme re-cuts misligated products, genuinely
+eliminating many misligations that occur under T4-only static conditions.
+NEB's GetSet tool uses cycling data directly and reports that up to ~20
+four-base overhangs achieve perfect fidelity under cycling (Pryor 2020),
+consistent with our SA finding 25 overhangs at 1.0000 set fidelity.
+
+Note: the T4 18h matrix is also very sparse (86% zeros vs 94% for
+cycling), so both datasets share this characteristic. The cycling data
+still has 56 non-zero off-diagonal entries in a typical top-25 submatrix.
 
 ### 2. BsaI and BsmBI cycling are nearly identical (rho = 0.977)
 
@@ -99,21 +107,36 @@ higher fidelity due to weaker base-pairing reducing misligation.
 
 ## Practical Recommendation
 
-**Use T4 25°C/18h data (Potapov 2018) for both individual and set-level
-overhang scoring.** Rationale:
+**Use BsmBI cycling data (Pryor 2020) for overhang scoring in the pipeline.**
+This matches the actual assembly conditions (BsmBI cycling protocol) and is
+the more conservative choice — T4 static systematically overestimates
+fidelity, especially for palindromes. NEB's own GetSet tool offers
+enzyme-specific cycling datasets for exactly this reason.
 
-1. It has ~5x more counts than cycling data, providing much more statistical
-   power to detect rare misligations
-2. It is the only dataset that can meaningfully differentiate HF sets
-   (cycling data gives trivially perfect sets)
-3. Individual fidelity rankings correlate well across conditions (rho > 0.77),
-   so T4-optimized sets should also perform well under cycling
-4. The T4 data may overestimate palindrome fidelity, but since we already
-   exclude palindromes from HF sets, this is not a concern
+Rationale:
 
-**For the pipeline's overhang selection module:** Use the T4-based
-SA-optimized set (or Potapov Table 1 sets) as the pool of pre-approved
-overhangs. Do not mix data sources.
+1. **Matches experimental conditions.** The pipeline uses BsmBI Golden Gate
+   cycling, not T4 static ligation. The cycling protocol's self-correction
+   mechanism is part of the real system, and the BsmBI data captures it.
+2. **More conservative.** T4 static overestimates fidelity for most overhangs
+   (points above diagonal in scatter plots). Using BsmBI data means any
+   overhang that passes our thresholds will perform at least as well in
+   the actual reaction.
+3. **NEB validates this approach.** The GetSet tool uses cycling data and
+   finds ~20 overhangs at perfect fidelity under BsmBI — our SA confirms this.
+4. **Palindrome accuracy.** T4 inflates palindrome fidelity (2 pass 0.95 vs
+   0 under BsmBI cycling). BsmBI data correctly penalizes palindromes.
+
+**For set optimization:** Since BsmBI cycling yields perfect (1.0) set
+fidelity for 25-overhang sets, the SA is less discriminating at this set
+size. For sets >20 overhangs (e.g., superblock junctions), T4 data may
+provide additional discriminating power as a secondary tiebreaker. But
+individual P_fid ranking and palindrome filtering should use BsmBI data.
+
+**For the pipeline's overhang selection module:** Use the BsmBI cycling
+matrix for individual P_fid scoring. For HF set pools, the Potapov Table 1
+sets remain a good starting point (they perform well under all conditions)
+but should be evaluated and filtered using BsmBI cycling fidelity.
 
 ## Output Files
 
