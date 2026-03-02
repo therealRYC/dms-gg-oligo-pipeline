@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-01 — Backwards-sweep SB partitioning: cassette-aware, balanced superblocks
+# Last updated: 2026-03-01 — Remove deprecated builtin_high_fidelity_overhangs alias
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -128,8 +128,6 @@ builtin_overhang_fidelity <- function() {
   oh_data[order(oh_data$fidelity, decreasing = TRUE), ]
 }
 
-# Keep old name as alias for backward compatibility
-builtin_high_fidelity_overhangs <- builtin_overhang_fidelity
 
 #' Load NEB overhang fidelity data for a given enzyme
 #'
@@ -691,7 +689,7 @@ precompute_boundary_scores <- function(cds, hf_set, oh_fidelity,
     }
     # OPT-005: blacklisted oh2 values (SB boundary collision prevention)
     if (!is.null(blacklisted_oh2) &&
-        (oh2 %in% blacklisted_oh2 || reverse_complement(oh2) %in% blacklisted_oh2)) {
+      (oh2 %in% blacklisted_oh2 || reverse_complement(oh2) %in% blacklisted_oh2)) {
       valid[b] <- FALSE
       next
     }
@@ -960,8 +958,10 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
     if (multi_k) {
       K_min <- max(1L, ceiling(n_codons / effective_max_codons) - 1L)
       K_max <- floor(n_codons / min_codons) - 1L
-      k_range <- seq(max(K_min, K_ideal - dp_k_range),
-                     min(K_max, K_ideal + dp_k_range))
+      k_range <- seq(
+        max(K_min, K_ideal - dp_k_range),
+        min(K_max, K_ideal + dp_k_range)
+      )
       k_range <- k_range[k_range >= 1L]
     } else {
       k_range <- K_ideal
@@ -981,7 +981,7 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
   best_avg_score <- -Inf
   k_results <- list()
   prev_avg <- -Inf
-  diminishing_stop_pct <- 0.005  # 0.5% threshold
+  diminishing_stop_pct <- 0.005 # 0.5% threshold
 
   dp_start <- proc.time()
   for (K in k_range) {
@@ -1615,7 +1615,7 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
     # Walk from last tile backwards. The last SB's total budget is
     # gene_content + cassette <= max_sub_length, where gene_content =
     # gene_len - left_boundary_nt.
-    last_sb_first_tile <- n_tiles  # start with just the last tile
+    last_sb_first_tile <- n_tiles # start with just the last tile
     for (t in rev(seq_len(n_tiles))) {
       # If this tile starts the last SB, gene_content = gene_len - gene_start
       gene_start <- if (t == 1L) 0L else tiles$end_nt[t - 1L]
@@ -1623,7 +1623,7 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
       if (gene_content_candidate + polIII_len <= max_sub_length) {
         last_sb_first_tile <- t
       } else {
-        break  # adding more tiles would overflow
+        break # adding more tiles would overflow
       }
     }
 
@@ -1645,7 +1645,6 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
     }
     # Close the last (cassette-carrying) SB
     sb_end_tiles <- c(sb_end_tiles, n_tiles)
-
   } else {
     # No cassette budget, or cassette will be split separately.
     # Pure forward greedy on all tiles.
@@ -1698,7 +1697,6 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
   n_collisions <- 0L
 
   if (n_sb >= 2L) {
-
     for (bi in seq_len(n_sb - 1L)) {
       boundary_tile <- sb_end_tiles[bi]
       boundary_oh <- tiles$oh2_seq[boundary_tile]
@@ -1731,7 +1729,7 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
         boundary_pos <- tiles$end_nt[boundary_tile]
         for (t in seq_len(n_tiles)) {
           if (tiles$start_nt[t] > boundary_pos &&
-              oh_collides(boundary_oh, tiles$oh1_seq[t])) {
+            oh_collides(boundary_oh, tiles$oh1_seq[t])) {
             has_collision <- TRUE
             break
           }
@@ -1757,7 +1755,7 @@ partition_tile_superblocks <- function(tiles, gene_len, polIII_len,
         for (t in seq_len(n_tiles)) {
           if (t == boundary_tile) next
           if (tiles$end_nt[t] < boundary_pos &&
-              oh_collides(boundary_oh, tiles$oh2_seq[t])) {
+            oh_collides(boundary_oh, tiles$oh2_seq[t])) {
             has_collision <- TRUE
             break
           }
@@ -2081,8 +2079,10 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
 
   for (sb_iter in seq_len(max_sb_iterations)) {
     if (sb_iter > 1L) {
-      cli::cli_h3(paste0("SB-aware refinement iteration ", sb_iter,
-                         " (blacklisted: ", paste(blacklisted_oh2, collapse=", "), ")"))
+      cli::cli_h3(paste0(
+        "SB-aware refinement iteration ", sb_iter,
+        " (blacklisted: ", paste(blacklisted_oh2, collapse = ", "), ")"
+      ))
     }
 
     if (boundary_method == "dp") {
@@ -2192,7 +2192,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       # Check if this boundary_oh collides with oh1 in later SBs (BsaI)
       for (t in seq_len(nrow(tiles))) {
         if (tiles$start_nt[t] > boundary_pos &&
-            oh_collides(boundary_oh, tiles$oh1_seq[t])) {
+          oh_collides(boundary_oh, tiles$oh1_seq[t])) {
           new_blacklist <- c(new_blacklist, boundary_oh)
           break
         }
@@ -2201,7 +2201,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       for (t in seq_len(nrow(tiles))) {
         if (t == boundary_tile) next
         if (tiles$end_nt[t] < boundary_pos &&
-            oh_collides(boundary_oh, tiles$oh2_seq[t])) {
+          oh_collides(boundary_oh, tiles$oh2_seq[t])) {
           new_blacklist <- c(new_blacklist, boundary_oh)
           break
         }
@@ -2228,7 +2228,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
 
     blacklisted_oh2 <- unique(c(blacklisted_oh2, new_blacklist))
     cli::cli_alert_info(paste0(
-      "SB collision: blacklisting oh2=", paste(new_blacklist, collapse=", "),
+      "SB collision: blacklisting oh2=", paste(new_blacklist, collapse = ", "),
       ". Re-running DP..."
     ))
   } # end sb_iter loop

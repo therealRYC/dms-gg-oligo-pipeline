@@ -7,9 +7,9 @@ test_that("builtin overhang fidelity returns all 256 overhangs", {
   expect_true(all(oh_data$fidelity > 0 & oh_data$fidelity <= 1))
   # At least 60 overhangs should have >= 0.95 fidelity
   expect_gte(sum(oh_data$fidelity >= 0.95), 60)
-  # backward compat alias
-  oh_data2 <- builtin_high_fidelity_overhangs()
-  expect_equal(nrow(oh_data2), 256)
+  # Verify top fidelity overhangs are well-known sequences
+  top_oh <- oh_data$overhang[oh_data$fidelity >= 0.99]
+  expect_true(length(top_oh) > 0)
 })
 
 test_that("generate_hf_set selects mutually orthogonal overhangs", {

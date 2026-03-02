@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-21 — Fix oligo naming: include barcode_idx when barcodes_per_variant > 1
+# Last updated: 2026-03-01 — Remove dead functions build_mutant_tile() and build_oligo()
 # 08_oligo_assembly.R — Assemble universal oligo sequences for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 #
@@ -38,13 +38,14 @@
 assemble_oligos <- function(variants, cds, barcodes, tiles,
                             oh3, oh4,
                             max_oligo_length = MAX_OLIGO_LENGTH) {
-
   n <- nrow(variants)
 
   # --- (B) Pre-compute invariant enzyme site strings ---
   # These are constant for ALL oligos — compute once, not n times.
-  bsai_5prime <- paste0(ENZYMES$BsaI$recog,
-                         paste(rep("A", ENZYMES$BsaI$spacer_len), collapse = ""))
+  bsai_5prime <- paste0(
+    ENZYMES$BsaI$recog,
+    paste(rep("A", ENZYMES$BsaI$spacer_len), collapse = "")
+  )
   bsmbi_oh3_str <- orient_enzyme_site("BsmBI", oh3, "forward")
   bsai_oh4_str <- orient_enzyme_site("BsaI", oh4, "reverse")
 
@@ -102,8 +103,10 @@ assemble_oligos <- function(variants, cds, barcodes, tiles,
     )
     # Include barcode_idx in name when barcodes_per_variant > 1 to ensure uniqueness
     if ("barcode_idx" %in% names(variants) && max(variants$barcode_idx) > 1L) {
-      oligo_names[idx] <- paste0("oligo_", variants$variant_id[idx],
-                                  "_b", variants$barcode_idx[idx])
+      oligo_names[idx] <- paste0(
+        "oligo_", variants$variant_id[idx],
+        "_b", variants$barcode_idx[idx]
+      )
     } else {
       oligo_names[idx] <- paste0("oligo_", variants$variant_id[idx])
     }
@@ -114,10 +117,10 @@ assemble_oligos <- function(variants, cds, barcodes, tiles,
   # Build output data frame once at end (avoids per-row assignment overhead)
   oligos <- data.frame(
     oligo_name = oligo_names,
-    sequence   = sequences,
-    length     = lengths,
+    sequence = sequences,
+    length = lengths,
     variant_id = variants$variant_id,
-    tile_id    = variants$tile_id,
+    tile_id = variants$tile_id,
     stringsAsFactors = FALSE
   )
 
@@ -138,49 +141,4 @@ assemble_oligos <- function(variants, cds, barcodes, tiles,
   }
 
   oligos
-}
-
-#' Build the mutant tile nucleotide sequence
-#'
-#' Returns the full tile (including oh1 and oh2 flanks) with the mutation
-#' applied. The caller strips oh1/oh2 to get just the mutable region.
-#'
-#' @param cds Full CDS
-#' @param mut_position Codon position (1-based) of mutation
-#' @param mut_codon Mutant codon
-#' @param tile_start_nt Start nucleotide of tile (1-based)
-#' @param tile_end_nt End nucleotide of tile (1-based)
-#' @return Character string of mutant tile sequence (includes oh1/oh2 flanks)
-build_mutant_tile <- function(cds, mut_position, mut_codon, tile_start_nt, tile_end_nt) {
-  mut_cds <- replace_codon(cds, mut_position, mut_codon)
-  substring(mut_cds, tile_start_nt, tile_end_nt)
-}
-
-#' Build a universal oligo sequence for the 3-enzyme architecture
-#'
-#' All tile types use the same structure:
-#'   BsaI_fwd + oh1 + mutable_region + BsmBI_rev_oh2 + BsmBI_fwd_oh3 + barcode + BsaI_rev_oh4
-#'
-#' @param mutable_region Mutable portion of the tile (excludes oh1/oh2 flanks)
-#' @param barcode Barcode sequence
-#' @param oh1_seq 4-nt WT gene sequence at tile's 5' boundary
-#' @param oh2_seq 4-nt WT gene sequence at tile's 3' boundary
-#' @param oh3 Fixed BsmBI overhang (PolIII-barcode junction)
-#' @param oh4 Fixed BsaI overhang (barcode-helper junction)
-#' @return Complete oligo sequence
-build_oligo <- function(mutable_region, barcode, oh1_seq, oh2_seq, oh3, oh4) {
-  # 5' BsaI forward site: recognition + spacer (no overhang needed — oh1 IS the overhang)
-  bsai_5prime <- paste0(ENZYMES$BsaI$recog,
-                        paste(rep("A", ENZYMES$BsaI$spacer_len), collapse = ""))  # 7 nt
-
-  # BsmBI reverse site embedding oh2: enzyme reads on complement strand
-  bsmbi_oh2 <- orient_enzyme_site("BsmBI", oh2_seq, "reverse")  # 11 nt
-
-  # BsmBI forward site embedding oh3
-  bsmbi_oh3 <- orient_enzyme_site("BsmBI", oh3, "forward")  # 11 nt
-
-  # 3' BsaI reverse site embedding oh4
-  bsai_oh4 <- orient_enzyme_site("BsaI", oh4, "reverse")  # 11 nt
-
-  paste0(bsai_5prime, oh1_seq, mutable_region, bsmbi_oh2, bsmbi_oh3, barcode, bsai_oh4)
 }
