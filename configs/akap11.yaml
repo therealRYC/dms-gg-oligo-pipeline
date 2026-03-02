@@ -1,0 +1,16 @@
+# Created: 2026-03-01
+# Last updated: 2026-03-01 — Initial AKAP11 config
+
+# AKAP11 — NM_016248, 1902 codons (5706 nt)
+# Minimal config; inherits defaults from config_template.yaml
+
+gene_fasta: "data/AKAP11_NM_016248_CDS.fasta"
+gene_name: "AKAP11"
+output_dir: "output/akap11"
+
+# PaqCI overhangs (destination vector)
+paqci_star2: "AATG"
+paqci_star1: "GCTA"
+
+# Fast validation run (1 barcode per variant)
+barcodes_per_variant: 1

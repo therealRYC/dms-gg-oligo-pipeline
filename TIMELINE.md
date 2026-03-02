@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-01 20:50:25 | 139 commits | 2026-01-29 to 2026-03-01
+> Auto-generated on 2026-03-01 20:51:17 | 140 commits | 2026-01-29 to 2026-03-01
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-01
 
+- Add gene-specific config files for GRIN2A, AKAP11, and TRIO
 - Add TIMELINE.md with auto-update script and post-commit hook
 - Remove dead functions and deprecated alias
 - Archive historical example configs and helper scripts
