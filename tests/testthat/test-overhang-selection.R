@@ -301,10 +301,9 @@ test_that("dp_solve_k returns NULL for impossible K", {
 
 test_that("precompute_boundary_scores returns correct structure", {
   cds <- TEST_GENE_SEQ
-  hf_set <- load_high_fidelity_set()
   oh_fidelity <- builtin_overhang_fidelity()
 
-  precomp <- precompute_boundary_scores(cds, hf_set, oh_fidelity)
+  precomp <- precompute_boundary_scores(cds, oh_fidelity)
   n_codons <- nchar(cds) %/% 3
 
   expect_equal(length(precomp$oh1_seq), n_codons)
@@ -370,20 +369,16 @@ test_that("search_tile_boundaries_dp produces same or better results than greedy
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  hf_set <- load_high_fidelity_set()
   oh_fidelity <- builtin_overhang_fidelity()
 
   tiles_greedy <- search_tile_boundaries(cds, tile_size,
-    hf_set = hf_set,
     oh_fidelity = oh_fidelity
   )
   tiles_dp <- search_tile_boundaries_dp(cds, tile_size,
-    hf_set = hf_set,
     oh_fidelity = oh_fidelity, multi_k = TRUE
   )
 
-  # DP optimizes total boundary score (HF bonus + fidelity), and may choose
-
+  # DP optimizes total boundary score (P_fid * P_eff), and may choose
   # a different K than greedy. With multi_k=TRUE, compare average boundary
   # fidelity rather than HF counts (which aren't comparable across different K).
   greedy_fid <- mean(c(
@@ -486,7 +481,6 @@ test_that("oh3 and oh4 are never homopolymers (long gene)", {
 
 test_that("dp_solve_superblock_splits returns empty for short region", {
   cds <- TEST_GENE_SEQ
-  hf_set <- load_high_fidelity_set()
   oh_fidelity <- builtin_overhang_fidelity()
 
   # Region of 200 nt + 0 extra < 1778 max_sub_length → no splits needed
@@ -494,14 +488,13 @@ test_that("dp_solve_superblock_splits returns empty for short region", {
     cds,
     region_start_nt = 1L, region_end_nt = 200L,
     max_sub_length = 1778L, extra_content_length = 0L,
-    exclude_ohs = c("ATGG"), hf_set = hf_set, oh_fidelity = oh_fidelity
+    exclude_ohs = c("ATGG"), oh_fidelity = oh_fidelity
   )
   expect_equal(nrow(result), 0)
 })
 
 test_that("dp_solve_superblock_splits finds valid splits for long region", {
   cds <- TEST_LONG_GENE_SEQ
-  hf_set <- load_high_fidelity_set()
   oh_fidelity <- builtin_overhang_fidelity()
   gene_len <- nchar(cds)
 
@@ -512,7 +505,7 @@ test_that("dp_solve_superblock_splits finds valid splits for long region", {
     region_start_nt = 244L, region_end_nt = gene_len,
     max_sub_length = 1778L, extra_content_length = nchar(TEST_POLIII),
     exclude_ohs = c("ATGG", "ACTA"),
-    hf_set = hf_set, oh_fidelity = oh_fidelity
+    oh_fidelity = oh_fidelity
   )
   expect_true(nrow(result) >= 1, info = "Should need at least 1 split")
   expect_true(all(nchar(result$junction_oh) == 4))
@@ -698,51 +691,43 @@ test_that("compute_overhang_efficiency handles degenerate matrix gracefully", {
   expect_true(all(eff == 1.0))
 })
 
-test_that("oogga_score computes P_fid * P_eff * (1 + w_hf * in_HF) correctly", {
+test_that("overhang_score computes P_fid * P_eff correctly", {
   fid_lookup <- c("AAAA" = 0.996, "AACG" = 0.934, "GGCG" = 0.669)
   eff_lookup <- c("AAAA" = 1.0, "AACG" = 0.8, "GGCG" = 0.4)
-  hf_set <- c("AACG", "AAAA") # AACG is in HF, GGCG is not
 
-  # AACG: in HF -> 0.934 * 0.8 * (1 + 0.5 * 1) = 0.934 * 0.8 * 1.5
-  score_hf <- oogga_score("AACG", fid_lookup, eff_lookup, hf_set, w_hf = 0.5)
-  expect_equal(score_hf, 0.934 * 0.8 * 1.5, tolerance = 1e-6)
+  # Score = fid * eff (no HF bonus — BUG-008)
+  score1 <- overhang_score("AACG", fid_lookup, eff_lookup)
+  expect_equal(score1, 0.934 * 0.8, tolerance = 1e-6)
 
-  # GGCG: not in HF -> 0.669 * 0.4 * (1 + 0.5 * 0) = 0.669 * 0.4 * 1.0
-  score_nohf <- oogga_score("GGCG", fid_lookup, eff_lookup, hf_set, w_hf = 0.5)
-  expect_equal(score_nohf, 0.669 * 0.4 * 1.0, tolerance = 1e-6)
+  score2 <- overhang_score("GGCG", fid_lookup, eff_lookup)
+  expect_equal(score2, 0.669 * 0.4, tolerance = 1e-6)
+
+  score3 <- overhang_score("AAAA", fid_lookup, eff_lookup)
+  expect_equal(score3, 0.996 * 1.0, tolerance = 1e-6)
 })
 
-test_that("oogga_score with w_hf=0 gives pure OOGGA (no HF bonus)", {
-  fid_lookup <- c("AACG" = 0.934)
-  eff_lookup <- c("AACG" = 0.8)
-  hf_set <- c("AACG")
-
-  score <- oogga_score("AACG", fid_lookup, eff_lookup, hf_set, w_hf = 0.0)
-  expect_equal(score, 0.934 * 0.8 * 1.0, tolerance = 1e-6)
-})
-
-test_that("oogga_score falls back to 0.5 for unknown overhangs", {
+test_that("overhang_score falls back to 0.5 for unknown overhangs", {
   fid_lookup <- c("AAAA" = 0.996)
   eff_lookup <- c("AAAA" = 1.0)
-  hf_set <- character(0)
 
   # "NNNN" not in lookups -> fid=0.5, eff=0.5
-  score <- oogga_score("NNNN", fid_lookup, eff_lookup, hf_set)
-  expect_equal(score, 0.5 * 0.5 * 1.0, tolerance = 1e-6)
+  score <- overhang_score("NNNN", fid_lookup, eff_lookup)
+  expect_equal(score, 0.5 * 0.5, tolerance = 1e-6)
 })
 
-test_that("oogga_score returns higher values for HF overhangs than non-HF with similar fidelity", {
-  # Two overhangs with identical fidelity and efficiency, but one is HF
+test_that("oogga_score legacy alias ignores hf_set and w_hf (BUG-008)", {
+  # oogga_score now delegates to overhang_score, ignoring HF bonus params
   fid_lookup <- c("AACG" = 0.95, "TGGT" = 0.95)
   eff_lookup <- c("AACG" = 0.85, "TGGT" = 0.85)
   hf_set <- c("AACG")
 
-  score_hf <- oogga_score("AACG", fid_lookup, eff_lookup, hf_set)
-  score_nohf <- oogga_score("TGGT", fid_lookup, eff_lookup, hf_set)
+  # Both should score equally despite HF membership — bonus is dropped
+  score_hf <- oogga_score("AACG", fid_lookup, eff_lookup, hf_set, w_hf = 0.5)
+  score_nohf <- oogga_score("TGGT", fid_lookup, eff_lookup, hf_set, w_hf = 0.5)
 
-  expect_gt(score_hf, score_nohf)
-  # The ratio should be (1 + w_hf) = 1.5
-  expect_equal(score_hf / score_nohf, 1.5, tolerance = 1e-6)
+  expect_equal(score_hf, 0.95 * 0.85, tolerance = 1e-6)
+  expect_equal(score_nohf, 0.95 * 0.85, tolerance = 1e-6)
+  expect_equal(score_hf, score_nohf, tolerance = 1e-6)
 })
 
 test_that("precompute_boundary_scores works with eff_lookup parameter", {
@@ -750,21 +735,20 @@ test_that("precompute_boundary_scores works with eff_lookup parameter", {
   skip_if_not(exists("TEST_GENE_SEQ"), message = "TEST_GENE_SEQ not available")
 
   oh_data <- builtin_overhang_fidelity()
-  hf_set <- generate_hf_set(oh_data, 20)
 
   # Generate efficiency lookup
   mat <- generate_pairwise_from_fidelity(oh_data)
   eff_lookup <- compute_overhang_efficiency(mat)
 
-  # Call with eff_lookup (new scoring)
+  # Call with eff_lookup (new scoring: P_fid * P_eff)
   result_with_eff <- precompute_boundary_scores(
-    TEST_GENE_SEQ, hf_set, oh_data,
+    TEST_GENE_SEQ, oh_data,
     eff_lookup = eff_lookup
   )
 
   # Call without eff_lookup (default = 1.0 efficiency)
   result_no_eff <- precompute_boundary_scores(
-    TEST_GENE_SEQ, hf_set, oh_data,
+    TEST_GENE_SEQ, oh_data,
     eff_lookup = NULL
   )
 

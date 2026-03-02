@@ -52,7 +52,6 @@ make_test_tiles <- function(n_tiles, tile_width_codons = 80L,
     oh1 <- substring(gene_seq, sn, sn + 3L)
     oh2 <- substring(gene_seq, en - 3L, en)
 
-    hf_set <- load_high_fidelity_set()
     oh_fidelity <- builtin_overhang_fidelity()
     fid_lookup <- oh_fidelity$fidelity
     names(fid_lookup) <- oh_fidelity$overhang
@@ -64,7 +63,7 @@ make_test_tiles <- function(n_tiles, tile_width_codons = 80L,
       tile_id = i, start_codon = sc, end_codon = ec,
       start_nt = sn, end_nt = en,
       oh1_seq = oh1, oh2_seq = oh2,
-      oh1_in_hf = oh1 %in% hf_set, oh2_in_hf = oh2 %in% hf_set,
+      oh1_in_hf = oh1 %in% POTAPOV_TABLE1_SET3_25, oh2_in_hf = oh2 %in% POTAPOV_TABLE1_SET3_25,
       oh1_fidelity = oh1_fid, oh2_fidelity = oh2_fid,
       tile_seq = substring(gene_seq, sn, en),
       boundary_shift = 0L,
