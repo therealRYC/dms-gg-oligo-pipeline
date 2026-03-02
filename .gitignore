@@ -11,10 +11,11 @@ output/
 results/
 figures/
 *.html
-260*/
+/260*/
 
 # Raw data downloads (processed versions in .rds are tracked)
 data/o537-Human_CDS.tsv
+data/ptk4-gfp.gb
 
 # Claude Code
 .claude/
