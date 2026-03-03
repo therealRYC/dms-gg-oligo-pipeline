@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-02 -->
-<!-- Last updated: 2026-03-02 — Initial filing of WPRE/PolIII insulation analysis -->
+<!-- Last updated: 2026-03-03 — Mark implementation items complete -->
 
 # WPRE, PolyA, and PolII/PolIII Insulation Design
 
@@ -148,7 +148,16 @@ The PolIII terminator (TTTTT, 5-6 T's) should NOT be conflated with the PaqCI ov
 
 ## 7. Next Steps
 
-- [ ] Obtain exact sequences for WPRE, bGH polyA, and alpha-2 globin pause element
-- [ ] Add elements to `intergene_elements` in pipeline config YAML
-- [ ] Run pipeline to verify cassette splitting handles the total size
-- [ ] Confirm no BsmBI/PaqCI sites in any of the added elements (domesticate if needed)
+- [x] Obtain exact sequences for WPRE, bGH polyA ~~, and alpha-2 globin pause element~~
+  - bGH polyA (225 bp) verified: pcDNA3.1 / GenBank J00008.1, EF550208.1, U55762.1
+  - Alpha-globin pause **deferred** — not needed for field-standard design
+- [x] Add elements to `intergene_elements` in pipeline config YAML
+  - Updated `configs/grin2a.yaml` and `configs/grin2a_long_cassette.yaml`
+- [x] Confirm no BsmBI/PaqCI sites in bGH polyA (verified clean)
+- [ ] Run pipeline to verify cassette sizing and outputs (in progress)
+
+## 8. Final Decision (2026-03-03)
+
+**WPRE + bGH polyA, no additional insulation.** Follows field standard (Perturb-seq,
+CROP-seq, lentiCRISPR v2). Alpha-globin pause and cHS4 available as future config-only
+additions. See `docs/cassette_design_rationale.md` for full rationale.

@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-03 13:57:15 | 158 commits | 2026-01-29 to 2026-03-03
+> Auto-generated on 2026-03-03 14:06:23 | 159 commits | 2026-01-29 to 2026-03-03
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-03
 
+- Update plan files: mark cassette design items complete
 - Replace hGH polyA with bGH polyA (225bp) in downstream cassette
 
 ### 2026-03-02
