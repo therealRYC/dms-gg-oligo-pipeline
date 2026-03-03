@@ -1,16 +1,24 @@
 <!-- Created: 2026-03-03 -->
-<!-- Last updated: 2026-03-03 — Initial canonical sequence reference -->
+<!-- Last updated: 2026-03-03 — Add pTK4 provenance for all sequences -->
 
 # Canonical Cassette Element Sequences
 
 Reference sequences for downstream cassette elements used in the DMS-GG oligo pipeline.
 These are the verified, canonical sequences referenced by pipeline config files.
 
+**Provenance:** All three sequences (WPRE, spacer, bGH polyA) were obtained from the
+**pTK4 vector** (Bhatt et al., Addgene) and sequence-confirmed against the pTK4 map.
+The WPRE and spacer come from the GFP cassette region (downstream of GFP, upstream of
+hGH polyA). The bGH polyA comes from the puromycin resistance cassette elsewhere in pTK4,
+which uses bGH polyA rather than hGH polyA. We swapped out the hGH polyA from the GFP
+region for the shorter bGH polyA from the puromycin region.
+
 ---
 
 ## bGH polyA Signal (225 bp)
 
-**Source:** Bovine growth hormone polyadenylation signal from pcDNA3.1 (Thermo Fisher).
+**Source:** pTK4 vector, puromycin resistance cassette polyA site. This is a separate
+region from the WPRE-spacer-hGH polyA downstream of GFP. Sequence-confirmed against pTK4.
 Cross-verified against:
 - GenBank J00008.1 (bovine GH gene, Woychik et al. 1982)
 - GenBank EF550208.1 (pcDNA3.1+PA vector)
@@ -36,8 +44,9 @@ CGGTGGGCTCTATGG
 
 ## WPRE (Woodchuck Hepatitis Virus Post-transcriptional Regulatory Element, 589 bp)
 
-**Source:** pTK4-GFP (Addgene). Standard WPRE sequence used across lentiviral and
-AAV expression vectors.
+**Source:** pTK4 vector, GFP cassette region (downstream of GFP, upstream of hGH polyA).
+Sequence-confirmed against pTK4. Standard WPRE sequence used across lentiviral and AAV
+expression vectors.
 
 **Enzyme sites:** None (no BsmBI or PaqCI sites).
 
@@ -62,7 +71,8 @@ TCGGATCTCCCTTTGGGCCGCCTCCCCGC
 
 ## Spacer (31 bp)
 
-**Source:** Derived from pTK4-GFP vector. Placed between WPRE and polyA signal.
+**Source:** pTK4 vector, GFP cassette region (between WPRE and hGH polyA).
+Sequence-confirmed against pTK4.
 
 ```
 ATCGATACCGAGCGCTGGTCGACAGATCTAC

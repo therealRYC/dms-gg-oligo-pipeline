@@ -17,7 +17,7 @@ The final construct in the plasmid:
 ```
 [Backbone]--PaqCI**--[Gene w/ mutation]--[Intergene elements]--[PolIII]--[Barcode]--PaqCI*--[Backbone]
 ```
-Intergene elements (e.g., WPRE, hGH polyA) are optional and configured per experiment.
+Intergene elements (e.g., WPRE, bGH polyA) are optional and configured per experiment.
 
 Every oligo in the pool has the same universal structure regardless of tile position:
 ```
@@ -141,7 +141,7 @@ dms-gg-oligo-pipeline/
 │   ├── grin2a.yaml             # GRIN2A (1464 codons)
 │   ├── akap11.yaml             # AKAP11 (1902 codons)
 │   ├── trio.yaml               # TRIO (3098 codons)
-│   └── grin2a_long_cassette.yaml  # GRIN2A + P2A-EGFP (2133 nt cassette, split test)
+│   └── grin2a_long_cassette.yaml  # GRIN2A + P2A-EGFP (1881 nt cassette, split test)
 ├── R/
 │   ├── constants.R             # Enzyme definitions, synthesis limits, AA alphabet
 │   ├── utils.R                 # Shared helpers (reverse complement, GC content, etc.)
@@ -209,7 +209,25 @@ The pipeline has been validated on three genes of increasing size plus a cassett
 
 Pre-built configs for each gene are in `configs/`. Runtimes measured on WSL2 with `barcodes_per_variant=1`. At `barcodes_per_variant=10`, expect approximately 10x longer runtimes due to barcode generation and oligo assembly scaling (e.g., GRIN2A: ~45 min, AKAP11: ~77 min).
 
-The GRIN2A + P2A-EGFP test case (`configs/grin2a_long_cassette.yaml`) validates cassette splitting: the downstream cassette (P2A-EGFP + WPRE + spacer + hGH polyA = 2133 nt) exceeds the 1800 nt synthesis limit and is automatically split into 2 BsmBI-connected fragments.
+The GRIN2A + P2A-EGFP test case (`configs/grin2a_long_cassette.yaml`) validates cassette splitting: the downstream cassette (P2A-EGFP + WPRE + spacer + bGH polyA = 1881 nt) exceeds the 1778 nt cassette block synthesis limit and is automatically split into 2 BsmBI-connected fragments.
+
+## Default Cassette Sequences
+
+The default configs use the following downstream cassette elements between the gene 3' end and the PolIII promoter:
+
+```
+[Gene 3' end] -- [WPRE 589bp] -- [spacer 31bp] -- [bGH polyA 225bp] -- [hU6+T7 ~250bp] -- [barcode] -- ...
+```
+
+All three sequences were obtained from the **pTK4 vector** (Bhatt et al., Addgene):
+
+| Element | Size | Source region in pTK4 | Notes |
+|---------|------|-----------------------|-------|
+| WPRE | 589 bp | Downstream of GFP cassette | Woodchuck hepatitis virus post-transcriptional regulatory element. Enhances mRNA processing and reduces PolII readthrough. |
+| Spacer | 31 bp | Between WPRE and hGH polyA (downstream of GFP) | Contains ClaI and SalI sites. Retained for consistency with pTK4 and XPRESSO vector designs. |
+| bGH polyA | 225 bp | Puromycin resistance polyA site (separate from the WPRE-spacer-hGH region) | Bovine growth hormone polyadenylation signal. The pTK4 GFP cassette uses hGH polyA (477 bp) downstream of WPRE, but the puromycin cassette elsewhere in pTK4 uses the shorter bGH polyA. We use bGH polyA for its smaller size and wider use across standard vectors (pcDNA3.1, pEGFP, pAAV). |
+
+The bGH polyA sequence matches GenBank J00008.1 (bovine GH gene), EF550208.1 (pcDNA3.1+PA), and U55762.1 (pEGFP-N1). No BsmBI or PaqCI enzyme sites. See `data/cassette_elements/README.md` for full sequences and `docs/cassette_design_rationale.md` for design rationale.
 
 ## Overhang Fidelity Data
 
