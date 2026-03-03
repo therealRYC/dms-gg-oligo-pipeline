@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-03 14:19:52 | 160 commits | 2026-01-29 to 2026-03-03
+> Auto-generated on 2026-03-03 14:23:53 | 161 commits | 2026-01-29 to 2026-03-03
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-03
 
+- Track BsmBI cycling pairwise matrix, gitignore Pryor raw data
 - Document pTK4 provenance for all cassette element sequences
 - Update plan files: mark cassette design items complete
 - Replace hGH polyA with bGH polyA (225bp) in downstream cassette
