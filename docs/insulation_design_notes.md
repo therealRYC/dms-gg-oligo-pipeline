@@ -1,4 +1,10 @@
+<!-- Created: 2026-03-02 -->
+<!-- Last updated: 2026-03-03 — Final decision: WPRE + bGH polyA, add PolIII terminator section -->
+
 # Insulation Design Notes: PolII/PolIII Boundary
+
+> **Decision (2026-03-03):** WPRE + bGH polyA, no additional insulation elements.
+> See `docs/cassette_design_rationale.md` for full research and reasoning.
 
 ## Context
 
@@ -14,26 +20,29 @@ PolII transcription termination is stochastic and occurs **200–2000 nt downstr
 
 ---
 
-## Recommended Cassette Design
+## Final Cassette Design (2026-03-03)
 
 ```
-[Gene] — [WPRE, ~592 bp] — [bGH polyA, ~225 bp] — [alpha-globin pause, ~90 bp] — [hU6+T7, ~260 bp] — [barcode, 20 nt] — [PolIII terminator, 6 nt TTTTT+N] — [PaqCI site + overhang, ~15 nt]
+[Gene] — [WPRE, 589 bp] — [spacer, 31 bp] — [bGH polyA, 225 bp] — [hU6+T7, ~250 bp] — [barcode, 20 nt] — [PolIII terminator, 6 nt TTTTT+N] — [PaqCI site + overhang, ~15 nt]
+                                                                                                              ↑ in destination vector ↑
 ```
 
-**Note:** The PolIII terminator (TTTTT) and PaqCI overhang are separate elements. TTTT would be a poor Golden Gate overhang.
+**Decision:** WPRE + bGH polyA only. No alpha-globin pause or cHS4 insulator. This follows the
+field standard used by every major functional genomics platform (Perturb-seq, CROP-seq,
+lentiCRISPR v2). Alpha-globin pause or cHS4 can be added later as config changes if needed.
 
 ### Size Budget
 
-| Element | Size (bp) | Notes |
-|---------|-----------|-------|
-| WPRE | 592 | Post-transcriptional regulatory element, enhances mRNA stability |
-| bGH polyA | ~225 | Bovine growth hormone polyadenylation signal |
-| Alpha-globin pause | ~90 | Human alpha-2 globin 3' flanking pause element |
-| hU6 + embedded T7 | ~260 | Human U6 PolIII promoter with internal T7 promoter |
-| Barcode | 20 | Programmed barcode (Hamming distance ≥ 3) |
-| PolIII terminator | 6 | TTTTT + 1 nt spacer |
-| PaqCI site + overhang | ~15 | Level 2 cloning site |
-| **Total** | **~1,208** | Well within 1,800 nt synthesis limit |
+| Element | Size (bp) | Lives on |
+|---------|-----------|----------|
+| WPRE | 589 | Gene block (intergene element) |
+| Spacer | 31 | Gene block (intergene element) |
+| bGH polyA | 225 | Gene block (intergene element) |
+| hU6 + embedded T7 | ~250 | Gene block (core; last 5 nt become BsmBI oh) |
+| Barcode | 20 | Oligo |
+| PolIII terminator | 6 | Destination vector backbone |
+| PaqCI site + overhang | ~15 | Destination vector backbone |
+| **Total** | **~1,136** | Well within 1,800 nt synthesis limit |
 
 ---
 
@@ -133,10 +142,42 @@ PolII + polyA + U6 in tandem arrangement. Measured R² > 0.84 concordance betwee
 
 ---
 
-## Optional Enhancements (Future)
+## PolIII Terminator Placement
 
-1. **cHS4 core insulator** (~250 bp): Add between pause element and U6 for chromatin boundary protection. More relevant if using chromosomal integration (AAVS1, PiggyBac) in iPSCs. Total cassette would be ~1,458 bp.
+The PolIII terminator (>=4 T's, typically TTTTT) must be **after the barcode** but is
+**not part of the pipeline output**. It lives in the destination vector backbone.
 
-2. **MAZ element** (~50–100 bp): G-rich pause site from human C2 complement gene. Works synergistically with polyA signals. Could substitute for or supplement alpha-globin pause.
+After PaqCI Level 2 assembly:
 
-3. **SV40 late polyA** (~240 bp): ~3x faster termination than bGH. Could replace bGH if read-through is observed experimentally. Similar size.
+```
+...barcode — GCTA — TTTTTX — [rest of backbone]
+              ↑        ↑
+         PaqCI* oh   PolIII terminator (in backbone)
+```
+
+### Destination vector requirements
+
+1. **PolIII terminator** (TTTTT) immediately after PaqCI* site in backbone
+2. **PaqCI* overhang must NOT contain TTTT** — would cause premature PolIII termination.
+   Current default `GCTA` is safe.
+3. ~4 nt of PaqCI* overhang sequence gets transcribed between barcode and terminator.
+   These are constant across all constructs and trimmed during demultiplexing.
+
+---
+
+## Optional Enhancements (Future, Config-Only Changes)
+
+These can be added as `intergene_elements` in the config YAML without any code changes:
+
+1. **Alpha-globin pause element** (~90 bp): From HBA2 3' flanking region. Slows PolII
+   so Xrn2 torpedo catches up. Eggermont & Proudfoot 1993 showed polyA + pause
+   prevents tandem interference. Place between bGH polyA and PolIII promoter.
+
+2. **cHS4 core insulator** (~250 bp): CTCF-mediated enhancer blocking. More relevant
+   for chromosomal integration sites (AAVS1, PiggyBac) in iPSCs.
+
+3. **MAZ element** (~50-100 bp): G-rich pause site from human C2 complement gene.
+   Works synergistically with polyA signals (Ashfield et al. 1991).
+
+4. **SV40 late polyA** (~240 bp): ~3x faster termination than bGH. Could replace bGH
+   if read-through is observed experimentally. Similar size.
