@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-03 16:29:35 | 161 commits | 2026-01-29 to 2026-03-03
+> Auto-generated on 2026-03-03 19:47:03 | 162 commits | 2026-01-29 to 2026-03-03
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-03
 
+- Add WT controls and optional synonymous variants to mutation design
 - Update README: barcode linear code cutoff, SB collision resolution method
 - Document pTK4 provenance for all cassette element sequences
 - Update plan files: mark cassette design items complete
