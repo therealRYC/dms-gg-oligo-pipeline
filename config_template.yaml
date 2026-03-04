@@ -16,7 +16,7 @@ polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGAT
 
 # --- Intergene Elements ---
 # Sequence elements placed between the gene 3' end and the PolIII promoter.
-# These are from the pTK4-GFP vector (Addgene): WPRE + spacer + hGH polyA.
+# Default: WPRE + spacer + bGH polyA (from pcDNA3.1 / pTK4-derived designs).
 #
 # Each element has a name and a sequence. Elements are concatenated in order
 # and placed between the gene and PolIII promoter in the BsmBI gene blocks.
@@ -24,7 +24,7 @@ polIII_promoter: "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGAT
 # superblock splitting handles it automatically.
 #
 # Final construct layout:
-#   [Gene] — [WPRE] — [spacer] — [hGH_polyA] — [PolIII] — [Barcode]
+#   [Gene] — [WPRE] — [spacer] — [bGH_polyA] — [PolIII] — [Barcode]
 #
 # To run WITHOUT intergene elements (PolIII directly after gene), comment out
 # or delete the intergene_elements section below.
@@ -38,10 +38,11 @@ intergene_elements:
     # 589 nt — WPRE from pTK4-GFP (Addgene). WHV post-transcriptional regulatory element.
   - name: "spacer"
     sequence: "ATCGATACCGAGCGCTGGTCGACAGATCTAC"
-    # 31 nt — Spacer between WPRE and hGH polyA, from pTK4-GFP.
-  - name: "hGH_polyA"
-    sequence: "GGGTGGCATCCCTGTGACCCCTCCCCAGTGCCTCTCCTGGCCCTGGAAGTTGCCACTCCAGTGCCCACCAGCCTTGTCCTAATAAAATTAAGTTGCATCATTTTGTCTGACTAGGTGTCCTTCTATAATATTATGGGGTGGAGGGGGGTGGTATGGAGCAAGGGGCAAGTTGGGAAGACAACCTGTAGGGCCTGCGGGGTCTATTGGGAACCAAGCTGGAGTGCAGTGGCACAATCTTGGCTCACTGCAATCTCCGCCTCCTGGGTTCAAGCGATTCTCCTGCCTCAGCCTCCCGAGTTGTTGGGATTCCAGGCATGCATGACCAGGCTCAGCTAATTTTTGTTTTTTTGGTAGAGACGGGGTTTCACCATATTGGCCAGGCTGGTCTCCAACTCCTAATCTCAGGTGATCTACCCACCTTGGCCTCCCAAATTGCTGGGATTACAGGCGTGAACCACTGCTCCCTTCCCTGTCCTT"
-    # 477 nt — Human growth hormone polyA signal, from pTK4-GFP (Addgene).
+    # 31 nt — Spacer between WPRE and polyA, from pTK4-GFP.
+  - name: "bGH_polyA"
+    sequence: "CTGTGCCTTCTAGTTGCCAGCCATCTGTTGTTTGCCCCTCCCCCGTGCCTTCCTTGACCCTGGAAGGTGCCACTCCCACTGTCCTTTCCTAATAAAATGAGGAAATTGCATCGCATTGTCTGAGTAGGTGTCATTCTATTCTGGGGGGTGGGGTGGGGCAGGACAGCAAGGGGGAGGATTGGGAAGACAATAGCAGGCATGCTGGGGATGCGGTGGGCTCTATGG"
+    # 225 nt — bGH polyA signal from pcDNA3.1 (Thermo Fisher). GenBank J00008.1, EF550208.1.
+    # No BsmBI, BsaI, or PaqCI sites. Verified against Goodwin & Rottman 1992 JBC 267:16330.
 
 # --- Codon Usage Table (optional) ---
 # By default, the pipeline uses the built-in CoCoPUTs human codon usage table
