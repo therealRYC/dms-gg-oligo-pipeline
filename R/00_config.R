@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-25 — Add intergene_elements for flexible gene constructs
+# Last updated: 2026-03-03 — Add include_synonymous config parameter
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -29,26 +29,27 @@ load_config <- function(config_path) {
 
   # --- Apply defaults ---
   defaults <- list(
-    max_oligo_length         = 300L,
-    max_geneblock_length     = 1800L,
-    min_geneblock_length     = 300L,
-    barcode_length           = 20L,
-    min_hamming_distance     = 3L,
-    barcode_prefix_length    = 12L,
-    barcode_gc_range         = c(0.25, 0.75),
-    barcode_max_homopolymer  = 4L,
+    max_oligo_length = 300L,
+    max_geneblock_length = 1800L,
+    min_geneblock_length = 300L,
+    barcode_length = 20L,
+    min_hamming_distance = 3L,
+    barcode_prefix_length = 12L,
+    barcode_gc_range = c(0.25, 0.75),
+    barcode_max_homopolymer = 4L,
     overhang_fidelity_threshold = 0.95,
-    search_window_K          = 15L,
-    dp_k_range               = 5L,
-    boundary_method          = "dp",
-    multi_k_search           = TRUE,
-    barcodes_per_variant     = 10L,
-    overlap_codons           = 4L,
-    codon_table_path         = NULL,
-    auto_domesticate         = TRUE,
-    simulate_assembly        = FALSE,
+    search_window_K = 15L,
+    dp_k_range = 5L,
+    boundary_method = "dp",
+    multi_k_search = TRUE,
+    barcodes_per_variant = 10L,
+    overlap_codons = 4L,
+    codon_table_path = NULL,
+    include_synonymous = FALSE,
+    auto_domesticate = TRUE,
+    simulate_assembly = FALSE,
     simulation_samples_per_tile = 1L,
-    output_dir               = "output"
+    output_dir = "output"
   )
 
   for (key in names(defaults)) {
@@ -58,27 +59,28 @@ load_config <- function(config_path) {
   }
 
   # Coerce types
-  cfg$max_oligo_length      <- as.integer(cfg$max_oligo_length)
-  cfg$max_geneblock_length  <- as.integer(cfg$max_geneblock_length)
-  cfg$min_geneblock_length  <- as.integer(cfg$min_geneblock_length)
+  cfg$max_oligo_length <- as.integer(cfg$max_oligo_length)
+  cfg$max_geneblock_length <- as.integer(cfg$max_geneblock_length)
+  cfg$min_geneblock_length <- as.integer(cfg$min_geneblock_length)
   # barcode_length: handle "auto" sentinel
   if (is.character(cfg$barcode_length) && tolower(cfg$barcode_length) == "auto") {
     cfg$barcode_length <- "auto"
   } else {
     cfg$barcode_length <- as.integer(cfg$barcode_length)
   }
-  cfg$min_hamming_distance  <- as.integer(cfg$min_hamming_distance)
+  cfg$min_hamming_distance <- as.integer(cfg$min_hamming_distance)
   cfg$barcode_prefix_length <- as.integer(cfg$barcode_prefix_length)
   cfg$barcode_max_homopolymer <- as.integer(cfg$barcode_max_homopolymer)
-  cfg$barcode_gc_range      <- as.numeric(cfg$barcode_gc_range)
+  cfg$barcode_gc_range <- as.numeric(cfg$barcode_gc_range)
   cfg$overhang_fidelity_threshold <- as.numeric(cfg$overhang_fidelity_threshold)
-  cfg$search_window_K       <- as.integer(cfg$search_window_K)
-  cfg$dp_k_range            <- as.integer(cfg$dp_k_range %||% 5L)
-  cfg$boundary_method       <- as.character(cfg$boundary_method)
-  cfg$multi_k_search        <- as.logical(cfg$multi_k_search)
-  cfg$barcodes_per_variant  <- as.integer(cfg$barcodes_per_variant)
-  cfg$overlap_codons        <- as.integer(cfg$overlap_codons)
-  cfg$simulate_assembly     <- as.logical(cfg$simulate_assembly)
+  cfg$search_window_K <- as.integer(cfg$search_window_K)
+  cfg$dp_k_range <- as.integer(cfg$dp_k_range %||% 5L)
+  cfg$boundary_method <- as.character(cfg$boundary_method)
+  cfg$multi_k_search <- as.logical(cfg$multi_k_search)
+  cfg$barcodes_per_variant <- as.integer(cfg$barcodes_per_variant)
+  cfg$overlap_codons <- as.integer(cfg$overlap_codons)
+  cfg$include_synonymous <- as.logical(cfg$include_synonymous)
+  cfg$simulate_assembly <- as.logical(cfg$simulate_assembly)
   cfg$simulation_samples_per_tile <- as.integer(cfg$simulation_samples_per_tile)
 
   # --- Validate oh3 and oh4 ---
@@ -128,8 +130,10 @@ build_downstream_cassette <- function(cfg) {
       # Uppercase and validate DNA
       elem$sequence <- toupper(elem$sequence)
       if (grepl("[^ACGT]", elem$sequence)) {
-        stop("intergene_elements[[", i, "]] ('", elem$name,
-             "') sequence contains non-ACGT characters")
+        stop(
+          "intergene_elements[[", i, "]] ('", elem$name,
+          "') sequence contains non-ACGT characters"
+        )
       }
       cfg$intergene_elements[[i]] <- elem
     }
@@ -162,7 +166,7 @@ validate_config <- function(cfg) {
 
   # Gene input: require exactly one of gene_fasta or gene_cds
   has_fasta <- !is.null(cfg$gene_fasta) && nzchar(cfg$gene_fasta)
-  has_cds   <- !is.null(cfg$gene_cds) && nzchar(cfg$gene_cds)
+  has_cds <- !is.null(cfg$gene_cds) && nzchar(cfg$gene_cds)
   if (has_fasta && has_cds) {
     errors <- c(errors, "Specify only one of gene_fasta or gene_cds (not both)")
   } else if (!has_fasta && !has_cds) {
@@ -228,7 +232,7 @@ validate_config <- function(cfg) {
       errors <- c(errors, "oh3 and oh4 must be different sequences")
     }
     if (nchar(cfg$oh3) == 4 && nchar(cfg$oh4) == 4 &&
-        !grepl("[^ACGT]", cfg$oh3) && !grepl("[^ACGT]", cfg$oh4)) {
+      !grepl("[^ACGT]", cfg$oh3) && !grepl("[^ACGT]", cfg$oh4)) {
       oh3_rc <- reverse_complement(cfg$oh3)
       oh4_rc <- reverse_complement(cfg$oh4)
       if (cfg$oh3 == oh4_rc || cfg$oh4 == oh3_rc) {
@@ -239,7 +243,7 @@ validate_config <- function(cfg) {
         oh_val <- cfg[[oh_name]]
         for (enz_name in c("BsaI", "BsmBI", "PaqCI")) {
           if (grepl(ENZYMES[[enz_name]]$recog, oh_val, fixed = TRUE) ||
-              grepl(ENZYMES[[enz_name]]$recog_rc, oh_val, fixed = TRUE)) {
+            grepl(ENZYMES[[enz_name]]$recog_rc, oh_val, fixed = TRUE)) {
             errors <- c(errors, paste0(oh_name, " contains ", enz_name, " recognition site"))
           }
         }
@@ -265,7 +269,7 @@ validate_config <- function(cfg) {
     errors <- c(errors, "min_hamming_distance must be >= 1")
   }
   if (!identical(cfg$barcode_length, "auto") &&
-      cfg$min_hamming_distance > cfg$barcode_length) {
+    cfg$min_hamming_distance > cfg$barcode_length) {
     errors <- c(errors, "min_hamming_distance must be <= barcode_length")
   }
 
@@ -274,19 +278,21 @@ validate_config <- function(cfg) {
     errors <- c(errors, "barcode_prefix_length must be >= min_hamming_distance")
   }
   if (!identical(cfg$barcode_length, "auto") &&
-      cfg$barcode_prefix_length > cfg$barcode_length) {
+    cfg$barcode_prefix_length > cfg$barcode_length) {
     errors <- c(errors, "barcode_prefix_length must be <= barcode_length")
   }
   # prefix_length == barcode_length only valid when barcodes_per_variant == 1
   if (!identical(cfg$barcode_length, "auto") &&
-      cfg$barcode_prefix_length >= cfg$barcode_length &&
-      cfg$barcodes_per_variant > 1L) {
-    errors <- c(errors,
-      "barcode_prefix_length must be < barcode_length when barcodes_per_variant > 1 (suffix space needed for replicate barcodes)")
+    cfg$barcode_prefix_length >= cfg$barcode_length &&
+    cfg$barcodes_per_variant > 1L) {
+    errors <- c(
+      errors,
+      "barcode_prefix_length must be < barcode_length when barcodes_per_variant > 1 (suffix space needed for replicate barcodes)"
+    )
   }
 
   if (length(cfg$barcode_gc_range) != 2 ||
-      cfg$barcode_gc_range[1] >= cfg$barcode_gc_range[2]) {
+    cfg$barcode_gc_range[1] >= cfg$barcode_gc_range[2]) {
     errors <- c(errors, "barcode_gc_range must be a 2-element vector [min, max] with min < max")
   }
   if (cfg$barcodes_per_variant < 1L) {

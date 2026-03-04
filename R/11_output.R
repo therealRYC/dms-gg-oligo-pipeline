@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Add _skipped_variants.csv output for gene-edge variants (BUG-6)
+# Last updated: 2026-03-03 — Add variant_type column to barcode map and skipped variants outputs
 # 11_output.R — Write CSV/FASTA outputs for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 
@@ -37,14 +37,18 @@ write_outputs <- function(oligos, geneblock_result, variants, barcodes,
   # 1. Oligo pool CSV
   oligo_path <- file.path(output_dir, paste0(gene_name, "_oligo_pool.csv"))
   readr::write_csv(oligos, oligo_path)
-  cli::cli_alert_success(paste0("Wrote oligo pool: ", oligo_path,
-                                 " (", nrow(oligos), " oligos)"))
+  cli::cli_alert_success(paste0(
+    "Wrote oligo pool: ", oligo_path,
+    " (", nrow(oligos), " oligos)"
+  ))
 
   # 2. Gene block order CSV (deduplicated blocks for synthesis ordering)
   block_path <- file.path(output_dir, paste0(gene_name, "_geneblock_order.csv"))
   readr::write_csv(blocks, block_path)
-  cli::cli_alert_success(paste0("Wrote gene block order: ", block_path,
-                                 " (", nrow(blocks), " blocks)"))
+  cli::cli_alert_success(paste0(
+    "Wrote gene block order: ", block_path,
+    " (", nrow(blocks), " blocks)"
+  ))
 
   # 3. Variant-barcode map CSV
   barcode_map <- data.frame(
@@ -54,6 +58,7 @@ write_outputs <- function(oligos, geneblock_result, variants, barcodes,
     mut_aa           = variants$mut_aa,
     wt_codon         = variants$wt_codon,
     mut_codon        = variants$mut_codon,
+    variant_type     = if (!is.null(variants$variant_type)) variants$variant_type else NA_character_,
     barcode          = barcodes,
     min_hamming_dist = if (!is.null(min_hamming_dist)) min_hamming_dist else NA_integer_,
     barcode_idx      = if (!is.null(variants$barcode_idx)) variants$barcode_idx else rep(1L, nrow(variants)),
@@ -62,8 +67,10 @@ write_outputs <- function(oligos, geneblock_result, variants, barcodes,
   )
   map_path <- file.path(output_dir, paste0(gene_name, "_variant_barcode_map.csv"))
   readr::write_csv(barcode_map, map_path)
-  cli::cli_alert_success(paste0("Wrote variant-barcode map: ", map_path,
-                                 " (", nrow(barcode_map), " variants)"))
+  cli::cli_alert_success(paste0(
+    "Wrote variant-barcode map: ", map_path,
+    " (", nrow(barcode_map), " variants)"
+  ))
 
   # 4. Tile manifests CSV (per-tile BsaI and BsmBI reaction contents)
   manifest_path <- file.path(output_dir, paste0(gene_name, "_tile_manifests.csv"))
@@ -119,19 +126,22 @@ write_outputs <- function(oligos, geneblock_result, variants, barcodes,
   if (!is.null(skipped_variants) && nrow(skipped_variants) > 0) {
     skipped_path <- file.path(output_dir, paste0(gene_name, "_skipped_variants.csv"))
     skipped_out <- data.frame(
-      variant_id  = skipped_variants$variant_id,
-      position    = skipped_variants$position,
-      wt_aa       = skipped_variants$wt_aa,
-      mut_aa      = skipped_variants$mut_aa,
-      wt_codon    = skipped_variants$wt_codon,
-      mut_codon   = skipped_variants$mut_codon,
-      tile_id     = skipped_variants$tile_id,
+      variant_id = skipped_variants$variant_id,
+      position = skipped_variants$position,
+      wt_aa = skipped_variants$wt_aa,
+      mut_aa = skipped_variants$mut_aa,
+      wt_codon = skipped_variants$wt_codon,
+      mut_codon = skipped_variants$mut_codon,
+      variant_type = if (!is.null(skipped_variants$variant_type)) skipped_variants$variant_type else NA_character_,
+      tile_id = skipped_variants$tile_id,
       skip_reason = skipped_variants$skip_reason,
       stringsAsFactors = FALSE
     )
     readr::write_csv(skipped_out, skipped_path)
-    cli::cli_alert_success(paste0("Wrote skipped variants: ", skipped_path,
-                                   " (", nrow(skipped_out), " variants)"))
+    cli::cli_alert_success(paste0(
+      "Wrote skipped variants: ", skipped_path,
+      " (", nrow(skipped_out), " variants)"
+    ))
   }
 
   invisible(list(

@@ -7,7 +7,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 
 ## Overview
 
-The pipeline generates all 19 amino acid substitutions + 1 stop codon at every position in a gene, each encoded as a single fully-specified oligo with a programmed barcode. Assembly uses a three-enzyme architecture:
+The pipeline generates all 19 missense substitutions + 1 nonsense (stop) + 1 wild-type control at every position in a gene, each encoded as a single fully-specified oligo with a programmed barcode. Optional synonymous codon controls can also be included. Assembly uses a three-enzyme architecture:
 
 - **BsaI** (Level 1): Inserts the oligo (mutant tile + barcode) and 5' WT gene block(s) into the helper plasmid
 - **BsmBI** (Level 1b): Inserts the 3' WT gene block(s) and PolIII promoter between the tile and barcode
@@ -111,7 +111,7 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 2. **Gene input** (`01_gene_input.R`) -- Read FASTA, validate CDS (divisible by 3, starts ATG, no internal stops)
 3. **Enzyme site scan** (`02_enzyme_site_scan.R`) -- Find endogenous BsaI/BsmBI/PaqCI sites, suggest silent mutations for domestication
 4. **Codon table** (`03_codon_table.R`) -- Human codon usage table, preferred codon lookup
-5. **Mutation design** (`04_mutation_design.R`) -- Generate all single-AA substitutions + stops using preferred human codons
+5. **Mutation design** (`04_mutation_design.R`) -- Generate 19 missense + 1 nonsense + 1 WT control per position (+ optional synonymous) using preferred human codons
 6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- DP optimizer for tile boundary placement maximizing overhang quality (P_fid * P_eff from BsmBI cycling data); oh3/oh4 auto-selection by score ranking; superblock split-point optimization
 7. **Barcode design** (`07_barcode_design.R`) -- Unified hierarchical prefix-suffix barcodes with Hamming distance guarantee on prefixes
 8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles)
@@ -202,10 +202,10 @@ The pipeline has been validated on three genes of increasing size plus a cassett
 
 | Gene | Accession | Codons | Variants | Oligos | Gene Blocks | Tiles | Runtime |
 |------|-----------|--------|----------|--------|-------------|-------|---------|
-| GRIN2A | NM_000833 | 1,465 | 29,220 | 29,220 | 51 | 25 | ~4 min |
-| AKAP11 | NM_016248 | 1,902 | 37,960 | 37,960 | 64 | 31 | ~7 min |
-| TRIO | NM_007118 | 3,098 | 61,880 | 61,880 | 98 | 47 | ~8 min |
-| GRIN2A + P2A-EGFP | NM_000833 | 1,465 | 29,220 | 29,220 | 64 | 25 | ~4 min |
+| GRIN2A | NM_000833 | 1,465 | 30,681 | 30,681 | 51 | 25 | ~4 min |
+| AKAP11 | NM_016248 | 1,902 | 39,858 | 39,858 | 64 | 31 | ~7 min |
+| TRIO | NM_007118 | 3,098 | 64,974 | 64,974 | 98 | 47 | ~8 min |
+| GRIN2A + P2A-EGFP | NM_000833 | 1,465 | 30,681 | 30,681 | 64 | 25 | ~4 min |
 
 Pre-built configs for each gene are in `configs/`. Runtimes measured on WSL2 with `barcodes_per_variant=1`. At `barcodes_per_variant=10`, expect approximately 10x longer runtimes due to barcode generation and oligo assembly scaling (e.g., GRIN2A: ~45 min, AKAP11: ~77 min).
 

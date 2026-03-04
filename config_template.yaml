@@ -109,6 +109,13 @@ dp_k_range: 5                                # Search K_ideal +/- dp_k_range til
 paqci_star2: "NNNN"                        # PaqCI** overhang (5' end of insert)
 paqci_star1: "NNNN"                        # PaqCI* overhang (3' end of insert)
 
+# --- Variant Controls ---
+# WT controls are ALWAYS included (one per mutable position, identical codon to
+# wild-type with a unique barcode). These serve as normalization controls.
+# Synonymous controls use the highest-frequency alternative codon for the same AA.
+# Met and Trp positions have no synonymous variant (only one codon each).
+include_synonymous: false                  # Add synonymous codon controls (default: off)
+
 # --- Enzyme Site Domestication ---
 auto_domesticate: true                     # Automatically apply silent mutations to remove sites
 

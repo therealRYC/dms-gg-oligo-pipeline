@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-02-25 — Support intergene_elements for flexible gene constructs
+# Last updated: 2026-03-03 — Pass include_synonymous to design_mutations; update variant count for auto-sizing
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -105,7 +105,8 @@ cli::cli_alert_success("Codon usage table loaded: {codon_source} [{round(step_el
 cli::cli_h2("Step 4: Scanning for enzyme sites (BsaI, BsmBI, PaqCI)")
 step_start <- proc.time()
 scan_result <- scan_enzyme_sites(gene$cds, cfg$polIII_promoter, codon_usage,
-                                  intergene_elements = cfg$intergene_elements)
+  intergene_elements = cfg$intergene_elements
+)
 
 # Check intergene elements for enzyme sites (can't be auto-domesticated)
 if (nrow(scan_result$intergene_sites) > 0) {
@@ -137,7 +138,8 @@ gene$original_cds <- gene$cds
 if (cfg$auto_domesticate && nrow(scan_result$domestication) > 0) {
   cli::cli_alert("Applying domestication (with iterative BsaI/BsmBI resolution)...")
   gene$cds <- apply_domestication(gene$cds, scan_result$domestication,
-                                   codon_usage = codon_usage)
+    codon_usage = codon_usage
+  )
   gene$protein <- translate_cds(gene$cds)
   if (endsWith(gene$protein, "*")) {
     gene$protein <- substring(gene$protein, 1, nchar(gene$protein) - 1)
@@ -151,7 +153,9 @@ cli::cli_alert_info("Step 4 completed. [{round(step_elapsed, 1)}s]")
 # Step 5: Design mutations
 cli::cli_h2("Step 5: Designing mutations")
 step_start <- proc.time()
-variants <- design_mutations(gene$cds, codon_usage)
+variants <- design_mutations(gene$cds, codon_usage,
+  include_synonymous = cfg$include_synonymous
+)
 variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["5_mutations"]] <- step_elapsed
@@ -162,12 +166,13 @@ cli::cli_alert_success(paste0(
 # Step 5.5: Resolve barcode length (needed before tiling for oligo budget)
 if (identical(cfg$barcode_length, "auto")) {
   cli::cli_h2("Step 5.5: Auto-sizing barcode length")
-  n_variants_expected <- (gene$n_codons - 2L) * 20L  # exclude Met and stop codons
+  # Use actual variant count (includes WT controls, and synonymous if enabled)
+  n_variants_expected <- length(unique(variants$variant_id))
   cfg$barcode_length <- auto_size_barcode_length(
-    n_variants       = n_variants_expected,
-    prefix_length    = cfg$barcode_prefix_length,
+    n_variants = n_variants_expected,
+    prefix_length = cfg$barcode_prefix_length,
     barcodes_per_variant = cfg$barcodes_per_variant,
-    min_hamming      = cfg$min_hamming_distance
+    min_hamming = cfg$min_hamming_distance
   )
   cli::cli_alert_success(paste0(
     "Auto-sized barcode_length = ", cfg$barcode_length,
@@ -237,9 +242,11 @@ cli::cli_alert_info(paste0(
 # Use last 6 nt of left element and first 6 nt of right element (enough for any 7-nt site)
 bsmbi_fwd_oh3_seq <- orient_enzyme_site("BsmBI", oh3, "forward")
 bsai_rev_oh4_seq <- orient_enzyme_site("BsaI", oh4, "reverse")
-junction_left_context <- substring(bsmbi_fwd_oh3_seq,
-                                    nchar(bsmbi_fwd_oh3_seq) - 5L,
-                                    nchar(bsmbi_fwd_oh3_seq))
+junction_left_context <- substring(
+  bsmbi_fwd_oh3_seq,
+  nchar(bsmbi_fwd_oh3_seq) - 5L,
+  nchar(bsmbi_fwd_oh3_seq)
+)
 junction_right_context <- substring(bsai_rev_oh4_seq, 1L, 6L)
 cli::cli_alert_info(paste0(
   "Junction context for barcode filtering: left='", junction_left_context,
@@ -247,12 +254,12 @@ cli::cli_alert_info(paste0(
 ))
 
 barcode_result <- design_barcodes(
-  n_variants          = nrow(variants),
-  barcode_length      = cfg$barcode_length,
-  min_hamming         = cfg$min_hamming_distance,
-  prefix_length       = cfg$barcode_prefix_length,
-  gc_range            = cfg$barcode_gc_range,
-  max_homopolymer     = cfg$barcode_max_homopolymer,
+  n_variants = nrow(variants),
+  barcode_length = cfg$barcode_length,
+  min_hamming = cfg$min_hamming_distance,
+  prefix_length = cfg$barcode_prefix_length,
+  gc_range = cfg$barcode_gc_range,
+  max_homopolymer = cfg$barcode_max_homopolymer,
   barcodes_per_variant = cfg$barcodes_per_variant,
   junction_left_context = junction_left_context,
   junction_right_context = junction_right_context
@@ -276,12 +283,12 @@ if (cfg$barcodes_per_variant > 1L) {
 cli::cli_h2("Step 8: Assembling oligos (universal 3-enzyme structure)")
 step_start <- proc.time()
 oligos <- assemble_oligos(
-  variants    = variants_expanded,
-  cds         = gene$cds,
-  barcodes    = barcodes,
-  tiles       = tiles,
-  oh3         = oh3,
-  oh4         = oh4,
+  variants = variants_expanded,
+  cds = gene$cds,
+  barcodes = barcodes,
+  tiles = tiles,
+  oh3 = oh3,
+  oh4 = oh4,
   max_oligo_length = cfg$max_oligo_length
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
@@ -294,17 +301,17 @@ cli::cli_alert_success(paste0(
 cli::cli_h2("Step 9: Designing gene blocks and helper plasmid")
 step_start <- proc.time()
 geneblock_result <- design_wt_geneblocks(
-  cds         = gene$cds,
-  polIII      = cfg$downstream_cassette,
-  tiles       = tiles,
-  oh3         = oh3,
-  oh4         = oh4,
+  cds = gene$cds,
+  polIII = cfg$downstream_cassette,
+  tiles = tiles,
+  oh3 = oh3,
+  oh4 = oh4,
   paqci_star2 = cfg$paqci_star2,
   paqci_star1 = cfg$paqci_star1,
-  max_block_length    = cfg$max_geneblock_length,
-  min_block_length    = cfg$min_geneblock_length,
-  fidelity_threshold  = cfg$overhang_fidelity_threshold,
-  assembly_plan       = assembly_plan
+  max_block_length = cfg$max_geneblock_length,
+  min_block_length = cfg$min_geneblock_length,
+  fidelity_threshold = cfg$overhang_fidelity_threshold,
+  assembly_plan = assembly_plan
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["9_geneblocks"]] <- step_elapsed
@@ -316,20 +323,20 @@ cli::cli_alert_success(paste0(
 cli::cli_h2("Step 10: Running QC checks")
 step_start <- proc.time()
 qc_result <- run_qc_checks(
-  oligos          = oligos,
+  oligos = oligos,
   geneblock_result = geneblock_result,
-  variants        = variants_expanded,
-  barcodes        = barcodes,
-  tiles           = tiles,
-  tile_overhangs  = tiles,
-  cds             = gene$cds,
-  oh3             = oh3,
-  oh4             = oh4,
+  variants = variants_expanded,
+  barcodes = barcodes,
+  tiles = tiles,
+  tile_overhangs = tiles,
+  cds = gene$cds,
+  oh3 = oh3,
+  oh4 = oh4,
   max_oligo_length = cfg$max_oligo_length,
   max_block_length = cfg$max_geneblock_length,
   min_block_length = cfg$min_geneblock_length,
-  min_hamming      = cfg$min_hamming_distance,
-  assembly_plan    = assembly_plan
+  min_hamming = cfg$min_hamming_distance,
+  assembly_plan = assembly_plan
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["10_qc"]] <- step_elapsed
@@ -426,10 +433,14 @@ pipeline_elapsed <- (proc.time() - pipeline_start)[["elapsed"]]
 cli::cli_h1("Pipeline Complete")
 cli::cli_alert_success(paste0("Gene: ", gene$gene_name))
 cli::cli_alert_success(paste0("Architecture: 3-enzyme (BsaI + BsmBI + PaqCI)"))
-cli::cli_alert_success(paste0("Variants: ", nrow(variants), " (unique mutations)",
-  if (nrow(skipped_variants) > 0) paste0(", ", nrow(skipped_variants), " skipped (gene-edge overlap)") else ""))
-cli::cli_alert_success(paste0("Oligos: ", nrow(oligos),
-  if (cfg$barcodes_per_variant > 1L) paste0(" (", cfg$barcodes_per_variant, " barcodes/variant)") else ""))
+cli::cli_alert_success(paste0(
+  "Variants: ", nrow(variants), " (unique mutations)",
+  if (nrow(skipped_variants) > 0) paste0(", ", nrow(skipped_variants), " skipped (gene-edge overlap)") else ""
+))
+cli::cli_alert_success(paste0(
+  "Oligos: ", nrow(oligos),
+  if (cfg$barcodes_per_variant > 1L) paste0(" (", cfg$barcodes_per_variant, " barcodes/variant)") else ""
+))
 cli::cli_alert_success(paste0("Gene blocks: ", nrow(geneblock_result$blocks)))
 cli::cli_alert_success(paste0("Tiles: ", nrow(tiles)))
 cli::cli_alert_success(paste0("Fixed overhangs: oh3=", oh3, ", oh4=", oh4))
