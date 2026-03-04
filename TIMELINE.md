@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-03 19:55:39 | 165 commits | 2026-01-29 to 2026-03-03
+> Auto-generated on 2026-03-03 20:08:21 | 168 commits | 2026-01-29 to 2026-03-03
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,11 +28,14 @@
 
 ### 2026-03-03
 
+- Merge origin/main into branch, resolve TIMELINE.md conflict
 - Fix QC variant count check to account for gene-edge skipped positions
 - Update tests and README for WT controls (21 variants/position)
 - Update config, QC, output, and pipeline for WT controls + variant_type
 - Add WT controls and optional synonymous variants to mutation design
+- Merge branch 'worktree-260302-fixing-wpre-cassette'
 - Update README: barcode linear code cutoff, SB collision resolution method
+- Track BsmBI cycling pairwise matrix, gitignore Pryor raw data
 - Document pTK4 provenance for all cassette element sequences
 - Update plan files: mark cassette design items complete
 - Replace hGH polyA with bGH polyA (225bp) in downstream cassette

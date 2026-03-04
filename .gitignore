@@ -16,6 +16,7 @@ figures/
 # Raw data downloads (processed versions in .rds are tracked)
 data/o537-Human_CDS.tsv
 data/ptk4-gfp.gb
+data/pryor2020_overhang_fidelity/
 
 # Claude Code
 .claude/
