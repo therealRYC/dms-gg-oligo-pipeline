@@ -63,7 +63,7 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   # Step 5: Design mutations
   variants <- design_mutations(gene$cds, codon_usage)
   variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
-  expect_equal(nrow(variants), 98 * 20) # 98 mutable codons (skip Met@1, stop@100) * 20 mutations
+  expect_equal(nrow(variants), 98 * 21) # 98 mutable codons (skip Met@1, stop@100) * 21 (19 missense + 1 stop + 1 WT)
 
   # Step 6: Plan assembly (dynamic tile boundary search + overhang selection)
   tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
@@ -279,7 +279,7 @@ test_that("full pipeline runs on long test gene with superblocking", {
   # Step 5: Design mutations
   variants <- design_mutations(gene$cds, codon_usage)
   variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
-  expect_equal(nrow(variants), 698 * 20) # 698 mutable codons (skip Met@1, stop@700) * 20 mutations
+  expect_equal(nrow(variants), 698 * 21) # 698 mutable codons (skip Met@1, stop@700) * 21 (19 missense + 1 stop + 1 WT)
 
   # Step 6: Plan assembly (dynamic tile boundary search + superblocks)
   tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
@@ -483,10 +483,10 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
     )
   }
 
-  # Step 5: Design mutations — 3098 codons * 20 mutations
+  # Step 5: Design mutations — 3096 mutable codons * 21 variants
   variants <- design_mutations(gene$cds, codon_usage)
   variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
-  expect_equal(nrow(variants), 3096 * 20) # 3096 mutable codons (skip Met@1, stop@3098)
+  expect_equal(nrow(variants), 3096 * 21) # 3096 mutable codons (skip Met@1, stop@3098) * 21
 
   # Step 6: Plan assembly (dynamic tile boundary search + superblocks)
   tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
@@ -695,20 +695,20 @@ test_that("config rejects neither gene_fasta nor gene_cds", {
 })
 
 test_that("QC variant_count check passes with expanded variants (barcodes_per_variant > 1)", {
-  # Simulate expanded variants: 4 codons, 2 mutable (skip Met@1, stop@4) * 20 = 40 variants
+  # Simulate expanded variants: 4 codons, 2 mutable (skip Met@1, stop@4) * 21 = 42 variants
   cds <- "ATGGCTGAATAA"
   codon_usage <- load_codon_usage()
   variants <- design_mutations(cds, codon_usage)
-  expect_equal(nrow(variants), 2 * 20)
+  expect_equal(nrow(variants), 2 * 21)
 
   # Expand to 3 barcodes per variant
   variants_expanded <- variants[rep(seq_len(nrow(variants)), each = 3L), ]
   variants_expanded$barcode_idx <- rep(1:3, times = nrow(variants))
   rownames(variants_expanded) <- NULL
-  expect_equal(nrow(variants_expanded), 120) # 40 * 3
+  expect_equal(nrow(variants_expanded), 126) # 42 * 3
 
   # The check should use unique(variant_id), NOT nrow()
   n_unique <- length(unique(variants_expanded$variant_id))
-  expect_equal(n_unique, 40) # Still 40 unique variants
-  expect_equal(n_unique, ((nchar(cds) %/% 3L) - 2L) * 20L)
+  expect_equal(n_unique, 42) # Still 42 unique variants (19 missense + 1 stop + 1 WT per position)
+  expect_equal(n_unique, ((nchar(cds) %/% 3L) - 2L) * 21L)
 })
