@@ -1,5 +1,5 @@
 # Created: 2026-03-01
-# Last updated: 2026-03-03 — Replace hGH polyA with bGH polyA (225 bp, no enzyme sites)
+# Last updated: 2026-03-03 — Use bGH polyA; clarify PaqCI overhangs are placeholders
 
 # AKAP11 — NM_016248, 1902 codons (5706 nt)
 # Minimal config; inherits defaults from config_template.yaml
@@ -26,7 +26,8 @@ intergene_elements:
     # 225 nt — bGH polyA signal from pcDNA3.1 (Thermo Fisher). GenBank J00008.1, EF550208.1, U55762.1.
     # No BsmBI or PaqCI sites. Verified against Goodwin & Rottman 1992 JBC 267:16330.
 
-# PaqCI overhangs (destination vector)
+# PaqCI overhangs — MUST match your destination vector's PaqCI sites.
+# These are arbitrary placeholders; replace with your actual vector overhangs.
 paqci_star2: "AATG"
 paqci_star1: "GCTA"
 

@@ -83,9 +83,13 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 | `multi_k_search` | `true` | Try multiple tile counts to find best overhang quality |
 | `dp_k_range` | 5 | Search K_ideal +/- this many tile counts; stops early when gain < 0.5% |
 | `overhang_fidelity_threshold` | 0.95 | Minimum fidelity for auto-selected overhangs |
+| `paqci_star2` | *(required)* | 4-nt PaqCI overhang at the 5' end of the insert (PaqCI\*\*). **Must match your destination vector.** |
+| `paqci_star1` | *(required)* | 4-nt PaqCI overhang at the 3' end of the insert (PaqCI\*). **Must match your destination vector.** |
 | `auto_domesticate` | `true` | Automatically apply silent mutations to remove enzyme sites |
 | `simulate_assembly` | `false` | Run in-silico GG assembly simulation after design |
 | `simulation_samples_per_tile` | 1 | Variants per tile to simulate (when `simulate_assembly` is true) |
+
+**PaqCI overhangs**: The `paqci_star2` and `paqci_star1` parameters have no meaningful default — they are determined by the PaqCI sites flanking the cloning site in your destination backbone. The pipeline will error if these are left as the placeholder `"NNNN"`. The values in the example configs (`AATG`/`GCTA`) are arbitrary and should be replaced with the overhangs from your specific vector.
 
 ## Outputs
 

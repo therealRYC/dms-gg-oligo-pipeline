@@ -106,7 +106,11 @@ dp_k_range: 5                                # Search K_ideal +/- dp_k_range til
 # oh3: "NNNN"
 # oh4: "NNNN"
 
-# --- PaqCI Overhangs (determined by destination vector) ---
+# --- PaqCI Overhangs (REQUIRED — determined by your destination vector) ---
+# These 4-nt overhangs are set by the PaqCI sites flanking the cloning site in
+# your backbone. They have NO meaningful default — you MUST replace "NNNN" with
+# the actual overhangs from your vector. The pipeline will error if left as NNNN.
+# The values in the example configs (AATG/GCTA) are arbitrary placeholders.
 paqci_star2: "NNNN"                        # PaqCI** overhang (5' end of insert)
 paqci_star1: "NNNN"                        # PaqCI* overhang (3' end of insert)
 

@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-03 20:36:14 | 164 commits | 2026-01-29 to 2026-03-03
+> Auto-generated on 2026-03-03 20:43:47 | 165 commits | 2026-01-29 to 2026-03-03
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-03
 
+- Clarify PaqCI overhangs are user-determined, not defaults
 - Replace hGH polyA with bGH polyA in TRIO, AKAP11, and config template
 - Merge branch 'worktree-260302-fixing-wpre-cassette'
 - Update README: barcode linear code cutoff, SB collision resolution method
