@@ -102,32 +102,35 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
   )
 
   # 6. Variant count (use unique variant_id to handle barcodes_per_variant > 1)
-  # Compute expected count from the actual variant data rather than hardcoding,
-  # since variant count depends on whether WT controls and synonymous are included.
+  # Compute expected count from actual positions present in the data, not from
+  # n_mutable, since gene-edge variants may have been skipped before QC runs.
   n_codons <- gene_len %/% 3L
-  n_mutable <- n_codons - 2L # exclude codon 1 (Met) and codon n_codons (stop)
-  n_unique_variants <- length(unique(variants$variant_id))
-  # Determine variant types present to build expected count description
+  n_mutable <- n_codons - 2L # all mutable positions (codons 2 through n-1)
+  unique_vars <- variants[!duplicated(variants$variant_id), ]
+  n_unique_variants <- nrow(unique_vars)
+  n_positions_present <- length(unique(unique_vars$position))
   has_variant_type <- "variant_type" %in% names(variants)
   if (has_variant_type) {
-    type_counts <- table(variants$variant_type[!duplicated(variants$variant_id)])
+    type_counts <- table(unique_vars$variant_type)
     type_desc <- paste(paste0(type_counts, " ", names(type_counts)), collapse = " + ")
-    # Compute expected: 20 base (missense+nonsense) + WT controls + synonymous
+    # Expected: 20 base (missense + nonsense) per present position + controls
     n_wt_ctrl <- sum(type_counts["wt_control"], na.rm = TRUE)
     n_syn <- sum(type_counts["synonymous"], na.rm = TRUE)
-    expected_per_pos_base <- 20L # 19 missense + 1 nonsense
-    expected_total <- n_mutable * expected_per_pos_base + n_wt_ctrl + n_syn
+    expected_total <- n_positions_present * 20L + n_wt_ctrl + n_syn
   } else {
-    expected_total <- n_mutable * 20L
-    type_desc <- paste0(n_mutable, " x 20")
+    expected_total <- n_positions_present * 20L
+    type_desc <- paste0(n_positions_present, " x 20")
   }
+  n_skipped <- n_mutable - n_positions_present
+  skip_note <- if (n_skipped > 0) paste0("; ", n_skipped, " position(s) skipped") else ""
   checks[[6]] <- qc_check(
     name = "variant_count",
     desc = "Expected number of variants generated",
     pass = n_unique_variants == expected_total,
     detail = paste0(
       n_unique_variants, " unique variants (expected: ", expected_total,
-      " across ", n_mutable, " mutable positions; ", type_desc, ")"
+      " across ", n_positions_present, "/", n_mutable,
+      " mutable positions; ", type_desc, skip_note, ")"
     )
   )
 
