@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-03 21:28:18 | 172 commits | 2026-01-29 to 2026-03-03
+> Auto-generated on 2026-03-03 21:34:12 | 173 commits | 2026-01-29 to 2026-03-03
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-03
 
+- Gitignore large pipeline outputs in Example Genes
 - Add example pipeline output for GRIN2A, TRIO, and AKAP11
 - Clarify PaqCI overhangs are user-determined, not defaults
 - Replace hGH polyA with bGH polyA in TRIO, AKAP11, and config template
