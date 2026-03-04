@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-03 14:23:53 | 161 commits | 2026-01-29 to 2026-03-03
+> Auto-generated on 2026-03-03 17:07:31 | 163 commits | 2026-01-29 to 2026-03-03
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,8 @@
 
 ### 2026-03-03
 
+- Merge branch 'worktree-260302-fixing-wpre-cassette'
+- Update README: barcode linear code cutoff, SB collision resolution method
 - Track BsmBI cycling pairwise matrix, gitignore Pryor raw data
 - Document pTK4 provenance for all cassette element sequences
 - Update plan files: mark cassette design items complete
