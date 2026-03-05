@@ -1,5 +1,5 @@
 # Created: 2026-03-04
-# Last updated: 2026-03-04 — Initial tests for plan_assembly_v2
+# Last updated: 2026-03-05 — Add overlap and cassette pass-through tests, simplify SB collision check
 # test-plan-assembly-v2.R — Tests for SB-first two-pass assembly planning
 
 # =============================================================================
@@ -65,7 +65,7 @@ test_that("plan_assembly_v2 works on long gene (multiple SBs)", {
   max_codons <- 243L %/% 3L
   expect_gte(plan$summary$n_tiles, ceiling(n_codons / max_codons))
 
-  # Tiles should cover entire gene
+  # Tiles should cover entire gene (first tile starts at 1, last tile ends at gene end)
   expect_equal(plan$tiles$start_nt[1], 1L)
   expect_equal(plan$tiles$end_nt[nrow(plan$tiles)], nchar(TEST_LONG_GENE_SEQ))
 
@@ -78,6 +78,10 @@ test_that("plan_assembly_v2 works on long gene (multiple SBs)", {
 
   # No SB collisions
   expect_equal(plan$summary$n_sb_collisions, 0L)
+
+  # v2 should include cassette_splits field
+  expect_true("cassette_splits" %in% names(plan))
+  expect_true(is.data.frame(plan$cassette_splits))
 
   # SB boundary overhangs should not collide with oh3 or oh4
   sb_result <- plan$sb_result
@@ -176,17 +180,9 @@ test_that("tile boundary overhangs don't collide with SB boundary overhangs", {
   ]
 
   if (length(sb_ohs) > 0) {
-    sb_df <- plan$sb_result$boundaries
-    gene_len <- nchar(TEST_LONG_GENE_SEQ)
-
-    # Identify SB boundary nt positions in the gene
-    sb_boundary_nts <- sb_df$end_nt[!is.na(sb_df$boundary_oh) & sb_df$end_nt <= gene_len]
-
-    # No INTERNAL tile oh1 should collide with any SB boundary OH
-    # (First tile of each SB has oh1 = SB boundary by design — that's the anchor)
+    # After post-extension, no tile oh1 or oh2 should collide with SB boundary OHs.
+    # (Tiles extend past SB boundaries, so their oh2 values are at different positions.)
     for (ti in seq_len(nrow(plan$tiles))) {
-      # Skip tiles whose start_nt is at an SB boundary (oh1 IS the SB junction)
-      if ((plan$tiles$start_nt[ti] - 1L) %in% sb_boundary_nts) next
       for (sb_oh in sb_ohs) {
         expect_false(
           oh_collides(plan$tiles$oh1_seq[ti], sb_oh),
@@ -195,14 +191,6 @@ test_that("tile boundary overhangs don't collide with SB boundary overhangs", {
             "collides with SB oh", sb_oh
           )
         )
-      }
-    }
-    # INTERNAL tile oh2 should not collide with SB boundary OHs
-    # (Last tile of each SB has oh2 AT the SB boundary — that's expected)
-    for (ti in seq_len(nrow(plan$tiles))) {
-      # Skip tiles whose end_nt is at an SB boundary (oh2 IS the SB junction)
-      if (plan$tiles$end_nt[ti] %in% sb_boundary_nts) next
-      for (sb_oh in sb_ohs) {
         expect_false(
           oh_collides(plan$tiles$oh2_seq[ti], sb_oh),
           info = paste(
@@ -261,5 +249,94 @@ test_that("plan_assembly_v2 handles downstream cassette", {
       nchar(plan$core_downstream_cassette),
       nchar(cassette) - 5L
     )
+  }
+})
+
+# =============================================================================
+# TILE OVERLAP AT SB BOUNDARIES
+# =============================================================================
+
+test_that("tiles overlap at SB boundaries", {
+  plan <- plan_assembly_v2(
+    cds = TEST_LONG_GENE_SEQ,
+    polIII = TEST_POLIII,
+    max_mutable_nt = 243L,
+    config = list(overlap_codons = 4L)
+  )
+
+  if (plan$summary$n_superblocks >= 2L) {
+    sb_df <- plan$sb_result$boundaries
+    gene_len <- nchar(TEST_LONG_GENE_SEQ)
+    tiles <- plan$tiles
+
+    # Find SB boundary positions within the gene
+    sb_boundary_nts <- sb_df$end_nt[!is.na(sb_df$boundary_oh) & sb_df$end_nt <= gene_len]
+
+    for (sb_nt in sb_boundary_nts) {
+      # Find tiles that span across this SB boundary (tile covers positions on both sides)
+      tiles_crossing <- which(tiles$start_nt <= sb_nt & tiles$end_nt > sb_nt)
+      expect_true(length(tiles_crossing) >= 1L,
+        info = paste("Expected at least 1 tile crossing SB boundary at nt", sb_nt)
+      )
+
+      # The tile whose end_nt crosses the SB boundary should extend past it
+      for (ti in tiles_crossing) {
+        expect_true(tiles$end_nt[ti] > sb_nt,
+          info = paste(
+            "Tile", ti, "end_nt", tiles$end_nt[ti],
+            "should extend past SB boundary", sb_nt
+          )
+        )
+      }
+    }
+  }
+})
+
+# =============================================================================
+# CASSETTE SPLITS PASS-THROUGH
+# =============================================================================
+
+test_that("cassette_splits is empty for normal-sized cassettes", {
+  plan <- plan_assembly_v2(
+    cds = TEST_LONG_GENE_SEQ,
+    polIII = TEST_POLIII,
+    max_mutable_nt = 243L
+  )
+
+  # Normal PolIII (~250 nt) fits in one block — no cassette splits
+  expect_true("cassette_splits" %in% names(plan))
+  expect_equal(nrow(plan$cassette_splits), 0L)
+})
+
+test_that("cassette_splits has rows for oversized cassettes", {
+  # Build a very large cassette (~2500 nt) that exceeds synthesis limit
+  cassette_unit <- "TAGCAACCGTGA" # 12 nt
+  big_cassette <- paste0(
+    paste0(rep(cassette_unit, 200), collapse = ""),
+    TEST_POLIII
+  )
+  # big_cassette is ~2400 + 250 = ~2650 nt, well over 1800 synthesis limit
+
+  plan <- plan_assembly_v2(
+    cds = TEST_LONG_GENE_SEQ,
+    polIII = TEST_POLIII,
+    max_mutable_nt = 243L,
+    downstream_cassette = big_cassette
+  )
+
+  # Cassette > 1800 nt should trigger SB DP to place boundaries within it
+  expect_true("cassette_splits" %in% names(plan))
+
+  if (nrow(plan$cassette_splits) > 0) {
+    # Verify columns
+    expect_true("split_pos" %in% names(plan$cassette_splits))
+    expect_true("junction_oh" %in% names(plan$cassette_splits))
+
+    # split_pos should be positive and within cassette length
+    expect_true(all(plan$cassette_splits$split_pos > 0))
+    expect_true(all(plan$cassette_splits$split_pos <= nchar(big_cassette)))
+
+    # junction_oh should be 4-nt strings
+    expect_true(all(nchar(plan$cassette_splits$junction_oh) == 4))
   }
 })

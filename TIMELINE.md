@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-05 13:23:53 | 186 commits | 2026-01-29 to 2026-03-05
+> Auto-generated on 2026-03-05 13:30:57 | 187 commits | 2026-01-29 to 2026-03-05
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-05
 
+- Update tests for codon constraint, anchor removal, overlap, and cassette pass-through
 - Pass SB DP cassette boundaries through to gene block design
 - Add SB-boundary tile overlap via post-extension
 - Remove anchor_oh1/anchor_oh2 from tile DP and v2 orchestration

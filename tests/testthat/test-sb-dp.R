@@ -1,5 +1,5 @@
 # Created: 2026-03-04
-# Last updated: 2026-03-04 — Initial tests for search_superblock_boundaries_dp()
+# Last updated: 2026-03-05 — Add hard codon constraint tests
 # test-sb-dp.R — Tests for the SB-first DP superblock boundary search
 #
 # Tests cover:
@@ -418,7 +418,7 @@ test_that("sb_dp_solve_k finds optimal single boundary", {
 # Test: Codon boundary preference within gene
 # =============================================================================
 
-test_that("boundaries within gene prefer codon boundaries", {
+test_that("gene-region SB boundaries are always codon-aligned (hard constraint)", {
   # Use a 3600 nt all-gene sequence (no cassette)
   # This needs 2 SBs (1 boundary)
   seq_3600 <- make_test_seq(3600)
@@ -429,11 +429,47 @@ test_that("boundaries within gene prefer codon boundaries", {
     min_block_length = 300L
   )
 
-  # The boundary should be at a codon boundary within the gene
-  if (result$n_superblocks >= 2L) {
-    boundary_pos <- result$boundaries$end_nt[1]
-    expect_equal(boundary_pos %% 3L, 0L,
-      info = paste("Gene boundary at", boundary_pos, "should fall on codon boundary")
-    )
+  # All boundaries within the gene must be codon-aligned (p %% 3 == 0)
+  gene_len <- nchar(seq_3600)
+  for (i in seq_len(result$n_superblocks - 1L)) {
+    boundary_pos <- result$boundaries$end_nt[i]
+    if (boundary_pos <= gene_len) {
+      expect_equal(boundary_pos %% 3L, 0L,
+        info = paste("Gene SB boundary at", boundary_pos, "must be codon-aligned")
+      )
+    }
+  }
+})
+
+test_that("cassette-region SB boundaries are NOT required to be codon-aligned", {
+  # Build: 1500 nt gene + 2400 nt cassette = 3900 nt
+  # Forces at least one boundary in the cassette region
+  gene_seq <- make_test_seq(1500)
+  cassette_unit <- "TAGCAACCGTGA" # 12 nt
+  cassette_seq <- paste0(rep(cassette_unit, 200), collapse = "")
+  cassette_seq <- substring(cassette_seq, 1, 2400)
+  full_seq <- paste0(gene_seq, cassette_seq)
+  gene_len <- nchar(gene_seq)
+
+  result <- search_superblock_boundaries_dp(
+    full_seq = full_seq,
+    gene_len = gene_len,
+    max_block_length = 1800L,
+    min_block_length = 300L
+  )
+
+  # At least 3 SBs needed (3900 / 1800 > 2)
+  expect_gte(result$n_superblocks, 2L)
+
+  # Gene-region boundaries: codon-aligned
+  # Cassette-region boundaries: any nt position is fine
+  for (i in seq_len(result$n_superblocks - 1L)) {
+    boundary_pos <- result$boundaries$end_nt[i]
+    if (boundary_pos <= gene_len) {
+      expect_equal(boundary_pos %% 3L, 0L,
+        info = paste("Gene boundary at", boundary_pos, "must be codon-aligned")
+      )
+    }
+    # No constraint on cassette boundaries — they can be at any nt position
   }
 })

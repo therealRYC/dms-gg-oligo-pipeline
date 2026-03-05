@@ -1,8 +1,7 @@
 # Created: 2026-03-04
-# Last updated: 2026-03-04 — Initial tests for SB anchor overhangs in tile DP
-# test-tile-dp-anchors.R — Tests for anchor_oh1, anchor_oh2, sb_blacklist
-# parameters in search_tile_boundaries_dp() and the
-# search_tile_boundaries_within_sb() wrapper.
+# Last updated: 2026-03-05 — Remove anchor tests (anchors removed); keep blacklist/wrapper tests
+# test-tile-dp-anchors.R — Tests for sb_blacklist parameter in
+# search_tile_boundaries_dp() and the search_tile_boundaries_within_sb() wrapper.
 
 # =============================================================================
 # TEST FIXTURES
@@ -34,102 +33,6 @@ TEST_600NT_GENE <- paste0(
   "TCC", "GCT", "ATC", "GAC", "AAA", "GCT", "GTT", "GAC", "AAA", "CTG", # 181-190
   "GCT", "GAA", "TAC", "ATC", "AAA", "GCT", "GAA", "GCT", "GAA", "TAA" # 191-200
 )
-
-# =============================================================================
-# ANCHOR VALIDATION TESTS
-# =============================================================================
-
-test_that("anchor_oh1 matching gene start produces no warning", {
-  cds <- TEST_600NT_GENE
-  gene_start_4nt <- substring(cds, 1, 4)
-
-  # Matching anchor should not warn
-  expect_silent({
-    suppressMessages({
-      tiles <- search_tile_boundaries_dp(
-        cds,
-        max_mutable_nt = 243L,
-        anchor_oh1 = gene_start_4nt,
-        multi_k = FALSE
-      )
-    })
-  })
-  expect_true(nrow(tiles) >= 1)
-})
-
-test_that("anchor_oh1 mismatch produces a warning", {
-  cds <- TEST_600NT_GENE
-  gene_start_4nt <- substring(cds, 1, 4)
-
-  # Deliberately wrong anchor
-  wrong_anchor <- if (gene_start_4nt == "AAAA") "CCCC" else "AAAA"
-
-  # Capture all messages and check that at least one mentions anchor_oh1 mismatch
-  msgs <- character(0)
-  suppressMessages(
-    withCallingHandlers(
-      search_tile_boundaries_dp(
-        cds,
-        max_mutable_nt = 243L,
-        anchor_oh1 = wrong_anchor,
-        multi_k = FALSE
-      ),
-      message = function(m) {
-        msgs <<- c(msgs, conditionMessage(m))
-        invokeRestart("muffleMessage")
-      }
-    )
-  )
-  expect_true(any(grepl("anchor_oh1 mismatch", msgs)),
-    info = paste("Expected anchor_oh1 mismatch message. Got:", paste(msgs, collapse = " | "))
-  )
-})
-
-test_that("anchor_oh2 matching gene end produces no warning", {
-  cds <- TEST_600NT_GENE
-  gene_len <- nchar(cds)
-  gene_end_4nt <- substring(cds, gene_len - 3L, gene_len)
-
-  expect_silent({
-    suppressMessages({
-      tiles <- search_tile_boundaries_dp(
-        cds,
-        max_mutable_nt = 243L,
-        anchor_oh2 = gene_end_4nt,
-        multi_k = FALSE
-      )
-    })
-  })
-  expect_true(nrow(tiles) >= 1)
-})
-
-test_that("anchor_oh2 mismatch produces a warning", {
-  cds <- TEST_600NT_GENE
-  gene_len <- nchar(cds)
-  gene_end_4nt <- substring(cds, gene_len - 3L, gene_len)
-
-  wrong_anchor <- if (gene_end_4nt == "CCCC") "AAAA" else "CCCC"
-
-  # Capture all messages and check that at least one mentions anchor_oh2 mismatch
-  msgs <- character(0)
-  suppressMessages(
-    withCallingHandlers(
-      search_tile_boundaries_dp(
-        cds,
-        max_mutable_nt = 243L,
-        anchor_oh2 = wrong_anchor,
-        multi_k = FALSE
-      ),
-      message = function(m) {
-        msgs <<- c(msgs, conditionMessage(m))
-        invokeRestart("muffleMessage")
-      }
-    )
-  )
-  expect_true(any(grepl("anchor_oh2 mismatch", msgs)),
-    info = paste("Expected anchor_oh2 mismatch message. Got:", paste(msgs, collapse = " | "))
-  )
-})
 
 # =============================================================================
 # SB BLACKLIST TESTS
