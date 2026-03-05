@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-04 22:58:46 | 180 commits | 2026-01-29 to 2026-03-04
+> Auto-generated on 2026-03-04 23:05:33 | 181 commits | 2026-01-29 to 2026-03-04
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-04
 
+- Add plan_assembly_v2() SB-first two-pass orchestration (T2)
 - Merge T0 (SB-level DP) and T1 (tile DP anchors) into sb-first branch
 - Merge branch 'worktree-agent-a3028781' into 260304-sb-first-dp
 - Add SB anchor overhangs and sb_blacklist to tile DP
