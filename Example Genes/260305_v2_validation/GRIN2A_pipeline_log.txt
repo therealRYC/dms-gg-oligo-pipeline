@@ -1,0 +1,210 @@
+
+── DMS Golden Gate Oligo Pipeline (3-Enzyme Architecture) ──────────────────────
+ℹ Config: configs/grin2a_v2run.yaml
+
+── Step 1: Loading configuration ──
+
+ℹ Intergene elements: WPRE + spacer + bGH_polyA (845 nt total)
+✔ Configuration loaded and validated. [0.1s]
+
+── Step 2: Reading gene ──
+
+✔ Gene 'GRIN2A': 4395 nt, 1465 codons, 1464 aa [1.3s]
+
+── Step 3: Loading codon usage table ──
+
+✔ Codon usage table loaded: built-in CoCoPUTs (Homo sapiens, GRCh38.p13) [0.1s]
+
+── Step 4: Scanning for enzyme sites (BsaI, BsmBI, PaqCI) ──
+
+! Found 6 enzyme site(s) in gene that need domestication.
+→ Applying domestication (with iterative BsaI/BsmBI resolution)...
+ℹ Domesticated: BsaI site at nt 3604-3609 | codon 1202: GAG -> GAA (E, freq: 39.42 -> 33.87)
+ℹ Domesticated: BsaI site at nt 2374-2379 | codon 792: GAG -> GAA (E, freq: 39.42 -> 33.87)
+ℹ Domesticated: BsaI site at nt 2013-2018 | codon 671: CAG -> CAA (Q, freq: 35.3 -> 14.18)
+ℹ Domesticated: BsmBI site at nt 1629-1634 | codon 543: ACC -> ACA (T, freq: 17.76 -> 16.56)
+ℹ Domesticated: BsmBI site at nt 1279-1284 | codon 427: GAG -> GAA (E, freq: 39.42 -> 33.87)
+ℹ Domesticated: BsaI site at nt 780-785 | codon 260: TTG -> CTT (L, freq: 13.47 -> 14.16)
+✔ Gene domesticated for all 3 enzymes.
+ℹ Step 4 completed. [0.2s]
+
+── Step 5: Designing mutations ──
+
+✔ Designed 30723 variants across 1463 mutable positions (codons 2-1464; skipped codon 1=Met and codon 1465=stop). [27797 missense + 1463 nonsense + 1463 WT controls]
+ℹ Fixed 343 variant(s) that would have created enzyme sites.
+There were 47 warnings (use warnings() to see them)
+✔ 30723 variants designed. [99.4s]
+
+── Step 6: Planning assembly (SB-first two-pass DP) ──
+
+ℹ Max mutable region: 234 nt (78 codons) | Fixed overhead: 64 nt
+
+── SB-First Two-Pass Assembly Planning (v2) ──
+
+── Phase 1: Selecting fixed overhangs (oh3, oh4) 
+ℹ Derived oh3=CACC from PolIII promoter 3' end (fidelity=0.417)
+✔ Fixed overhangs: oh3=CACC (non-HF), oh4=AGAA (non-HF)
+
+── Phase 2: Superblock boundary search (Pass 1) 
+ℹ Precomputing SB boundary scores for 5490 positions...
+ℹ 2279 valid SB boundary candidates out of 5490 positions.
+ℹ SB boundary DP: 5490 bp, K range [3, 5]
+ℹ Stopping SB K search at K=4: avg score improvement 0.00% < 0.5% threshold
+ℹ SB boundary DP completed in 0.2s (3 K values).
+ℹ SB multi-K: K=3 score=2.464, K=4 score=3.285 | best K=3
+✔ SB boundary search: 4 superblocks, 3 boundaries, total score = 2.4638
+✔ SB DP: 4 superblock(s), 3 boundary(ies). Total score: 2.464
+
+── Phase 3: Tile boundary search within each superblock (Pass 2) 
+ℹ SB 1: gene region [1, 1362] (454 codons)
+ℹ Precomputing boundary scores for 453 candidate positions...
+✔ Boundary scores precomputed in 0.5s.
+ℹ DP boundary search: 454 codons, 414 valid candidate positions, K range [6, 11]
+ℹ Stopping K search at K=10: avg score improvement -0.93% < 0.5% threshold
+ℹ DP tile boundary search completed in 0s (6 K values).
+ℹ Multi-K: K=6 score=6.5, K=7 score=7.9, K=8 score=9.1, K=9 score=10.3, K=10 score=11.3 | best K=9
+✔ DP boundary search: 10 tiles, 9 boundaries (both_HF=0, one_HF=1, neither=8)
+ℹ SB 1: extended last tile by 4 codons past SB boundary (new end_codon=458, oh2=GGGG)
+ℹ SB 2: gene region [1363, 2301] (313 codons)
+ℹ Precomputing boundary scores for 312 candidate positions...
+✔ Boundary scores precomputed in 0.3s.
+ℹ DP boundary search: 313 codons, 275 valid candidate positions, K range [4, 9]
+ℹ Stopping K search at K=6: avg score improvement -0.79% < 0.5% threshold
+ℹ DP tile boundary search completed in 0s (6 K values).
+ℹ Multi-K: K=4 score=5.0, K=5 score=6.6, K=6 score=7.9 | best K=5
+✔ DP boundary search: 6 tiles, 5 boundaries (both_HF=2, one_HF=2, neither=1)
+ℹ SB 2: extended last tile by 4 codons past SB boundary (new end_codon=771, oh2=TTGG)
+ℹ SB 3: gene region [2302, 4017] (572 codons)
+ℹ Precomputing boundary scores for 571 candidate positions...
+✔ Boundary scores precomputed in 0.6s.
+ℹ DP boundary search: 572 codons, 527 valid candidate positions, K range [7, 12]
+ℹ Stopping K search at K=11: avg score improvement 0.08% < 0.5% threshold
+ℹ DP tile boundary search completed in 0s (6 K values).
+ℹ Multi-K: K=7 score=7.4, K=8 score=9.4, K=9 score=10.9, K=10 score=12.2, K=11 score=13.4 | best K=11
+✔ DP boundary search: 12 tiles, 11 boundaries (both_HF=1, one_HF=3, neither=7)
+ℹ SB 3: extended last tile by 4 codons past SB boundary (new end_codon=1343, oh2=CCTT)
+ℹ SB 4: gene region [4018, 4395] (126 codons)
+ℹ Precomputing boundary scores for 125 candidate positions...
+✔ Boundary scores precomputed in 0.1s.
+ℹ DP boundary search: 126 codons, 119 valid candidate positions, K range [1, 3]
+ℹ Stopping K search at K=2: avg score improvement -5.94% < 0.5% threshold
+ℹ DP tile boundary search completed in 0s (3 K values).
+ℹ Multi-K: K=1 score=1.3, K=2 score=2.4 | best K=1
+✔ DP boundary search: 2 tiles, 1 boundaries (both_HF=0, one_HF=0, neither=1)
+
+── Phase 4: Merging tiles across superblocks 
+✔ Merged 30 tile(s) across 4 superblock(s).
+ℹ SB-first partition: 4 superblocks, 3 boundary(ies). 87 per-tile split entries.
+
+── Phase 6: Validating per-reaction overhang fidelity 
+! 3 reaction(s) below fidelity threshold (0.95). Min: 0.894
+! 42 variant(s) at gene edges have partial oh1/oh2 overlap. These mutations may not fully assemble as intended.
+! Skipped 42 gene-edge variant(s) with partial oh1/oh2 overlap
+✔ Assembly planned: 30 tiles, 3/29 boundaries both in HF set [2.5s]
+
+── Step 7: Designing barcodes ──
+
+ℹ Barcode mode: unified hierarchical, barcode_length=20, prefix_length=12
+ℹ Junction context for barcode filtering: left='CACACC', right='AGAATG'
+ℹ Unified hierarchical mode: generating barcodes (length=20, prefix=12, suffix=8, min_hamming=3, need 30681 variants x 1 barcodes = 30681)
+→ Generating 30681 unique prefixes (hard Hamming >= 3)...
+ℹ Building GF(4) Hamming code: Ham_4(3) = [21, 18, 3]_4, shortened to [12, 9, >=3]_4
+ℹ Code capacity: 4^9 = 262,144 codewords
+→ Enumerating all 262,144 codewords...
+✔ Generated 262,144 prefix codewords (d >= 3 guaranteed by algebraic construction)
+ℹ Removed 4237 prefixes with enzyme sites at junction boundaries.
+✔ GF(4) linear code: 244106 prefixes after filtering (need 30681)
+ℹ Generated 30681 unique prefixes (method=linear).
+→ Generating barcodes (random suffixes per prefix)...
+ℹ Batch suffix generation: 30681 variants x 500 candidates = 15,340,500 total
+✔ Barcode generation: 30681 barcodes for 30681 variants in 149.7s.
+✔ Skipping prefix distance validation (d >= 3 guaranteed by linear construction).
+✔ Generated 30681 barcodes (mode=unified hierarchical, length=20, prefix_method=linear)
+→ Computing per-barcode nearest-neighbor Hamming distances...
+✔ Nearest-neighbor distances: min=3, median=6, max=7
+ℹ Step 7 completed. [185.9s]
+
+── Step 8: Assembling oligos (universal 3-enzyme structure) ──
+
+✔ All 30681 oligos within length limit. Range: 149-284 nt.
+✔ 30681 oligos assembled. [0.1s]
+
+── Step 9: Designing gene blocks and helper plasmid ──
+
+ℹ Deduplicated blocks: 137 -> 65 (72 duplicates removed)
+✔ Helper plasmid insert designed: oh_L=ATGG, oh_R=AGAA (72 nt)
+✔ All 65 gene blocks within synthesis limit. Range: 159-1738 nt.
+✔ 65 gene blocks designed. [0.5s]
+
+── Step 10: Running QC checks ──
+
+✖ 2 QC check(s) failed:
+!   FAIL: Tile boundary overhangs have adequate fidelity | 24 tile(s) with low-fidelity boundary overhangs (<0.80)
+!   FAIL: All gene blocks above synthesis minimum length | 3 block(s) below 300 nt minimum. Range: 159-1738 nt
+ℹ [PASS] All oligos within synthesis length limit — Range: 149-284 nt (limit: 300)
+ℹ [PASS] All gene blocks within synthesis length limit — Range: 159-1738 nt (limit: 1800)
+ℹ [PASS] No enzyme sites at barcode-context junctions — 0 barcode(s) with junction enzyme sites (left='CACACC', right='AGAATG')
+ℹ [PASS] All barcodes are unique — 30681 unique / 30681 total
+ℹ [PASS] Tiles cover entire gene without gaps — 4395 / 4395 nt covered
+ℹ [PASS] Expected number of variants generated — 30681 unique variants (expected: 30681 across 1461/1463 mutable positions; 27759 missense + 1461 nonsense + 1461 wt_control; 2 position(s) skipped)
+ℹ [PASS] Each non-control variant differs by exactly one codon from WT — 29220 / 29220 variants confirmed (WT controls excluded)
+ℹ [PASS] Oligo GC content within reasonable range (25-75%) — GC range: 40.8-66% | 0 oligo(s) with extreme GC
+ℹ [PASS] Gene domesticated for all 3 enzymes (BsaI, BsmBI, PaqCI) — No enzyme sites in gene
+ℹ [FAIL] Tile boundary overhangs have adequate fidelity — 24 tile(s) with low-fidelity boundary overhangs (<0.80)
+ℹ [PASS] Per-tile assembly manifests complete — 30 tile manifest(s) generated
+ℹ [PASS] Helper plasmid free of unintended BsmBI sites — OK
+ℹ [PASS] Per-reaction set-level overhang fidelity — Min set fidelity: 0.894 across 60 reactions | 3 reaction(s) below 0.90
+ℹ [PASS] No barcodes contain PolIII terminator signal (TTTT) — 0 / 30681 barcode(s) contain TTTT
+ℹ [FAIL] All gene blocks above synthesis minimum length — 3 block(s) below 300 nt minimum. Range: 159-1738 nt
+✔ QC: ISSUES FOUND [2.1s]
+ℹ Step 10b: Assembly simulation skipped (simulate_assembly = false)
+
+── Step 11: Writing outputs ──
+
+✔ Wrote oligo pool: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_oligo_pool.csv (30681 oligos)
+✔ Wrote gene block order: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_geneblock_order.csv (65 blocks)
+✔ Wrote variant-barcode map: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_variant_barcode_map.csv (30681 variants)
+✔ Wrote tile manifests: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_tile_manifests.csv
+✔ Wrote helper plasmid: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_helper_plasmid.csv
+✔ Wrote QC report: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_qc_report.csv
+✔ Wrote oligo FASTA: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_oligo_pool.fasta
+✔ Wrote gene block FASTA: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_geneblock_order.fasta
+✔ Wrote sequences FASTA: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_sequences.fasta
+✔ Wrote skipped variants: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_skipped_variants.csv (42 variants)
+✔ Outputs written. [2s]
+
+── Step 12: Generating wetlab assembly report ──
+
+✔ Wrote wetlab assembly report: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_assembly_report.md
+✔ Report generated. [0.4s]
+
+── Pipeline Complete ───────────────────────────────────────────────────────────
+✔ Gene: GRIN2A
+✔ Architecture: 3-enzyme (BsaI + BsmBI + PaqCI)
+✔ Variants: 30681 (unique mutations), 42 skipped (gene-edge overlap)
+✔ Oligos: 30681
+✔ Gene blocks: 65
+✔ Tiles: 30
+✔ Fixed overhangs: oh3=CACC, oh4=AGAA
+✔ Intergene elements: WPRE + spacer + bGH_polyA (845 nt)
+✔ Downstream cassette: 1095 nt (intergene + PolIII)
+✔ Barcodes: mode=unified hierarchical, length=20, prefix=12, effective_hamming=3
+✔ QC: ISSUES FOUND
+✔ Wetlab report: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a/GRIN2A_assembly_report.md
+✔ Output directory: /mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/260129 DMS Library Generation Computational Workflow/output/260305_v2_validation/grin2a
+
+── Timing Breakdown ──
+
+ℹ 1_config             0.1s
+ℹ 2_gene_input         1.3s
+ℹ 3_codon_usage        0.1s
+ℹ 4_enzyme_scan        0.2s
+ℹ 5_mutations          99.4s
+ℹ 6_assembly_plan      2.5s
+ℹ 7_barcodes           185.9s
+ℹ 8_oligo_assembly     0.1s
+ℹ 9_geneblocks         0.5s
+ℹ 10_qc                2.1s
+ℹ 11_output            2s
+ℹ 12_report            0.4s
+✔ Total pipeline time: 294.6s
