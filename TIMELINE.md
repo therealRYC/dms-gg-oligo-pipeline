@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-04 22:43:09 | 176 commits | 2026-01-29 to 2026-03-04
+> Auto-generated on 2026-03-04 22:57:02 | 178 commits | 2026-01-29 to 2026-03-04
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,8 @@
 
 ### 2026-03-04
 
+- Merge branch 'worktree-agent-a3028781' into 260304-sb-first-dp
+- Add search_superblock_boundaries_dp() for SB-first DP refactor (T0)
 - Add plan for SB-first two-pass DP assembly refactor
 - Replace synthetic pairwise matrices with real Pryor 2020 data
 - Remove HF set annotations from assembly report
