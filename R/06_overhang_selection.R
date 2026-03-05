@@ -3239,6 +3239,58 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
     )
 
     all_tiles_list[[si]] <- sb_tiles
+
+    # Post-extension: extend the last tile past the SB boundary so that
+    # adjacent SBs' tiles overlap, ensuring no unmutatable codons at SB gaps.
+    # The DP used effective_max_codons = max_codons - overlap_codons, so the
+    # last tile's core span is at most effective_max_codons. Post-extension
+    # adds up to overlap_codons → total tile size stays within max_codons.
+    if (gene_end_in_sb < gene_len && overlap_codons > 0L) {
+      last_idx <- nrow(sb_tiles)
+      total_gene_codons <- gene_len %/% 3L
+      current_ec <- sb_tiles$end_codon[last_idx]
+
+      extended <- FALSE
+      for (ext in seq(overlap_codons, 1L)) {
+        ext_ec <- min(current_ec + ext, total_gene_codons)
+        if (ext_ec <= current_ec) next
+        ext_en <- ext_ec * 3L
+        new_oh2 <- substring(cds, ext_en - 3L, ext_en)
+        new_oh2_rc <- reverse_complement(new_oh2)
+
+        if (!(new_oh2 %in% tile_sb_blacklist) &&
+          !(new_oh2_rc %in% tile_sb_blacklist) &&
+          !(new_oh2 %in% PALINDROMIC_4NT)) {
+          # Valid extension — apply it
+          sb_tiles$end_codon[last_idx] <- ext_ec
+          sb_tiles$end_nt[last_idx] <- ext_en
+          sb_tiles$oh2_seq[last_idx] <- new_oh2
+          new_fid <- if (new_oh2 %in% names(fid_lookup)) {
+            unname(fid_lookup[new_oh2])
+          } else {
+            NA_real_
+          }
+          sb_tiles$oh2_fidelity[last_idx] <- new_fid
+          sb_tiles$oh2_in_hf[last_idx] <- new_oh2 %in% POTAPOV_TABLE1_SET3_25
+          sb_tiles$tile_seq[last_idx] <- substring(
+            cds, sb_tiles$start_nt[last_idx], ext_en
+          )
+          extended <- TRUE
+          cli::cli_alert_info(paste0(
+            "SB ", si, ": extended last tile by ", ext, " codons past SB boundary ",
+            "(new end_codon=", ext_ec, ", oh2=", new_oh2, ")"
+          ))
+          break
+        }
+      }
+      if (!extended) {
+        cli::cli_alert_warning(paste0(
+          "SB ", si, ": could not extend last tile past SB boundary ",
+          "(all overlap positions blacklisted or palindromic)"
+        ))
+      }
+      all_tiles_list[[si]] <- sb_tiles
+    }
   }
 
   # =========================================================================

@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-05 13:20:50 | 184 commits | 2026-01-29 to 2026-03-05
+> Auto-generated on 2026-03-05 13:21:50 | 185 commits | 2026-01-29 to 2026-03-05
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-05
 
+- Add SB-boundary tile overlap via post-extension
 - Remove anchor_oh1/anchor_oh2 from tile DP and v2 orchestration
 - Enforce hard codon constraint for SB boundaries in gene portion
 - Add tile DP mechanics and overlap explanation doc
