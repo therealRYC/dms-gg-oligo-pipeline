@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-03-03 — Pass include_synonymous to design_mutations; update variant count for auto-sizing
+# Last updated: 2026-03-05 — Switch to plan_assembly_v2() (SB-first two-pass DP)
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -180,11 +180,11 @@ if (identical(cfg$barcode_length, "auto")) {
   ))
 }
 
-# Step 6: Plan assembly (dynamic tile boundary search + overhangs + superblocks)
-cli::cli_h2("Step 6: Planning assembly (dynamic tile boundary search)")
+# Step 6: Plan assembly (SB-first two-pass DP: superblock boundaries then tile boundaries)
+cli::cli_h2("Step 6: Planning assembly (SB-first two-pass DP)")
 step_start <- proc.time()
 tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
-assembly_plan <- plan_assembly(
+assembly_plan <- plan_assembly_v2(
   cds = gene$cds,
   polIII = cfg$polIII_promoter,
   max_mutable_nt = tile_size,
@@ -193,8 +193,6 @@ assembly_plan <- plan_assembly(
     fidelity_threshold = cfg$overhang_fidelity_threshold,
     manual_oh3 = cfg$oh3,
     manual_oh4 = cfg$oh4,
-    search_window_K = cfg$search_window_K,
-    boundary_method = cfg$boundary_method,
     multi_k = cfg$multi_k_search,
     overlap_codons = cfg$overlap_codons,
     min_geneblock_length = cfg$min_geneblock_length
