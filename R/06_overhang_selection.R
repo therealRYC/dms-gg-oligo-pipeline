@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-04 — Add plan_assembly_v2() SB-first two-pass orchestration
+# Last updated: 2026-03-05 — Hard codon constraint, remove anchors, SB overlap, cassette pass-through
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -1430,18 +1430,15 @@ search_superblock_boundaries_dp <- function(
     # Compute overhang score: P_fid * P_eff
     score <- overhang_score(oh, fid_lookup, eff_lookup)
 
-    # Codon boundary preference: within the gene portion, prefer positions
-    # that fall on codon boundaries (p divisible by 3). Non-codon positions
-    # in the gene get a penalty to push DP toward codon-aligned splits.
-    # Positions in the cassette portion (p > gene_len) have no penalty.
-    codon_penalty <- 0.0
+    # Hard codon constraint: within the gene portion, only allow positions
+    # that fall on codon boundaries (p divisible by 3). This ensures SB
+    # boundaries in the gene never split a codon.
+    # Positions in the cassette portion (p > gene_len) have no constraint.
     if (p <= gene_len && (p %% 3L) != 0L) {
-      # Penalize non-codon boundary positions within the gene
-      # (soft penalty — DP can still pick them if no codon boundary is available)
-      codon_penalty <- -0.5
+      next
     }
 
-    boundary_scores[p] <- score + codon_penalty
+    boundary_scores[p] <- score
     boundary_valid[p] <- TRUE
   }
 
@@ -1525,8 +1522,45 @@ search_superblock_boundaries_dp <- function(
   )
 
   if (is.null(best_result)) {
+    # Defensive fallback: retry with soft penalty instead of hard constraint.
+    # This should never trigger in practice — with ~600 codon-aligned positions
+    # per 1800 bp and ~14% exclusion rate, there are always enough candidates.
     cli::cli_alert_warning(
-      "SB DP found no valid solution; returning single oversized superblock."
+      "SB DP found no valid solution with hard codon constraint. Retrying with soft penalty (-0.5)."
+    )
+    boundary_scores_soft <- rep(-Inf, total_len)
+    boundary_valid_soft <- rep(FALSE, total_len)
+    for (p in 4L:total_len) {
+      oh <- substring(full_seq, p - 3L, p)
+      if (oh %in% blacklist_set) next
+      if (oh %in% PALINDROMIC_4NT) next
+      score <- overhang_score(oh, fid_lookup, eff_lookup)
+      codon_penalty <- 0.0
+      if (p <= gene_len && (p %% 3L) != 0L) {
+        codon_penalty <- -0.5
+      }
+      boundary_scores_soft[p] <- score + codon_penalty
+      boundary_valid_soft[p] <- TRUE
+    }
+    for (K in k_range) {
+      result <- sb_dp_solve_k(
+        K, total_len, min_block_length, max_block_length,
+        boundary_scores_soft, boundary_valid_soft
+      )
+      if (!is.null(result)) {
+        avg <- result$total_score / K
+        if (is.null(best_result) || avg > best_avg_score) {
+          best_avg_score <- avg
+          best_result <- result
+          best_result$K <- K
+        }
+      }
+    }
+  }
+
+  if (is.null(best_result)) {
+    cli::cli_alert_warning(
+      "SB DP found no valid solution even with soft penalty; returning single oversized superblock."
     )
     return(list(
       n_superblocks = 1L,

@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-05 11:25:48 | 182 commits | 2026-01-29 to 2026-03-05
+> Auto-generated on 2026-03-05 13:19:33 | 183 commits | 2026-01-29 to 2026-03-05
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-05
 
+- Enforce hard codon constraint for SB boundaries in gene portion
 - Add tile DP mechanics and overlap explanation doc
 
 ### 2026-03-04
