@@ -880,14 +880,6 @@ dp_solve_k <- function(K, n_codons, min_codons, max_codons,
 #'   efficiency is treated as 1.0 for all overhangs.
 #' @param blacklisted_oh2 Character vector of oh2 overhangs to exclude from
 #'   tile boundaries (OPT-005 legacy). Default NULL.
-#' @param anchor_oh1 Fixed oh1 for the first tile (from SB boundary with
-#'   previous SB, or oh_L for the first SB). When non-NULL, validates that
-#'   the first 4 nt of cds match this anchor. Does not alter the DP itself
-#'   (first tile always starts at position 1). Default NULL.
-#' @param anchor_oh2 Fixed oh2 for the last tile (from SB boundary with
-#'   next SB, or gene-end overhang for the last SB). When non-NULL, validates
-#'   that the last 4 nt of cds match this anchor. Does not alter the DP itself
-#'   (last tile always ends at the last codon). Default NULL.
 #' @param sb_blacklist Character vector of SB boundary overhangs to avoid at
 #'   tile boundaries. Merged into both oh1 and oh2 blacklists so that no tile
 #'   boundary reuses an SB junction overhang. Default NULL.
@@ -901,33 +893,9 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
                                       overlap_codons = 4L,
                                       eff_lookup = NULL,
                                       blacklisted_oh2 = NULL,
-                                      anchor_oh1 = NULL,
-                                      anchor_oh2 = NULL,
                                       sb_blacklist = NULL) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
-
-  # Anchor validation: confirm gene endpoints match expected SB boundary overhangs
-  if (!is.null(anchor_oh1)) {
-    gene_start_4nt <- substring(cds, 1, 4)
-    if (gene_start_4nt != anchor_oh1) {
-      cli::cli_alert_warning(paste0(
-        "anchor_oh1 mismatch: expected '", anchor_oh1,
-        "' but gene starts with '", gene_start_4nt,
-        "'. SB boundary overhang may not match gene sequence at this position."
-      ))
-    }
-  }
-  if (!is.null(anchor_oh2)) {
-    gene_end_4nt <- substring(cds, gene_len - 3L, gene_len)
-    if (gene_end_4nt != anchor_oh2) {
-      cli::cli_alert_warning(paste0(
-        "anchor_oh2 mismatch: expected '", anchor_oh2,
-        "' but gene ends with '", gene_end_4nt,
-        "'. SB boundary overhang may not match gene sequence at this position."
-      ))
-    }
-  }
 
   if (is.null(min_mutable_nt)) {
     min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
@@ -1163,17 +1131,12 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
 #'
 #' Wrapper around search_tile_boundaries_dp() for use in the two-pass
 #' SB-first assembly planning. Operates on a subsequence of the gene
-#' (one superblock's coding region) with fixed anchor overhangs at the
-#' SB boundaries.
+#' (one superblock's coding region).
 #'
 #' @param cds Full domesticated gene CDS (the SB's portion is extracted)
 #' @param sb_start_nt 1-based start position of this SB in the gene (nt)
 #' @param sb_end_nt 1-based end position of this SB in the gene (nt)
 #' @param max_mutable_nt Max mutable region size from compute_max_tile_size()
-#' @param anchor_oh1 Fixed oh1 for the first tile (from SB boundary with
-#'   previous SB, or oh_L for the first SB). Default NULL.
-#' @param anchor_oh2 Fixed oh2 for the last tile (from SB boundary with
-#'   next SB, or gene-end overhang for the last SB). Default NULL.
 #' @param sb_blacklist Character vector of ALL SB boundary overhangs to avoid
 #'   at internal tile boundaries. Default NULL.
 #' @param ... Additional arguments passed to search_tile_boundaries_dp()
@@ -1182,19 +1145,15 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
 #'   coordinates.
 search_tile_boundaries_within_sb <- function(cds, sb_start_nt, sb_end_nt,
                                              max_mutable_nt,
-                                             anchor_oh1 = NULL,
-                                             anchor_oh2 = NULL,
                                              sb_blacklist = NULL,
                                              ...) {
   # Extract the SB's portion of the gene
   sb_seq <- substring(cds, sb_start_nt, sb_end_nt)
 
-  # Run tile DP on the subsequence, passing anchor and blacklist info
+  # Run tile DP on the subsequence, passing blacklist info
   tiles <- search_tile_boundaries_dp(
     cds = sb_seq,
     max_mutable_nt = max_mutable_nt,
-    anchor_oh1 = anchor_oh1,
-    anchor_oh2 = anchor_oh2,
     sb_blacklist = sb_blacklist,
     ...
   )
@@ -3226,27 +3185,9 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
     sb_gene_len <- gene_end_in_sb - gene_start_in_sb + 1L
     sb_gene_codons <- sb_gene_len %/% 3L
 
-    # Determine anchor overhangs for this SB's tile DP
-    # First SB: oh1 anchor = oh_L (gene start)
-    # Other SBs: oh1 anchor = SB boundary OH from previous SB
-    anchor_oh1 <- if (si == 1L) {
-      oh_L
-    } else {
-      sb_df$boundary_oh[si - 1L]
-    }
-
-    # Last gene-containing SB: oh2 anchor = gene end overhang
-    # Other SBs: oh2 anchor = this SB's boundary OH
-    anchor_oh2 <- if (gene_end_in_sb == gene_len) {
-      substring(cds, gene_len - 3L, gene_len)
-    } else {
-      sb_df$boundary_oh[si]
-    }
-
     cli::cli_alert_info(paste0(
       "SB ", si, ": gene region [", gene_start_in_sb, ", ", gene_end_in_sb,
-      "] (", sb_gene_codons, " codons), anchors oh1=", anchor_oh1,
-      " oh2=", anchor_oh2
+      "] (", sb_gene_codons, " codons)"
     ))
 
     # Single-tile SB: if gene content fits in one tile, no DP needed
@@ -3289,8 +3230,6 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
       sb_end_nt = gene_end_in_sb,
       max_mutable_nt = max_mutable_nt,
       min_mutable_nt = min_mutable_nt,
-      anchor_oh1 = anchor_oh1,
-      anchor_oh2 = anchor_oh2,
       sb_blacklist = tile_sb_blacklist,
       oh_fidelity = oh_fidelity,
       multi_k = multi_k,
