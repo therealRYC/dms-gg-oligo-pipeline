@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-25 — Support intergene_elements in construct diagrams
+# Last updated: 2026-03-04 — Remove HF set annotations from report
 # 12_report.R — Wetlab-compatible Markdown assembly report
 # DMS Golden Gate Oligo Pipeline
 #
@@ -107,9 +107,11 @@ report_gene_summary <- function(gene, assembly_plan, oligos, variants, blocks, c
     paste0(min(oligos$length), "-", max(oligos$length), " nt")
   }
   df <- data.frame(
-    Property = c("Gene name", "CDS length", "Protein length", "Number of tiles",
-                 "Total variants", "Total oligos", "Oligo length range",
-                 "Gene blocks to order", "Barcodes per variant"),
+    Property = c(
+      "Gene name", "CDS length", "Protein length", "Number of tiles",
+      "Total variants", "Total oligos", "Oligo length range",
+      "Gene blocks to order", "Barcodes per variant"
+    ),
     Value = c(
       display_name,
       paste0(nchar(gene$cds), " nt (", gene$n_codons, " codons)"),
@@ -178,8 +180,10 @@ report_oligo_summary <- function(oligos, tiles) {
   }
   c(
     "## 3. Oligo Pool Summary", "",
-    paste0("**Total oligos:** ", nrow(oligos),
-           " | **Length range:** ", min(oligos$length), "-", max(oligos$length), " nt"), "",
+    paste0(
+      "**Total oligos:** ", nrow(oligos),
+      " | **Length range:** ", min(oligos$length), "-", max(oligos$length), " nt"
+    ), "",
     md_table(per_tile), ""
   )
 }
@@ -201,9 +205,11 @@ report_barcode_summary <- function(barcode_result, barcodes, cfg) {
   barcodes_per <- cfg$barcodes_per_variant %||% 1L
 
   # --- Design Parameters table ---
-  param_names <- c("Mode", "Barcode length", "Prefix length", "Suffix length",
-                   "Requested min Hamming", "Effective min Hamming",
-                   "Barcodes per variant")
+  param_names <- c(
+    "Mode", "Barcode length", "Prefix length", "Suffix length",
+    "Requested min Hamming", "Effective min Hamming",
+    "Barcodes per variant"
+  )
   param_vals <- c(
     "Unified hierarchical (prefix-suffix)",
     paste0(bc_length, " nt"),
@@ -214,8 +220,10 @@ report_barcode_summary <- function(barcode_result, barcodes, cfg) {
     as.character(barcodes_per)
   )
 
-  param_df <- data.frame(Parameter = param_names, Value = param_vals,
-                          stringsAsFactors = FALSE)
+  param_df <- data.frame(
+    Parameter = param_names, Value = param_vals,
+    stringsAsFactors = FALSE
+  )
   add("### Design Parameters")
   add("")
   add(md_table(param_df))
@@ -225,18 +233,24 @@ report_barcode_summary <- function(barcode_result, barcodes, cfg) {
   n_total <- length(barcodes)
   n_unique <- length(unique(barcodes))
   gc_vals <- vapply(barcodes, gc_content, numeric(1))
-  gc_range_str <- paste0(round(min(gc_vals) * 100, 1), "% - ",
-                         round(max(gc_vals) * 100, 1), "%")
+  gc_range_str <- paste0(
+    round(min(gc_vals) * 100, 1), "% - ",
+    round(max(gc_vals) * 100, 1), "%"
+  )
   gc_mean_str <- paste0(round(mean(gc_vals) * 100, 1), "%")
 
   compliance_str <- paste0("100% cross-variant (prefix d >= ", effective_ham, ")")
 
   stat_df <- data.frame(
-    Statistic = c("Total barcodes", "Unique barcodes",
-                  "GC content range", "GC content mean",
-                  "Hamming guarantee"),
-    Value = c(n_total, n_unique, gc_range_str, gc_mean_str,
-              compliance_str),
+    Statistic = c(
+      "Total barcodes", "Unique barcodes",
+      "GC content range", "GC content mean",
+      "Hamming guarantee"
+    ),
+    Value = c(
+      n_total, n_unique, gc_range_str, gc_mean_str,
+      compliance_str
+    ),
     stringsAsFactors = FALSE
   )
   add("### Pool Statistics")
@@ -273,19 +287,18 @@ report_fixed_overhangs <- function(assembly_plan, helper, cfg) {
 
   oh_df <- data.frame(
     Overhang = c("oh_L", "oh3", "oh4", "paqci_star2", "paqci_star1"),
-    Sequence = c(oh_L, oh3, oh4,
-                 cfg$paqci_star2 %||% "NNNN",
-                 cfg$paqci_star1 %||% "NNNN"),
-    Role = c("Gene start (BsaI, all tiles)",
-             "Downstream cassette-barcode junction (BsmBI, all tiles)",
-             "Barcode-helper junction (BsaI, all tiles)",
-             "PaqCI 5' end of insert (Level 2)",
-             "PaqCI 3' end of insert (Level 2)"),
-    `In HF Set` = c(
-      if (!is.null(assembly_plan$hf_set_used) && (oh_L %in% assembly_plan$hf_set_used)) "Yes" else "No",
-      if (isTRUE(assembly_plan$oh3_in_hf)) "Yes" else "No",
-      if (isTRUE(assembly_plan$oh4_in_hf)) "Yes" else "No",
-      "--", "--"),
+    Sequence = c(
+      oh_L, oh3, oh4,
+      cfg$paqci_star2 %||% "NNNN",
+      cfg$paqci_star1 %||% "NNNN"
+    ),
+    Role = c(
+      "Gene start (BsaI, all tiles)",
+      "Downstream cassette-barcode junction (BsmBI, all tiles)",
+      "Barcode-helper junction (BsaI, all tiles)",
+      "PaqCI 5' end of insert (Level 2)",
+      "PaqCI 3' end of insert (Level 2)"
+    ),
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
@@ -330,19 +343,21 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
   lines <- character(0)
   add <- function(...) lines <<- c(lines, ...)
 
-  add(paste0("### Tile ", tile_idx, " of ", n_tiles,
-             " -- Codons ", tile$start_codon, "-", tile$end_codon,
-             " (", tile_len, " nt)"))
+  add(paste0(
+    "### Tile ", tile_idx, " of ", n_tiles,
+    " -- Codons ", tile$start_codon, "-", tile$end_codon,
+    " (", tile_len, " nt)"
+  ))
   add("")
 
   # Boundary overhang table
   oh_df <- data.frame(
     Position = c("oh1 (5' boundary)", "oh2 (3' boundary)"),
     Sequence = c(tile$oh1_seq, tile$oh2_seq),
-    `In HF Set` = c(if (isTRUE(tile$oh1_in_hf)) "Yes" else "No",
-                     if (isTRUE(tile$oh2_in_hf)) "Yes" else "No"),
-    Fidelity = c(format_fidelity(tile$oh1_fidelity),
-                 format_fidelity(tile$oh2_fidelity)),
+    Fidelity = c(
+      format_fidelity(tile$oh1_fidelity),
+      format_fidelity(tile$oh2_fidelity)
+    ),
     stringsAsFactors = FALSE,
     check.names = FALSE
   )
@@ -350,8 +365,10 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
   add("")
   add(md_table(oh_df))
   add("")
-  add(paste0("**Variants:** ", nrow(tile_variants), " mutations, ",
-             nrow(tile_oligos), " oligos"))
+  add(paste0(
+    "**Variants:** ", nrow(tile_variants), " mutations, ",
+    nrow(tile_oligos), " oligos"
+  ))
   add("")
 
   # --- BsaI Level 1 Reaction ---
@@ -379,10 +396,12 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
 
   # 5'WT gene blocks first (physical order)
   if (length(bsai_part_names) == 0) {
-    comp_rows[[comp_idx]] <- c(comp_idx,
-                                "5'WT gene block",
-                                "(none -- tile starts at gene nt 1)",
-                                "--", "--", "--")
+    comp_rows[[comp_idx]] <- c(
+      comp_idx,
+      "5'WT gene block",
+      "(none -- tile starts at gene nt 1)",
+      "--", "--", "--"
+    )
     comp_idx <- comp_idx + 1L
   } else {
     n_bsai <- length(bsai_part_names)
@@ -391,10 +410,16 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
       block_row <- blocks[blocks$block_name == bp, ]
       blen <- if (nrow(block_row) > 0) paste0(block_row$length[1], " nt") else "?"
       # Overhang chain: oh_L -- [sub1] -- jxn[1] -- [sub2] -- ... -- oh1
-      oh_5 <- if (j == 1L) assembly_plan$oh_L
-              else sb_bsai$junction_oh[j - 1L]
-      oh_3 <- if (j == n_bsai) tile$oh1_seq
-              else sb_bsai$junction_oh[j]
+      oh_5 <- if (j == 1L) {
+        assembly_plan$oh_L
+      } else {
+        sb_bsai$junction_oh[j - 1L]
+      }
+      oh_3 <- if (j == n_bsai) {
+        tile$oh1_seq
+      } else {
+        sb_bsai$junction_oh[j]
+      }
       comp_rows[[comp_idx]] <- c(comp_idx, "5'WT gene block", bp, blen, oh_5, oh_3)
       comp_idx <- comp_idx + 1L
     }
@@ -405,22 +430,30 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
     min_len <- min(tile_oligos$length)
     max_len <- max(tile_oligos$length)
     if (min_len == max_len) paste0(min_len, " nt") else paste0(min_len, "-", max_len, " nt")
-  } else { "--" }
+  } else {
+    "--"
+  }
   oligo_oh_5 <- if (length(bsai_part_names) > 0) tile$oh1_seq else assembly_plan$oh_L
   oligo_oh_3 <- assembly_plan$oh4
-  comp_rows[[comp_idx]] <- c(comp_idx, "Oligo pool",
-                              paste0("Tile ", tid, " (", nrow(tile_oligos), " oligos)"),
-                              oligo_range, oligo_oh_5, oligo_oh_3)
+  comp_rows[[comp_idx]] <- c(
+    comp_idx, "Oligo pool",
+    paste0("Tile ", tid, " (", nrow(tile_oligos), " oligos)"),
+    oligo_range, oligo_oh_5, oligo_oh_3
+  )
   comp_idx <- comp_idx + 1L
 
   # Helper plasmid
-  comp_rows[[comp_idx]] <- c(comp_idx, "Helper plasmid", "helper_plasmid_insert",
-                              "--", "--", "--")
+  comp_rows[[comp_idx]] <- c(
+    comp_idx, "Helper plasmid", "helper_plasmid_insert",
+    "--", "--", "--"
+  )
   comp_idx <- comp_idx + 1L
 
   # Enzyme
-  comp_rows[[comp_idx]] <- c(comp_idx, "Enzyme + buffer", "BsaI-HFv2 + CutSmart",
-                              "--", "--", "--")
+  comp_rows[[comp_idx]] <- c(
+    comp_idx, "Enzyme + buffer", "BsaI-HFv2 + CutSmart",
+    "--", "--", "--"
+  )
 
   comp_df <- data.frame(
     do.call(rbind, comp_rows),
@@ -447,9 +480,10 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
   add(bsai_map)
   add("")
   if (!is.null(bsai_rxn_fid)) {
-    add(paste0("**Set fidelity:** ", format_fidelity(bsai_rxn_fid$set_fidelity),
-               " (", bsai_rxn_fid$n_overhangs, " overhangs, ",
-               bsai_rxn_fid$n_in_hf, " in HF set)"))
+    add(paste0(
+      "**Set fidelity:** ", format_fidelity(bsai_rxn_fid$set_fidelity),
+      " (", bsai_rxn_fid$n_overhangs, " overhangs)"
+    ))
   }
   add("")
 
@@ -475,19 +509,25 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
   }
 
   # BsaI product
-  comp_rows2[[comp_idx2]] <- c(comp_idx2, "BsaI product", "(in helper plasmid)",
-                                "--", "--", "--")
+  comp_rows2[[comp_idx2]] <- c(
+    comp_idx2, "BsaI product", "(in helper plasmid)",
+    "--", "--", "--"
+  )
   comp_idx2 <- comp_idx2 + 1L
 
   # 3'WT+PolIII gene blocks — only the final sub-block contains PolIII
   if (length(bsmbi_part_names) == 0) {
-    comp_rows2[[comp_idx2]] <- c(comp_idx2, "3'WT+PolIII block", "(none)",
-                                  "--", "--", "--")
+    comp_rows2[[comp_idx2]] <- c(
+      comp_idx2, "3'WT+PolIII block", "(none)",
+      "--", "--", "--"
+    )
     comp_idx2 <- comp_idx2 + 1L
   } else {
     # Find the index of the last 3'WT block (non-PolIII-only) to label correctly
-    last_3wt_idx <- max(which(!grepl("^bsmbi_polIII_tile", bsmbi_part_names)),
-                         0L)
+    last_3wt_idx <- max(
+      which(!grepl("^bsmbi_polIII_tile", bsmbi_part_names)),
+      0L
+    )
     n_bsmbi <- length(bsmbi_part_names)
     for (bp_idx in seq_along(bsmbi_part_names)) {
       bp <- bsmbi_part_names[bp_idx]
@@ -496,26 +536,34 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
       # PolIII-only fragment (last tile, no 3'WT gene content)
       if (grepl("^bsmbi_polIII_tile", bp)) {
         label <- "PolIII-only fragment"
-      # Final 3'WT sub-block (or single block) — contains PolIII
+        # Final 3'WT sub-block (or single block) — contains PolIII
       } else if (bp_idx == last_3wt_idx || !grepl("_sub", bp)) {
         label <- "3'WT+PolIII block"
-      # Non-final sub-block — gene content only, no PolIII
+        # Non-final sub-block — gene content only, no PolIII
       } else {
         label <- "3'WT block"
       }
       # Overhang chain: oh2 -- [sub1] -- jxn[1] -- [sub2] -- ... -- oh3
-      oh_5 <- if (bp_idx == 1L) tile$oh2_seq
-              else sb_bsmbi$junction_oh[bp_idx - 1L]
-      oh_3 <- if (bp_idx == n_bsmbi) assembly_plan$oh3
-              else sb_bsmbi$junction_oh[bp_idx]
+      oh_5 <- if (bp_idx == 1L) {
+        tile$oh2_seq
+      } else {
+        sb_bsmbi$junction_oh[bp_idx - 1L]
+      }
+      oh_3 <- if (bp_idx == n_bsmbi) {
+        assembly_plan$oh3
+      } else {
+        sb_bsmbi$junction_oh[bp_idx]
+      }
       comp_rows2[[comp_idx2]] <- c(comp_idx2, label, bp, blen, oh_5, oh_3)
       comp_idx2 <- comp_idx2 + 1L
     }
   }
 
   # Enzyme
-  comp_rows2[[comp_idx2]] <- c(comp_idx2, "Enzyme + buffer", "BsmBI-v2 + NEBuffer r3.1",
-                                "--", "--", "--")
+  comp_rows2[[comp_idx2]] <- c(
+    comp_idx2, "Enzyme + buffer", "BsmBI-v2 + NEBuffer r3.1",
+    "--", "--", "--"
+  )
 
   comp_df2 <- data.frame(
     do.call(rbind, comp_rows2),
@@ -540,9 +588,10 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
   add("")
   bsmbi_rxn_fid <- get_reaction_fidelity(assembly_plan, tid, "BsmBI")
   if (!is.null(bsmbi_rxn_fid)) {
-    add(paste0("**Set fidelity:** ", format_fidelity(bsmbi_rxn_fid$set_fidelity),
-               " (", bsmbi_rxn_fid$n_overhangs, " overhangs, ",
-               bsmbi_rxn_fid$n_in_hf, " in HF set)"))
+    add(paste0(
+      "**Set fidelity:** ", format_fidelity(bsmbi_rxn_fid$set_fidelity),
+      " (", bsmbi_rxn_fid$n_overhangs, " overhangs)"
+    ))
   }
   add("")
   add("---")
@@ -600,7 +649,7 @@ report_geneblock_sheet <- function(blocks) {
 #' Section 10: Domestication Log
 report_domestication <- function(scan_result) {
   if (is.null(scan_result) || is.null(scan_result$domestication) ||
-      nrow(scan_result$domestication) == 0) {
+    nrow(scan_result$domestication) == 0) {
     return(c(
       "## 10. Domestication Log", "",
       "No endogenous BsaI, BsmBI, or PaqCI sites were found in the gene.",
@@ -631,11 +680,13 @@ report_domestication <- function(scan_result) {
 #' Section 11: Configuration Parameters
 report_config <- function(cfg) {
   params <- data.frame(
-    Parameter = c("max_oligo_length", "max_geneblock_length",
-                  "barcode_length", "min_hamming_distance",
-                  "barcode_prefix_length", "barcodes_per_variant",
-                  "overhang_fidelity_threshold", "boundary_method",
-                  "multi_k_search", "auto_domesticate"),
+    Parameter = c(
+      "max_oligo_length", "max_geneblock_length",
+      "barcode_length", "min_hamming_distance",
+      "barcode_prefix_length", "barcodes_per_variant",
+      "overhang_fidelity_threshold", "boundary_method",
+      "multi_k_search", "auto_domesticate"
+    ),
     Value = c(
       cfg$max_oligo_length %||% 300,
       cfg$max_geneblock_length %||% 1800,
@@ -663,11 +714,9 @@ report_config <- function(cfg) {
 
 #' Build ASCII overhang map for a BsaI reaction
 format_bsai_overhang_map <- function(oh_L, bsai_part_names, oh1, oh4,
-                                      assembly_plan, tile_id) {
+                                     assembly_plan, tile_id) {
   # Collect overhangs and segment labels in order
   ohs <- c(oh_L)
-  oh_L_in_hf <- !is.null(assembly_plan$hf_set_used) && (oh_L %in% assembly_plan$hf_set_used)
-  hf_flags <- c(oh_L_in_hf)
   labels <- character(0)
 
   # Get superblock junction overhangs for this tile's 5'WT blocks
@@ -675,8 +724,7 @@ format_bsai_overhang_map <- function(oh_L, bsai_part_names, oh1, oh4,
   if (!is.null(sb) && nrow(sb) > 0) {
     sb_bsai <- sb[sb$tile_id == tile_id & sb$block_type == "bsai_5wt", , drop = FALSE]
   } else {
-    sb_bsai <- data.frame(junction_oh = character(0), junction_in_hf = logical(0),
-                           stringsAsFactors = FALSE)
+    sb_bsai <- data.frame(junction_oh = character(0), stringsAsFactors = FALSE)
   }
 
   if (length(bsai_part_names) > 0) {
@@ -687,7 +735,6 @@ format_bsai_overhang_map <- function(oh_L, bsai_part_names, oh1, oh4,
         labels <- c(labels, paste0("5'WT sub", j))
         if (j <= nrow(sb_bsai)) {
           ohs <- c(ohs, sb_bsai$junction_oh[j])
-          hf_flags <- c(hf_flags, isTRUE(sb_bsai$junction_in_hf[j]))
         }
       }
     } else {
@@ -695,8 +742,6 @@ format_bsai_overhang_map <- function(oh_L, bsai_part_names, oh1, oh4,
     }
     # oh1 between gene blocks and oligo
     ohs <- c(ohs, oh1)
-    hf_flags <- c(hf_flags, isTRUE(assembly_plan$tiles$oh1_in_hf[
-      assembly_plan$tiles$tile_id == tile_id]))
   }
   # else: no 5'WT block (tile 1). oh_L == oh1, so just use oh_L already added.
 
@@ -704,27 +749,22 @@ format_bsai_overhang_map <- function(oh_L, bsai_part_names, oh1, oh4,
 
   # oh4 at end
   ohs <- c(ohs, oh4)
-  hf_flags <- c(hf_flags, isTRUE(assembly_plan$oh4_in_hf))
 
-  format_overhang_map(ohs, labels, hf_flags)
+  format_overhang_map(ohs, labels)
 }
 
 #' Build ASCII overhang map for a BsmBI reaction
 format_bsmbi_overhang_map <- function(oh2, bsmbi_part_names, oh3,
-                                       assembly_plan, tile_id) {
+                                      assembly_plan, tile_id) {
   ohs <- c(oh2)
-  hf_flags <- c(isTRUE(assembly_plan$tiles$oh2_in_hf[
-    assembly_plan$tiles$tile_id == tile_id]))
   labels <- character(0)
 
   # Get superblock junction overhangs for this tile's 3'WT blocks
-
   sb <- assembly_plan$superblock_splits
   if (!is.null(sb) && nrow(sb) > 0) {
     sb_bsmbi <- sb[sb$tile_id == tile_id & sb$block_type == "bsmbi_3wt", , drop = FALSE]
   } else {
-    sb_bsmbi <- data.frame(junction_oh = character(0), junction_in_hf = logical(0),
-                            stringsAsFactors = FALSE)
+    sb_bsmbi <- data.frame(junction_oh = character(0), stringsAsFactors = FALSE)
   }
 
   if (length(bsmbi_part_names) > 0) {
@@ -743,7 +783,6 @@ format_bsmbi_overhang_map <- function(oh2, bsmbi_part_names, oh3,
         }
         if (j <= nrow(sb_bsmbi)) {
           ohs <- c(ohs, sb_bsmbi$junction_oh[j])
-          hf_flags <- c(hf_flags, isTRUE(sb_bsmbi$junction_in_hf[j]))
         }
       }
     } else {
@@ -754,9 +793,8 @@ format_bsmbi_overhang_map <- function(oh2, bsmbi_part_names, oh3,
 
   # oh3 at end
   ohs <- c(ohs, oh3)
-  hf_flags <- c(hf_flags, isTRUE(assembly_plan$oh3_in_hf))
 
-  format_overhang_map(ohs, labels, hf_flags)
+  format_overhang_map(ohs, labels)
 }
 
 
@@ -805,29 +843,35 @@ md_table <- function(df) {
   }, integer(1))
 
   # Header line
-  header_line <- paste0("| ",
+  header_line <- paste0(
+    "| ",
     paste(vapply(seq_along(headers), function(j) {
       pad_right(headers[j], widths[j])
     }, character(1)), collapse = " | "),
-    " |")
+    " |"
+  )
 
   # Separator
-  sep_line <- paste0("| ",
+  sep_line <- paste0(
+    "| ",
     paste(vapply(widths, function(w) {
       paste(rep("-", w), collapse = "")
     }, character(1)), collapse = " | "),
-    " |")
+    " |"
+  )
 
   # Data rows
   data_lines <- character(nrow(df))
   for (i in seq_len(nrow(df))) {
-    data_lines[i] <- paste0("| ",
+    data_lines[i] <- paste0(
+      "| ",
       paste(vapply(seq_along(headers), function(j) {
         val <- df[[j]][i]
         if (is.na(val)) val <- "--"
         pad_right(val, widths[j])
       }, character(1)), collapse = " | "),
-      " |")
+      " |"
+    )
   }
 
   c(header_line, sep_line, data_lines)
@@ -837,9 +881,8 @@ md_table <- function(df) {
 #'
 #' @param ohs Character vector of overhang sequences (N+1 for N segments)
 #' @param labels Character vector of segment labels (N segments between overhangs)
-#' @param hf_flags Logical vector indicating HF set membership (same length as ohs)
 #' @return Character vector of lines (inside a code block)
-format_overhang_map <- function(ohs, labels, hf_flags) {
+format_overhang_map <- function(ohs, labels) {
   n_oh <- length(ohs)
   n_seg <- length(labels)
 
@@ -855,33 +898,32 @@ format_overhang_map <- function(ohs, labels, hf_flags) {
     }
   }
 
-  # Build aligned annotation lines using tracked positions
+  # Build aligned annotation line with overhang sequences
   seq_line <- ""
-  hf_line <- ""
 
   for (i in seq_len(n_oh)) {
     target_pos <- oh_positions[i]
-    oh_text <- paste0(" ", ohs[i], " ")       # e.g. " ATGG " (6 chars)
-    hf_text <- if (isTRUE(hf_flags[i])) " (HF) " else " (--) "  # 6 chars
+    oh_text <- paste0(" ", ohs[i], " ")
 
-    # Pad each line independently to target position
+    # Pad to target position
     while (nchar(seq_line) < target_pos) seq_line <- paste0(seq_line, " ")
-    while (nchar(hf_line) < target_pos) hf_line <- paste0(hf_line, " ")
 
     seq_line <- paste0(seq_line, oh_text)
-    hf_line <- paste0(hf_line, hf_text)
   }
 
-  c("```",
+  c(
+    "```",
     paste0("  ", diagram),
     paste0("  ", seq_line),
-    paste0("  ", hf_line),
-    "```")
+    "```"
+  )
 }
 
 #' Format a fidelity value
 format_fidelity <- function(val) {
-  if (is.null(val) || is.na(val)) return("--")
+  if (is.null(val) || is.na(val)) {
+    return("--")
+  }
   sprintf("%.4f", val)
 }
 
@@ -893,16 +935,22 @@ pad_right <- function(x, width) {
 
 #' Get reaction fidelity for a specific tile and reaction type
 get_reaction_fidelity <- function(assembly_plan, tile_id, reaction_type) {
-  if (is.null(assembly_plan$reaction_fidelity)) return(NULL)
+  if (is.null(assembly_plan$reaction_fidelity)) {
+    return(NULL)
+  }
   rxn <- assembly_plan$reaction_fidelity
   row <- rxn[rxn$tile_id == tile_id & rxn$reaction_type == reaction_type, , drop = FALSE]
-  if (nrow(row) == 0) return(NULL)
+  if (nrow(row) == 0) {
+    return(NULL)
+  }
   row[1, ]
 }
 
 #' Get reaction overhangs as character vector
 get_reaction_overhangs <- function(assembly_plan, tile_id, reaction_type) {
   rxn_fid <- get_reaction_fidelity(assembly_plan, tile_id, reaction_type)
-  if (is.null(rxn_fid)) return(character(0))
+  if (is.null(rxn_fid)) {
+    return(character(0))
+  }
   strsplit(rxn_fid$overhangs, ";")[[1]]
 }
