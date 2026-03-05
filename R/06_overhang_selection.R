@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-04 — Replace synthetic pairwise matrices with real Pryor 2020 data
+# Last updated: 2026-03-04 — Add search_superblock_boundaries_dp() for SB-first DP refactor
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -1101,6 +1101,406 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
   ))
 
   tiles
+}
+
+# =============================================================================
+# SUPERBLOCK BOUNDARY SEARCH (SB-FIRST DP)
+# =============================================================================
+
+#' Solve the SB boundary placement DP for a fixed number of boundaries K
+#'
+#' Finds the K boundary positions (in nucleotide coordinates) that maximize
+#' total boundary overhang score, subject to segment length constraints.
+#' This is the nucleotide-level analog of dp_solve_k (which works in codons).
+#'
+#' @param K Number of internal boundaries (superblocks = K + 1)
+#' @param total_len Total sequence length in nucleotides
+#' @param min_len Minimum segment length in nucleotides
+#' @param max_len Maximum segment length in nucleotides
+#' @param boundary_scores Numeric vector of scores per nucleotide position
+#'   (length = total_len). Score at position p is for placing a boundary after
+#'   nucleotide p (the overhang is derived from nts p-3..p).
+#' @param boundary_valid Logical vector of valid positions (length = total_len)
+#' @return List with boundaries (integer vector of nt positions) and total_score,
+#'   or NULL if no feasible solution exists
+sb_dp_solve_k <- function(K, total_len, min_len, max_len,
+                          boundary_scores, boundary_valid) {
+  if (K == 0L) {
+    return(NULL)
+  }
+
+  # Early feasibility check: need at least (K+1)*min_len nucleotides
+  if ((K + 1L) * min_len > total_len) {
+    return(NULL)
+  }
+
+  # dp_prev[p] = best total score with previous boundary layer ending at nt p
+  dp_prev <- rep(-Inf, total_len)
+  # Parent pointers: parent[k, p] = optimal predecessor position for boundary k at p
+  parent <- matrix(NA_integer_, nrow = K, ncol = total_len)
+
+  # Layer k=1: first boundary, first segment spans [1..p]
+  lo_p <- min_len
+  hi_p <- min(max_len, total_len - 1L)
+  if (lo_p <= hi_p) {
+    for (p in lo_p:hi_p) {
+      if (!boundary_valid[p]) next
+      dp_prev[p] <- boundary_scores[p]
+    }
+  }
+
+  # Layers k=2..K
+  if (K >= 2L) {
+    for (k in 2L:K) {
+      dp_curr <- rep(-Inf, total_len)
+
+      lo_p <- k * min_len
+      hi_p <- min(total_len - 1L, total_len - min_len)
+      if (lo_p > hi_p) {
+        dp_prev <- dp_curr
+        next
+      }
+
+      for (p in lo_p:hi_p) {
+        if (!boundary_valid[p]) next
+
+        # Predecessor range: p' must give segment size [min_len, max_len]
+        lo <- max(1L, p - max_len)
+        hi <- p - min_len
+        if (hi < lo) next
+
+        # Scan for best predecessor in [lo, hi]
+        best_score <- -Inf
+        best_pos <- NA_integer_
+        for (pp in lo:hi) {
+          if (dp_prev[pp] > best_score) {
+            best_score <- dp_prev[pp]
+            best_pos <- pp
+          }
+        }
+
+        if (is.finite(best_score)) {
+          dp_curr[p] <- best_score + boundary_scores[p]
+          parent[k, p] <- best_pos
+        }
+      }
+
+      dp_prev <- dp_curr
+    }
+  }
+
+  # Find optimal last boundary: last segment must be [min_len, max_len]
+  best_total <- -Inf
+  best_p <- NA_integer_
+  for (p in seq_len(total_len - 1L)) {
+    last_seg <- total_len - p
+    if (last_seg < min_len || last_seg > max_len) next
+    if (dp_prev[p] > best_total) {
+      best_total <- dp_prev[p]
+      best_p <- p
+    }
+  }
+
+  if (!is.finite(best_total)) {
+    return(NULL)
+  }
+
+  # Backtrack to recover boundary positions
+  boundaries <- integer(K)
+  boundaries[K] <- best_p
+  if (K >= 2L) {
+    for (k in K:2L) {
+      boundaries[k - 1L] <- parent[k, boundaries[k]]
+    }
+  }
+
+  list(boundaries = boundaries, total_score = best_total)
+}
+
+
+#' Search for optimal superblock boundaries using dynamic programming
+#'
+#' Pass 1 of the two-pass assembly planning refactor. Finds optimal positions
+#' to split the full sequence (gene CDS + downstream cassette) into superblocks,
+#' each within synthesis length limits, maximizing the overhang quality at
+#' each split point.
+#'
+#' The DP operates on nucleotide positions (not codons), but prefers codon
+#' boundaries within the gene portion. Positions in the cassette portion
+#' (past gene_len) have no codon constraint.
+#'
+#' @param full_seq Character: gene CDS + downstream cassette concatenated
+#' @param gene_len Integer: length of gene CDS portion only (for codon
+#'   boundary preference). Set equal to nchar(full_seq) if no cassette.
+#' @param max_block_length Integer: max synthesis length per superblock
+#'   (default 1800, the Twist gene fragment limit)
+#' @param min_block_length Integer: min synthesis length per superblock
+#'   (default 300, the Twist gene fragment minimum)
+#' @param blacklist_ohs Character vector: overhangs to avoid at SB boundaries
+#'   (e.g., oh_L, oh3, oh4, palindromes, homopolymers). Both the overhang and
+#'   its reverse complement are checked.
+#' @param oh_fidelity Data frame with overhang + fidelity columns. If NULL,
+#'   loads BsmBI default fidelity data.
+#' @param eff_lookup Named numeric vector of overhang efficiencies (P_eff).
+#'   If NULL, loads from BsmBI pairwise matrix.
+#' @return List with:
+#'   \item{n_superblocks}{Integer count of superblocks}
+#'   \item{boundaries}{Data frame with columns: sb_id, start_nt, end_nt,
+#'     boundary_oh (4-nt overhang at 3' end of each non-final SB, NA for
+#'     last SB), boundary_score (score at that boundary, NA for last SB)}
+#'   \item{total_score}{Sum of boundary scores (0 if no splits needed)}
+search_superblock_boundaries_dp <- function(
+  full_seq,
+  gene_len,
+  max_block_length = 1800L,
+  min_block_length = 300L,
+  blacklist_ohs = character(0),
+  oh_fidelity = NULL,
+  eff_lookup = NULL
+) {
+  total_len <- nchar(full_seq)
+
+  # --- Input validation ---
+  stopifnot(is.character(full_seq), length(full_seq) == 1, total_len > 0)
+  stopifnot(is.numeric(gene_len), gene_len >= 1, gene_len <= total_len)
+  stopifnot(max_block_length > min_block_length)
+
+  # --- Load fidelity/efficiency data if not provided ---
+  if (is.null(oh_fidelity)) oh_fidelity <- load_overhang_fidelity("BsmBI")
+  if (is.null(eff_lookup)) {
+    bsmbi_pw <- load_pairwise_matrix("BsmBI")
+    eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+  }
+
+  # Build fidelity lookup
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+
+  # --- Edge case: sequence fits in a single block ---
+  if (total_len <= max_block_length) {
+    cli::cli_alert_info(
+      "Sequence length ({total_len} bp) <= max_block_length ({max_block_length} bp). No SB split needed."
+    )
+    return(list(
+      n_superblocks = 1L,
+      boundaries = data.frame(
+        sb_id = 1L,
+        start_nt = 1L,
+        end_nt = total_len,
+        boundary_oh = NA_character_,
+        boundary_score = NA_real_,
+        stringsAsFactors = FALSE
+      ),
+      total_score = 0
+    ))
+  }
+
+  # --- Build blacklist set (include reverse complements) ---
+  blacklist_set <- unique(c(
+    blacklist_ohs,
+    vapply(blacklist_ohs, reverse_complement, character(1))
+  ))
+
+  # --- Precompute boundary scores for every nucleotide position ---
+  # At position p, the overhang is the 4 nt ending at p: substring(full_seq, p-3, p)
+  # Positions 1-3 can't form a 4-nt overhang, so they're invalid.
+  boundary_scores <- rep(-Inf, total_len)
+  boundary_valid <- rep(FALSE, total_len)
+
+  cli::cli_alert_info("Precomputing SB boundary scores for {total_len} positions...")
+
+  for (p in 4L:total_len) {
+    # Extract the 4-nt overhang at this position
+    oh <- substring(full_seq, p - 3L, p)
+
+    # Skip if overhang is blacklisted (or its RC is blacklisted)
+    if (oh %in% blacklist_set) next
+
+    # Skip palindromic overhangs — these cause self-ligation issues in GG
+    if (oh %in% PALINDROMIC_4NT) next
+
+    # Compute overhang score: P_fid * P_eff
+    score <- overhang_score(oh, fid_lookup, eff_lookup)
+
+    # Codon boundary preference: within the gene portion, prefer positions
+    # that fall on codon boundaries (p divisible by 3). Non-codon positions
+    # in the gene get a penalty to push DP toward codon-aligned splits.
+    # Positions in the cassette portion (p > gene_len) have no penalty.
+    codon_penalty <- 0.0
+    if (p <= gene_len && (p %% 3L) != 0L) {
+      # Penalize non-codon boundary positions within the gene
+      # (soft penalty — DP can still pick them if no codon boundary is available)
+      codon_penalty <- -0.5
+    }
+
+    boundary_scores[p] <- score + codon_penalty
+    boundary_valid[p] <- TRUE
+  }
+
+  n_valid <- sum(boundary_valid)
+  cli::cli_alert_info("{n_valid} valid SB boundary candidates out of {total_len} positions.")
+
+  if (n_valid == 0L) {
+    cli::cli_alert_warning(
+      "No valid SB boundary positions found! All overhangs blacklisted or palindromic."
+    )
+    # Return single SB even though it exceeds max_block_length
+    return(list(
+      n_superblocks = 1L,
+      boundaries = data.frame(
+        sb_id = 1L,
+        start_nt = 1L,
+        end_nt = total_len,
+        boundary_oh = NA_character_,
+        boundary_score = NA_real_,
+        stringsAsFactors = FALSE
+      ),
+      total_score = 0
+    ))
+  }
+
+  # --- Determine K range ---
+  # K = number of internal boundaries (superblocks = K + 1)
+  K_min <- ceiling(total_len / max_block_length) - 1L
+  K_min <- max(1L, K_min) # At least 1 boundary needed (we already handled single-block case)
+
+  # Search K_min to K_min + 2 (narrow range — SB count is tightly constrained)
+  K_max <- K_min + 2L
+  # Upper bound: can't have more boundaries than segments of min_block_length
+  K_upper <- floor(total_len / min_block_length) - 1L
+  K_max <- min(K_max, K_upper)
+  k_range <- seq(K_min, K_max)
+
+  cli::cli_alert_info(
+    "SB boundary DP: {total_len} bp, K range [{K_min}, {K_max}]"
+  )
+
+  # --- Run DP for each K, track best ---
+  best_result <- NULL
+  best_avg_score <- -Inf
+  k_results <- list()
+  prev_avg <- -Inf
+  diminishing_stop_pct <- 0.005 # 0.5% threshold
+
+  dp_start <- proc.time()
+  for (K in k_range) {
+    result <- sb_dp_solve_k(
+      K, total_len, min_block_length, max_block_length,
+      boundary_scores, boundary_valid
+    )
+    if (!is.null(result)) {
+      avg <- result$total_score / K
+      k_results[[as.character(K)]] <- list(K = K, score = result$total_score, avg = avg)
+      if (avg > best_avg_score) {
+        best_avg_score <- avg
+        best_result <- result
+        best_result$K <- K
+      }
+      # Diminishing returns stopping (same pattern as tile DP)
+      if (K > K_min && is.finite(prev_avg) && prev_avg > 0) {
+        improvement <- (avg - prev_avg) / prev_avg
+        if (improvement < diminishing_stop_pct) {
+          cli::cli_alert_info(sprintf(
+            "Stopping SB K search at K=%d: avg score improvement %.2f%% < %.1f%% threshold",
+            K, improvement * 100, diminishing_stop_pct * 100
+          ))
+          break
+        }
+      }
+      prev_avg <- avg
+    }
+  }
+
+  dp_elapsed <- (proc.time() - dp_start)[["elapsed"]]
+  cli::cli_alert_info(
+    "SB boundary DP completed in {round(dp_elapsed, 1)}s ({length(k_range)} K values)."
+  )
+
+  if (is.null(best_result)) {
+    cli::cli_alert_warning(
+      "SB DP found no valid solution; returning single oversized superblock."
+    )
+    return(list(
+      n_superblocks = 1L,
+      boundaries = data.frame(
+        sb_id = 1L,
+        start_nt = 1L,
+        end_nt = total_len,
+        boundary_oh = NA_character_,
+        boundary_score = NA_real_,
+        stringsAsFactors = FALSE
+      ),
+      total_score = 0
+    ))
+  }
+
+  # Log multi-K comparison
+  if (length(k_results) > 1) {
+    k_summary <- vapply(k_results, function(r) {
+      sprintf("K=%d score=%.3f", r$K, r$score)
+    }, character(1))
+    cli::cli_alert_info(paste0(
+      "SB multi-K: ", paste(k_summary, collapse = ", "),
+      " | best K=", best_result$K
+    ))
+  }
+
+  # --- Build output boundaries data frame ---
+  K <- best_result$K
+  n_superblocks <- K + 1L
+  boundary_positions <- best_result$boundaries # nt positions
+
+  # Build SB table: each SB spans from previous boundary+1 to current boundary
+  sb_df <- data.frame(
+    sb_id = integer(n_superblocks),
+    start_nt = integer(n_superblocks),
+    end_nt = integer(n_superblocks),
+    boundary_oh = character(n_superblocks),
+    boundary_score = numeric(n_superblocks),
+    stringsAsFactors = FALSE
+  )
+
+  for (i in seq_len(n_superblocks)) {
+    sb_df$sb_id[i] <- i
+
+    if (i == 1L) {
+      sb_df$start_nt[i] <- 1L
+    } else {
+      sb_df$end_nt[i - 1L] <- boundary_positions[i - 1L]
+      sb_df$start_nt[i] <- boundary_positions[i - 1L] + 1L
+    }
+
+    if (i == n_superblocks) {
+      sb_df$end_nt[i] <- total_len
+      sb_df$boundary_oh[i] <- NA_character_
+      sb_df$boundary_score[i] <- NA_real_
+    } else {
+      sb_df$end_nt[i] <- boundary_positions[i]
+      oh <- substring(full_seq, boundary_positions[i] - 3L, boundary_positions[i])
+      sb_df$boundary_oh[i] <- oh
+      sb_df$boundary_score[i] <- overhang_score(oh, fid_lookup, eff_lookup)
+    }
+  }
+
+  # Verify segment sizes
+  for (i in seq_len(n_superblocks)) {
+    seg_len <- sb_df$end_nt[i] - sb_df$start_nt[i] + 1L
+    if (seg_len > max_block_length) {
+      cli::cli_alert_warning(
+        "SB {i} is {seg_len} bp, exceeding max_block_length ({max_block_length})."
+      )
+    }
+  }
+
+  cli::cli_alert_success(
+    "SB boundary search: {n_superblocks} superblocks, {K} boundaries, total score = {round(best_result$total_score, 4)}"
+  )
+
+  list(
+    n_superblocks = n_superblocks,
+    boundaries = sb_df,
+    total_score = best_result$total_score
+  )
 }
 
 # =============================================================================
