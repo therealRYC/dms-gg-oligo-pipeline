@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-04 — Replace synthetic pairwise matrices with real Pryor 2020 data
+# Last updated: 2026-03-04 — Add SB anchor overhangs and sb_blacklist to tile DP
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -644,6 +644,9 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
 #' @param blacklisted_oh2 Character vector of oh2 sequences to invalidate
 #'   (OPT-005: SB-aware blacklisting). Boundaries where oh2 is in this set
 #'   are marked invalid. Default NULL (no blacklisting).
+#' @param blacklisted_oh1 Character vector of oh1 sequences to invalidate
+#'   (SB boundary collision prevention). Boundaries where oh1 matches any
+#'   element (identity or RC) are marked invalid. Default NULL (no blacklisting).
 #' @param overlap_codons Integer, tile overlap (rightward extension). oh2 is
 #'   computed at the EXTENDED tile end (b + overlap_codons), not at the core
 #'   boundary (b). Default 0 (no overlap, oh2 at core boundary).
@@ -651,6 +654,7 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
 precompute_boundary_scores <- function(cds, oh_fidelity,
                                        eff_lookup = NULL,
                                        blacklisted_oh2 = NULL,
+                                       blacklisted_oh1 = NULL,
                                        overlap_codons = 0L) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
@@ -691,6 +695,13 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
 
     # Hard constraint: oh1 must not collide with oh_L in BsaI reaction
     if (oh1 == oh_L || oh1 == oh_L_rc) {
+      valid[b] <- FALSE
+      next
+    }
+    # SB blacklist: oh1 must not collide with any SB boundary overhang
+    # (prevents tile boundary overhangs from reusing SB junction overhangs)
+    if (!is.null(blacklisted_oh1) &&
+      (oh1 %in% blacklisted_oh1 || reverse_complement(oh1) %in% blacklisted_oh1)) {
       valid[b] <- FALSE
       next
     }
@@ -867,6 +878,19 @@ dp_solve_k <- function(K, n_codons, min_codons, max_codons,
 #' @param overlap_codons Number of overlap codons between adjacent tiles
 #' @param eff_lookup Named numeric vector (overhang -> efficiency). If NULL,
 #'   efficiency is treated as 1.0 for all overhangs.
+#' @param blacklisted_oh2 Character vector of oh2 overhangs to exclude from
+#'   tile boundaries (OPT-005 legacy). Default NULL.
+#' @param anchor_oh1 Fixed oh1 for the first tile (from SB boundary with
+#'   previous SB, or oh_L for the first SB). When non-NULL, validates that
+#'   the first 4 nt of cds match this anchor. Does not alter the DP itself
+#'   (first tile always starts at position 1). Default NULL.
+#' @param anchor_oh2 Fixed oh2 for the last tile (from SB boundary with
+#'   next SB, or gene-end overhang for the last SB). When non-NULL, validates
+#'   that the last 4 nt of cds match this anchor. Does not alter the DP itself
+#'   (last tile always ends at the last codon). Default NULL.
+#' @param sb_blacklist Character vector of SB boundary overhangs to avoid at
+#'   tile boundaries. Merged into both oh1 and oh2 blacklists so that no tile
+#'   boundary reuses an SB junction overhang. Default NULL.
 #' @return Data frame with tile info (same format as search_tile_boundaries)
 search_tile_boundaries_dp <- function(cds, max_mutable_nt,
                                       min_mutable_nt = NULL,
@@ -876,9 +900,34 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
                                       k_range = NULL,
                                       overlap_codons = 4L,
                                       eff_lookup = NULL,
-                                      blacklisted_oh2 = NULL) {
+                                      blacklisted_oh2 = NULL,
+                                      anchor_oh1 = NULL,
+                                      anchor_oh2 = NULL,
+                                      sb_blacklist = NULL) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
+
+  # Anchor validation: confirm gene endpoints match expected SB boundary overhangs
+  if (!is.null(anchor_oh1)) {
+    gene_start_4nt <- substring(cds, 1, 4)
+    if (gene_start_4nt != anchor_oh1) {
+      cli::cli_alert_warning(paste0(
+        "anchor_oh1 mismatch: expected '", anchor_oh1,
+        "' but gene starts with '", gene_start_4nt,
+        "'. SB boundary overhang may not match gene sequence at this position."
+      ))
+    }
+  }
+  if (!is.null(anchor_oh2)) {
+    gene_end_4nt <- substring(cds, gene_len - 3L, gene_len)
+    if (gene_end_4nt != anchor_oh2) {
+      cli::cli_alert_warning(paste0(
+        "anchor_oh2 mismatch: expected '", anchor_oh2,
+        "' but gene ends with '", gene_end_4nt,
+        "'. SB boundary overhang may not match gene sequence at this position."
+      ))
+    }
+  }
 
   if (is.null(min_mutable_nt)) {
     min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
@@ -930,11 +979,18 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
     ))
   }
 
+  # Merge SB blacklist into oh2 blacklist (both prevent those overhangs at
+  # tile boundaries). SB boundary overhangs must not appear as oh1 or oh2 at
+  # any tile boundary, so we pass sb_blacklist as blacklisted_oh1 separately.
+  combined_oh2_blacklist <- unique(c(blacklisted_oh2, sb_blacklist))
+  if (length(combined_oh2_blacklist) == 0L) combined_oh2_blacklist <- NULL
+
   # Precompute scores for all boundary positions
   # Pass overlap_codons so oh2 is computed at the EXTENDED tile end
   precomp <- precompute_boundary_scores(cds, oh_fidelity,
     eff_lookup = eff_lookup,
-    blacklisted_oh2 = blacklisted_oh2,
+    blacklisted_oh2 = combined_oh2_blacklist,
+    blacklisted_oh1 = sb_blacklist,
     overlap_codons = overlap_codons
   )
 
@@ -1099,6 +1155,58 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
     " boundaries (both_HF=", n_both, ", one_HF=", n_one,
     ", neither=", n_neither, ")"
   ))
+
+  tiles
+}
+
+#' Search tile boundaries within a single superblock
+#'
+#' Wrapper around search_tile_boundaries_dp() for use in the two-pass
+#' SB-first assembly planning. Operates on a subsequence of the gene
+#' (one superblock's coding region) with fixed anchor overhangs at the
+#' SB boundaries.
+#'
+#' @param cds Full domesticated gene CDS (the SB's portion is extracted)
+#' @param sb_start_nt 1-based start position of this SB in the gene (nt)
+#' @param sb_end_nt 1-based end position of this SB in the gene (nt)
+#' @param max_mutable_nt Max mutable region size from compute_max_tile_size()
+#' @param anchor_oh1 Fixed oh1 for the first tile (from SB boundary with
+#'   previous SB, or oh_L for the first SB). Default NULL.
+#' @param anchor_oh2 Fixed oh2 for the last tile (from SB boundary with
+#'   next SB, or gene-end overhang for the last SB). Default NULL.
+#' @param sb_blacklist Character vector of ALL SB boundary overhangs to avoid
+#'   at internal tile boundaries. Default NULL.
+#' @param ... Additional arguments passed to search_tile_boundaries_dp()
+#' @return Data frame of tiles (same format as search_tile_boundaries_dp),
+#'   with start_codon/end_codon/start_nt/end_nt adjusted to gene-level
+#'   coordinates.
+search_tile_boundaries_within_sb <- function(cds, sb_start_nt, sb_end_nt,
+                                             max_mutable_nt,
+                                             anchor_oh1 = NULL,
+                                             anchor_oh2 = NULL,
+                                             sb_blacklist = NULL,
+                                             ...) {
+  # Extract the SB's portion of the gene
+  sb_seq <- substring(cds, sb_start_nt, sb_end_nt)
+
+  # Run tile DP on the subsequence, passing anchor and blacklist info
+  tiles <- search_tile_boundaries_dp(
+    cds = sb_seq,
+    max_mutable_nt = max_mutable_nt,
+    anchor_oh1 = anchor_oh1,
+    anchor_oh2 = anchor_oh2,
+    sb_blacklist = sb_blacklist,
+    ...
+  )
+
+  # Adjust coordinates back to gene-level (SB subsequence starts at
+  # sb_start_nt in the full gene, so offset all positions accordingly)
+  offset_nt <- sb_start_nt - 1L
+  offset_codons <- offset_nt %/% 3L
+  tiles$start_codon <- tiles$start_codon + offset_codons
+  tiles$end_codon <- tiles$end_codon + offset_codons
+  tiles$start_nt <- tiles$start_nt + offset_nt
+  tiles$end_nt <- tiles$end_nt + offset_nt
 
   tiles
 }
