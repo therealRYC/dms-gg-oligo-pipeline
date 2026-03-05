@@ -1,5 +1,5 @@
 # Created: 2026-03-02
-# Last updated: 2026-03-03 — Use bGH polyA; clarify PaqCI overhangs are placeholders
+# Last updated: 2026-03-05 — Fix barcodes_per_variant to 10 (default)
 
 # GRIN2A with long cassette — test case for cassette splitting (BUG-004)
 # Downstream cassette: P2A-EGFP(786) + WPRE(589) + spacer(31) + bGH_polyA(225) + PolIII(250)
@@ -43,5 +43,4 @@ intergene_elements:
 paqci_star2: "AATG"
 paqci_star1: "GCTA"
 
-# Fast validation run
-barcodes_per_variant: 1
+barcodes_per_variant: 10
