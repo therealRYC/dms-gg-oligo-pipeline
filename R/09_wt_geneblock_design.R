@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-02 — BUG-008: remove hf_set from split/cassette functions, use overhang_score
+# Last updated: 2026-03-05 — Use pre-computed SB DP cassette splits when available
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -487,17 +487,27 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
               "Tile ", tile$tile_id, ": single 3'WT block oversized (",
               single_block_len, " nt) due to large cassette. Splitting cassette."
             ))
-            # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
-            cass_exclude <- unique(c(
-              oh3, all_oh2,
-              vapply(c(oh3, all_oh2), reverse_complement, character(1))
-            ))
-            cass_splits <- find_cassette_split_points(
-              cassette_seq = polIII_for_block,
-              max_sub_length = max_sub_content,
-              existing_ohs = cass_exclude,
-              oh_fidelity = assembly_plan$oh_fidelity_used
-            )
+            # Use pre-computed SB DP cassette splits if available, else greedy
+            if (!is.null(assembly_plan$cassette_splits) &&
+              nrow(assembly_plan$cassette_splits) > 0) {
+              cass_splits <- assembly_plan$cassette_splits
+              cli::cli_alert_info(paste0(
+                "Tile ", tile$tile_id, ": using ", nrow(cass_splits),
+                " pre-computed SB DP cassette split(s)."
+              ))
+            } else {
+              # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
+              cass_exclude <- unique(c(
+                oh3, all_oh2,
+                vapply(c(oh3, all_oh2), reverse_complement, character(1))
+              ))
+              cass_splits <- find_cassette_split_points(
+                cassette_seq = polIII_for_block,
+                max_sub_length = max_sub_content,
+                existing_ohs = cass_exclude,
+                oh_fidelity = assembly_plan$oh_fidelity_used
+              )
+            }
             if (nrow(cass_splits) > 0) {
               # Gene sub-block (gene content only, junction to first cassette fragment)
               gene_cass_oh <- substring(polIII_for_block, 1, 4)
@@ -662,17 +672,27 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         # Pre-compute cassette splits if needed (shared across sub-block loop)
         cassette_splits_df <- NULL
         if (needs_cassette_split) {
-          # Exclude ALL tiles' oh2 + internal junctions — blocks shared via dedup
-          cass_exclude <- unique(c(
-            oh3, all_oh2, internal_oh,
-            vapply(c(oh3, all_oh2, internal_oh), reverse_complement, character(1))
-          ))
-          cassette_splits_df <- find_cassette_split_points(
-            cassette_seq = polIII_for_block,
-            max_sub_length = max_sub_content,
-            existing_ohs = cass_exclude,
-            oh_fidelity = assembly_plan$oh_fidelity_used
-          )
+          # Use pre-computed SB DP cassette splits if available, else greedy
+          if (!is.null(assembly_plan$cassette_splits) &&
+            nrow(assembly_plan$cassette_splits) > 0) {
+            cassette_splits_df <- assembly_plan$cassette_splits
+            cli::cli_alert_info(paste0(
+              "Tile ", tile$tile_id, ": using ", nrow(cassette_splits_df),
+              " pre-computed SB DP cassette split(s)."
+            ))
+          } else {
+            # Exclude ALL tiles' oh2 + internal junctions — blocks shared via dedup
+            cass_exclude <- unique(c(
+              oh3, all_oh2, internal_oh,
+              vapply(c(oh3, all_oh2, internal_oh), reverse_complement, character(1))
+            ))
+            cassette_splits_df <- find_cassette_split_points(
+              cassette_seq = polIII_for_block,
+              max_sub_length = max_sub_content,
+              existing_ohs = cass_exclude,
+              oh_fidelity = assembly_plan$oh_fidelity_used
+            )
+          }
         }
 
         for (s in seq_len(n_sub)) {
@@ -773,17 +793,27 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       if (polIII_block_len > max_block_length && use_precomputed_splits &&
         !is.null(assembly_plan$oh_fidelity_used)) {
         # Cassette alone is oversized — split it
-        # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
-        cass_exclude <- unique(c(
-          oh3, all_oh2,
-          vapply(c(oh3, all_oh2), reverse_complement, character(1))
-        ))
-        cass_splits <- find_cassette_split_points(
-          cassette_seq = polIII_for_block,
-          max_sub_length = max_sub_content,
-          existing_ohs = cass_exclude,
-          oh_fidelity = assembly_plan$oh_fidelity_used
-        )
+        # Use pre-computed SB DP cassette splits if available, else greedy
+        if (!is.null(assembly_plan$cassette_splits) &&
+          nrow(assembly_plan$cassette_splits) > 0) {
+          cass_splits <- assembly_plan$cassette_splits
+          cli::cli_alert_info(paste0(
+            "Tile ", tile$tile_id, ": using ", nrow(cass_splits),
+            " pre-computed SB DP cassette split(s)."
+          ))
+        } else {
+          # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
+          cass_exclude <- unique(c(
+            oh3, all_oh2,
+            vapply(c(oh3, all_oh2), reverse_complement, character(1))
+          ))
+          cass_splits <- find_cassette_split_points(
+            cassette_seq = polIII_for_block,
+            max_sub_length = max_sub_content,
+            existing_ohs = cass_exclude,
+            oh_fidelity = assembly_plan$oh_fidelity_used
+          )
+        }
         if (nrow(cass_splits) > 0) {
           cass_result <- build_cassette_subblocks(
             cassette_seq = polIII_for_block,

@@ -3395,6 +3395,30 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
     stringsAsFactors = FALSE
   )
 
+  # Extract cassette-region SB boundaries (for pass-through to gene block design)
+  cassette_splits <- data.frame(
+    split_pos = integer(0), junction_oh = character(0),
+    stringsAsFactors = FALSE
+  )
+  for (bi in seq_len(n_sb - 1L)) {
+    split_nt_bi <- sb_df$end_nt[bi]
+    if (split_nt_bi > gene_len && !is.na(sb_df$boundary_oh[bi])) {
+      # Convert full_seq coordinate to cassette-relative coordinate
+      cassette_splits <- rbind(cassette_splits, data.frame(
+        split_pos = split_nt_bi - gene_len,
+        junction_oh = sb_df$boundary_oh[bi],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  if (nrow(cassette_splits) > 0) {
+    cli::cli_alert_info(paste0(
+      "SB DP found ", nrow(cassette_splits), " cassette boundary(ies) at positions ",
+      paste(cassette_splits$split_pos, collapse = ", "),
+      " (overhangs: ", paste(cassette_splits$junction_oh, collapse = ", "), ")"
+    ))
+  }
+
   for (bi in seq_len(n_sb - 1L)) {
     split_nt <- sb_df$end_nt[bi]
     # Skip SB boundaries in cassette region (no tiles reference them)
@@ -3553,6 +3577,7 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
     oh_fidelity_used = oh_fidelity,
     cassette_needs_splitting = cassette_needs_splitting,
     sb_result = sb_result, # v2-specific: SB DP result for inspection
+    cassette_splits = cassette_splits, # v2-specific: pre-computed cassette boundaries
     summary = list(
       n_tiles = n_tiles,
       n_boundaries = n_boundaries,
