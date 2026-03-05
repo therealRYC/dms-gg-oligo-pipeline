@@ -1,0 +1,210 @@
+-- DMS Golden Gate Oligo Pipeline (3-Enzyme Architecture) --
+Config: configs/akap11.yaml
+
+-- Step 1: Loading configuration --
+
+Intergene elements: WPRE + spacer + bGH_polyA (845 nt total)
+Configuration loaded and validated. [0.1s]
+
+-- Step 2: Reading gene --
+
+Gene 'AKAP11': 5706 nt, 1902 codons, 1901 aa [1.7s]
+
+-- Step 3: Loading codon usage table --
+
+Codon usage table loaded: built-in CoCoPUTs (Homo sapiens, GRCh38.p13) [0s]
+
+-- Step 4: Scanning for enzyme sites (BsaI, BsmBI, PaqCI) --
+
+Found 5 enzyme site(s) in gene that need domestication.
+Applying domestication (with iterative BsaI/BsmBI resolution)...
+Domesticated: BsaI site at nt 5603-5608 | codon 1868: GGA -> GGC (G, freq: 17.17 -> 19.75)
+Domesticated: BsaI site at nt 4693-4698 | codon 1565: GAG -> GAA (E, freq: 39.42 -> 33.87)
+Domesticated: BsaI site at nt 4350-4355 | codon 1450: GAG -> GAA (E, freq: 39.42 -> 33.87)
+Domesticated: PaqCI site at nt 3398-3404 | codon 1133: GCA -> GCC (A, freq: 17.05 -> 25.66)
+Domesticated: BsaI site at nt 499-504 | codon 167: GAG -> GAA (E, freq: 39.42 -> 33.87)
+Gene domesticated for all 3 enzymes.
+Step 4 completed. [0.3s]
+
+-- Step 5: Designing mutations --
+
+Designed 39900 variants across 1900 mutable positions (codons 2-1901; skipped codon 1=Met and codon 1902=stop). [36100 missense + 1900 nonsense + 1900 WT controls]
+Fixed 222 variant(s) that would have created enzyme sites.
+39900 variants designed. [157.1s]
+
+-- Step 6: Planning assembly (SB-first two-pass DP) --
+
+Max mutable region: 234 nt (78 codons) | Fixed overhead: 64 nt
+
+-- SB-First Two-Pass Assembly Planning (v2) --
+
+-- Phase 1: Selecting fixed overhangs (oh3, oh4)
+Derived oh3=CACC from PolIII promoter 3' end (fidelity=0.417)
+Fixed overhangs: oh3=CACC (non-HF), oh4=AGAA (non-HF)
+
+-- Phase 2: Superblock boundary search (Pass 1)
+Precomputing SB boundary scores for 6801 positions...
+2673 valid SB boundary candidates out of 6801 positions.
+SB boundary DP: 6801 bp, K range [3, 5]
+Stopping SB K search at K=5: avg score improvement 0.00% < 0.5% threshold
+SB boundary DP completed in 0.6s (3 K values).
+SB multi-K: K=3 score=2.195, K=4 score=3.285, K=5 score=4.106 | best K=4
+SB boundary search: 5 superblocks, 4 boundaries, total score = 3.2851
+SB DP: 5 superblock(s), 4 boundary(ies). Total score: 3.285
+
+-- Phase 3: Tile boundary search within each superblock (Pass 2)
+SB 1: gene region [1, 1026] (342 codons)
+Precomputing boundary scores for 341 candidate positions...
+Boundary scores precomputed in 0.4s.
+DP boundary search: 342 codons, 310 valid candidate positions, K range [4, 9]
+Stopping K search at K=7: avg score improvement -1.86% < 0.5% threshold
+DP tile boundary search completed in 0s (6 K values).
+Multi-K: K=4 score=4.8, K=5 score=6.5, K=6 score=8.0, K=7 score=9.2 | best K=6
+DP boundary search: 7 tiles, 6 boundaries (both_HF=0, one_HF=2, neither=4)
+SB 1: extended last tile by 4 codons past SB boundary (new end_codon=346, oh2=AGAG)
+SB 2: gene region [1027, 2742] (572 codons)
+Precomputing boundary scores for 571 candidate positions...
+Boundary scores precomputed in 0.7s.
+DP boundary search: 572 codons, 523 valid candidate positions, K range [7, 12]
+Stopping K search at K=10: avg score improvement 0.29% < 0.5% threshold
+DP tile boundary search completed in 0s (6 K values).
+Multi-K: K=7 score=8.2, K=8 score=10.6, K=9 score=12.2, K=10 score=13.6 | best K=10
+DP boundary search: 11 tiles, 10 boundaries (both_HF=1, one_HF=4, neither=5)
+SB 2: extended last tile by 4 codons past SB boundary (new end_codon=918, oh2=ATTT)
+SB 3: gene region [2743, 3819] (359 codons)
+Precomputing boundary scores for 358 candidate positions...
+Boundary scores precomputed in 0.4s.
+DP boundary search: 359 codons, 317 valid candidate positions, K range [4, 9]
+Stopping K search at K=6: avg score improvement -0.11% < 0.5% threshold
+DP tile boundary search completed in 0s (6 K values).
+Multi-K: K=4 score=4.5, K=5 score=6.7, K=6 score=8.0 | best K=5
+DP boundary search: 6 tiles, 5 boundaries (both_HF=0, one_HF=3, neither=2)
+SB 3: extended last tile by 4 codons past SB boundary (new end_codon=1277, oh2=AGTC)
+SB 4: gene region [3820, 5589] (590 codons)
+Precomputing boundary scores for 589 candidate positions...
+Boundary scores precomputed in 0.7s.
+DP boundary search: 590 codons, 534 valid candidate positions, K range [7, 12]
+Stopping K search at K=11: avg score improvement 0.05% < 0.5% threshold
+DP tile boundary search completed in 0s (6 K values).
+Multi-K: K=7 score=6.7, K=8 score=9.7, K=9 score=11.5, K=10 score=13.1, K=11 score=14.4 | best K=11
+DP boundary search: 12 tiles, 11 boundaries (both_HF=3, one_HF=6, neither=2)
+SB 4: extended last tile by 4 codons past SB boundary (new end_codon=1867, oh2=AGTG)
+SB 5: gene region [5590, 5706] (39 codons)
+
+-- Phase 4: Merging tiles across superblocks
+Merged 37 tile(s) across 5 superblock(s).
+SB-first partition: 5 superblocks, 4 boundary(ies). 144 per-tile split entries.
+
+-- Phase 6: Validating per-reaction overhang fidelity
+3 reaction(s) below fidelity threshold (0.95). Min: 0.9146
+42 variant(s) at gene edges have partial oh1/oh2 overlap. These mutations may not fully assemble as intended.
+Skipped 42 gene-edge variant(s) with partial oh1/oh2 overlap
+Assembly planned: 37 tiles, 4/36 boundaries both in HF set [3.6s]
+
+-- Step 7: Designing barcodes --
+
+Barcode mode: unified hierarchical, barcode_length=20, prefix_length=12
+Junction context for barcode filtering: left='CACACC', right='AGAATG'
+Unified hierarchical mode: generating barcodes (length=20, prefix=12, suffix=8, min_hamming=3, need 39858 variants x 10 barcodes = 398580)
+Generating 39858 unique prefixes (hard Hamming >= 3)...
+Building GF(4) Hamming code: Ham_4(3) = [21, 18, 3]_4, shortened to [12, 9, >=3]_4
+Code capacity: 4^9 = 262,144 codewords
+Enumerating all 262,144 codewords...
+Generated 262,144 prefix codewords (d >= 3 guaranteed by algebraic construction)
+Removed 4237 prefixes with enzyme sites at junction boundaries.
+GF(4) linear code: 244106 prefixes after filtering (need 39858)
+Generated 39858 unique prefixes (method=linear).
+Generating barcodes (random suffixes per prefix)...
+Batch suffix generation: 39858 variants x 500 candidates = 19,929,000 total
+Barcode generation: 398580 barcodes for 39858 variants in 226.9s.
+Skipping prefix distance validation (d >= 3 guaranteed by linear construction).
+Generated 398580 barcodes (mode=unified hierarchical, length=20, prefix=12, effective_hamming=3)
+Computing per-barcode nearest-neighbor Hamming distances...
+Using prefix-group optimization for NN computation (398580 barcodes, prefix_length=12)
+Nearest-neighbor distances: min=1, median=3, max=3
+Step 7 completed. [233.8s]
+
+-- Step 8: Assembling oligos (universal 3-enzyme structure) --
+
+All 398580 oligos within length limit. Range: 155-284 nt.
+398580 oligos assembled. [1s]
+
+-- Step 9: Designing gene blocks and helper plasmid --
+
+Deduplicated blocks: 208 -> 80 (128 duplicates removed)
+Helper plasmid insert designed: oh_L=ATGG, oh_R=AGAA (72 nt)
+All 80 gene blocks within synthesis limit. Range: 117-1792 nt.
+80 gene blocks designed. [0.5s]
+
+-- Step 10: Running QC checks --
+
+2 QC check(s) failed:
+  FAIL: Tile boundary overhangs have adequate fidelity | 26 tile(s) with low-fidelity boundary overhangs (<0.80)
+  FAIL: All gene blocks above synthesis minimum length | 5 block(s) below 300 nt minimum. Range: 117-1792 nt
+[PASS] All oligos within synthesis length limit -- Range: 155-284 nt (limit: 300)
+[PASS] All gene blocks within synthesis length limit -- Range: 117-1792 nt (limit: 1800)
+[PASS] No enzyme sites at barcode-context junctions -- 0 barcode(s) with junction enzyme sites (left='CACACC', right='AGAATG')
+[PASS] All barcodes are unique -- 398580 unique / 398580 total
+[PASS] Tiles cover entire gene without gaps -- 5706 / 5706 nt covered
+[PASS] Expected number of variants generated -- 39858 unique variants (expected: 39858 across 1898/1900 mutable positions; 36062 missense + 1898 nonsense + 1898 wt_control; 2 position(s) skipped)
+[PASS] Each non-control variant differs by exactly one codon from WT -- 379600 / 379600 variants confirmed (WT controls excluded)
+[PASS] Oligo GC content within reasonable range (25-75%) -- GC range: 33.5-55.8% | 0 oligo(s) with extreme GC
+[PASS] Gene domesticated for all 3 enzymes (BsaI, BsmBI, PaqCI) -- No enzyme sites in gene
+[FAIL] Tile boundary overhangs have adequate fidelity -- 26 tile(s) with low-fidelity boundary overhangs (<0.80)
+[PASS] Per-tile assembly manifests complete -- 37 tile manifest(s) generated
+[PASS] Helper plasmid free of unintended BsmBI sites -- OK
+[PASS] Per-reaction set-level overhang fidelity -- Min set fidelity: 0.9146 across 74 reactions | 0 reaction(s) below 0.90
+[PASS] No barcodes contain PolIII terminator signal (TTTT) -- 0 / 398580 barcode(s) contain TTTT
+[FAIL] All gene blocks above synthesis minimum length -- 5 block(s) below 300 nt minimum. Range: 117-1792 nt
+QC: ISSUES FOUND [41.2s]
+Step 10b: Assembly simulation skipped (simulate_assembly = false)
+
+-- Step 11: Writing outputs --
+
+Wrote oligo pool: output/akap11/AKAP11_oligo_pool.csv (398580 oligos)
+Wrote gene block order: output/akap11/AKAP11_geneblock_order.csv (80 blocks)
+Wrote variant-barcode map: output/akap11/AKAP11_variant_barcode_map.csv (398580 variants)
+Wrote tile manifests: output/akap11/AKAP11_tile_manifests.csv
+Wrote helper plasmid: output/akap11/AKAP11_helper_plasmid.csv
+Wrote QC report: output/akap11/AKAP11_qc_report.csv
+Wrote oligo FASTA: output/akap11/AKAP11_oligo_pool.fasta
+Wrote gene block FASTA: output/akap11/AKAP11_geneblock_order.fasta
+Wrote sequences FASTA: output/akap11/AKAP11_sequences.fasta
+Wrote skipped variants: output/akap11/AKAP11_skipped_variants.csv (42 variants)
+Outputs written. [14.7s]
+
+-- Step 12: Generating wetlab assembly report --
+
+Wrote wetlab assembly report: output/akap11/AKAP11_assembly_report.md
+Report generated. [3.8s]
+
+-- Pipeline Complete --
+Gene: AKAP11
+Architecture: 3-enzyme (BsaI + BsmBI + PaqCI)
+Variants: 39858 (unique mutations), 42 skipped (gene-edge overlap)
+Oligos: 398580 (10 barcodes/variant)
+Gene blocks: 80
+Tiles: 37
+Fixed overhangs: oh3=CACC, oh4=AGAA
+Intergene elements: WPRE + spacer + bGH_polyA (845 nt)
+Downstream cassette: 1095 nt (intergene + PolIII)
+Barcodes: mode=unified hierarchical, length=20, prefix=12, effective_hamming=3
+QC: ISSUES FOUND
+Wetlab report: output/akap11/AKAP11_assembly_report.md
+Output directory: output/akap11
+
+-- Timing Breakdown --
+
+1_config             0.1s
+2_gene_input         1.7s
+3_codon_usage        0s
+4_enzyme_scan        0.3s
+5_mutations          157.1s
+6_assembly_plan      3.6s
+7_barcodes           233.8s
+8_oligo_assembly     1s
+9_geneblocks         0.5s
+10_qc                41.2s
+11_output            14.7s
+12_report            3.8s
+Total pipeline time: 458.3s
