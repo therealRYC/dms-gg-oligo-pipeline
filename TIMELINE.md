@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-04 21:47:54 | 175 commits | 2026-01-29 to 2026-03-04
+> Auto-generated on 2026-03-04 22:43:09 | 176 commits | 2026-01-29 to 2026-03-04
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-04
 
+- Add plan for SB-first two-pass DP assembly refactor
 - Replace synthetic pairwise matrices with real Pryor 2020 data
 - Remove HF set annotations from assembly report
 
