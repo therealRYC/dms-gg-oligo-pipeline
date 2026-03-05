@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-02 — BUG-008: standardize scoring on BsmBI cycling P_fid * P_eff, drop HF bonus
+# Last updated: 2026-03-04 — Replace synthetic pairwise matrices with real Pryor 2020 data
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -144,12 +144,17 @@ load_overhang_fidelity <- function(enzyme_name = "BsmBI") {
   if (file.exists(data_path)) {
     return(readRDS(data_path))
   }
-  generic_path <- file.path(
+  # Fallback: derive from pairwise matrix if available
+  pw_path <- file.path(
     find_data_dir(), "neb_overhang_fidelity",
-    "potapov_18h_overhangs.rds"
+    paste0(tolower(enzyme_name), "_pairwise.rds")
   )
-  if (file.exists(generic_path)) {
-    return(readRDS(generic_path))
+  if (file.exists(pw_path)) {
+    cli::cli_alert_info("Deriving 1D fidelity from pairwise matrix for {enzyme_name}.")
+    mat <- readRDS(pw_path)
+    ohs <- rownames(mat)
+    fid <- vapply(ohs, function(oh) mat[oh, oh] / sum(mat[oh, ]), numeric(1))
+    return(data.frame(overhang = ohs, fidelity = unname(fid), stringsAsFactors = FALSE))
   }
   builtin_overhang_fidelity()
 }
@@ -222,7 +227,7 @@ generate_hf_set <- function(oh_data, n_members) {
 #'
 #' @param enzyme_name Enzyme name for enzyme-specific matrix
 #' @return Named 256x256 numeric matrix
-load_pairwise_matrix <- function(enzyme_name = "potapov_18h") {
+load_pairwise_matrix <- function(enzyme_name = "BsmBI") {
   data_path <- file.path(
     find_data_dir(), "neb_overhang_fidelity",
     paste0(tolower(enzyme_name), "_pairwise.rds")
@@ -240,6 +245,7 @@ load_pairwise_matrix <- function(enzyme_name = "potapov_18h") {
 
 #' Generate a synthetic 256x256 pairwise matrix from individual fidelity data
 #'
+#' FALLBACK ONLY — real Pryor 2020 pairwise matrices should be used when available.
 #' Uses a Hamming-distance model: cross-reactivity between overhangs X and Y
 #' decreases exponentially with the Hamming distance between X and RC(Y).
 #' The matrix is calibrated so that individual fidelity values match the input.
@@ -2031,15 +2037,11 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   hf_set <- load_high_fidelity_set() # informational only, not used in scoring
   oh_fidelity <- load_overhang_fidelity("BsmBI")
 
-  # Load real BsmBI cycling 256x256 matrix for P_eff computation (BUG-008).
-  # This replaces the old T4 Potapov matrix — both P_fid and P_eff now come
-  # from the same experimental condition (BsmBI cycling, Pryor et al. 2020).
-  bsmbi_cycling_matrix <- load_pairwise_matrix("bsmbi_cycling")
-  eff_lookup <- compute_overhang_efficiency(bsmbi_cycling_matrix)
-
-  # Pairwise matrices for Phase 6 validation (set fidelity per reaction)
+  # Load real enzyme-specific 256x256 pairwise matrices (Pryor et al. 2020).
+  # Used for scoring (P_fid * P_eff) and set fidelity validation.
   bsai_matrix <- load_pairwise_matrix("BsaI")
   bsmbi_matrix <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_matrix)
 
   # Phase 1-3: Search tile boundaries (with iterative SB-aware refinement, OPT-005)
   #
