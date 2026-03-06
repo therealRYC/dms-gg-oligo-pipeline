@@ -1,6 +1,6 @@
 # DMS-GG Assembly Report: AKAP11
 
-Generated: 2026-03-05 14:27:39
+Generated: 2026-03-05 19:54:46
 Pipeline: dms-gg-oligo-pipeline (3-Enzyme Architecture: BsaI + BsmBI + PaqCI)
 
 ---

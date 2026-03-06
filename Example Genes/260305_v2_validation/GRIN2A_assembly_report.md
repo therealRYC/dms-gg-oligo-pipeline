@@ -1,6 +1,6 @@
 # DMS-GG Assembly Report: GRIN2A
 
-Generated: 2026-03-05 14:25:14
+Generated: 2026-03-05 19:52:03
 Pipeline: dms-gg-oligo-pipeline (3-Enzyme Architecture: BsaI + BsmBI + PaqCI)
 
 ---
