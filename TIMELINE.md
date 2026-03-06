@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-05 14:35:26 | 191 commits | 2026-01-29 to 2026-03-05
+> Auto-generated on 2026-03-05 19:24:34 | 192 commits | 2026-01-29 to 2026-03-05
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-05
 
+- Fix oversized gene block when gene_residual + cassette > 1800
 - Add v2 validation reports with 10 barcodes per variant
 - Fix barcodes_per_variant to 10 in all config files
 - Add v2 validation reports for GRIN2A, AKAP11, TRIO

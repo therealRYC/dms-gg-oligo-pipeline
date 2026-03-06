@@ -3419,6 +3419,29 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
     ))
   }
 
+  # Defense-in-depth: warn if gene residual + cassette exceeds limit but SB DP
+
+  # placed no cassette boundary. The gene block designer will compute local
+  # splits as fallback, but this situation may indicate a SB DP gap.
+  if (nchar(cassette_seq) > 0) {
+    block_overhead_check <- 22L
+    max_sub_content_check <- max_block_length - block_overhead_check
+    gene_sb_boundaries <- sb_df$end_nt[sb_df$end_nt <= gene_len & !is.na(sb_df$boundary_oh)]
+    last_gene_boundary <- if (length(gene_sb_boundaries) > 0) max(gene_sb_boundaries) else 0L
+    gene_residual_check <- gene_len - last_gene_boundary
+    cassette_content_check <- nchar(cassette_seq) - 5L # core cassette (minus oh3+spacer)
+    if (gene_residual_check + cassette_content_check > max_sub_content_check &&
+      nrow(cassette_splits) == 0) {
+      cli::cli_alert_warning(paste0(
+        "Defense check: gene residual (", gene_residual_check, " nt) + cassette (",
+        cassette_content_check, " nt) = ", gene_residual_check + cassette_content_check,
+        " nt exceeds limit (", max_sub_content_check,
+        " nt), but SB DP placed no cassette boundary. ",
+        "Gene block designer will compute local splits as fallback."
+      ))
+    }
+  }
+
   for (bi in seq_len(n_sb - 1L)) {
     split_nt <- sb_df$end_nt[bi]
     # Skip SB boundaries in cassette region (no tiles reference them)

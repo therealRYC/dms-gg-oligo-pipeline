@@ -1,5 +1,5 @@
 # Created: 2026-03-04
-# Last updated: 2026-03-05 — Add overlap and cassette pass-through tests, simplify SB collision check
+# Last updated: 2026-03-05 — Add medium cassette regression test for BUG-004 guard fix
 # test-plan-assembly-v2.R — Tests for SB-first two-pass assembly planning
 
 # =============================================================================
@@ -339,4 +339,65 @@ test_that("cassette_splits has rows for oversized cassettes", {
     # junction_oh should be 4-nt strings
     expect_true(all(nchar(plan$cassette_splits$junction_oh) == 4))
   }
+})
+
+# =============================================================================
+# MEDIUM CASSETTE + LARGE GENE RESIDUAL (BUG-004 guard fix)
+# =============================================================================
+
+test_that("medium cassette with large gene residual has no oversized blocks", {
+  # Build a ~1100 nt cassette (under 1778 but gene_residual + cassette > 1800).
+  # This was the "danger zone" that the old guard condition missed.
+  filler <- paste(rep("TAGCAACCGT", 85), collapse = "") # 850 nt
+  cassette <- paste0(filler, TEST_POLIII) # ~1100 nt
+
+  plan <- plan_assembly_v2(
+    cds = TEST_LONG_GENE_SEQ,
+    polIII = TEST_POLIII,
+    max_mutable_nt = 243L,
+    downstream_cassette = cassette
+  )
+
+  # SB DP should place a cassette boundary
+  expect_true("cassette_splits" %in% names(plan))
+
+  result <- design_wt_geneblocks(
+    cds = TEST_LONG_GENE_SEQ, polIII = cassette,
+    tiles = plan$tiles,
+    oh3 = plan$oh3, oh4 = plan$oh4,
+    paqci_star2 = "AGTC", paqci_star1 = "TCGA",
+    assembly_plan = plan
+  )
+
+  over_max <- result$blocks[result$blocks$length > 1800L, ]
+  expect_equal(nrow(over_max), 0L,
+    info = paste("Oversized:", paste(over_max$block_name, over_max$length,
+      sep = "=", collapse = ", "
+    ))
+  )
+})
+
+test_that("normal-sized cassette (250 nt) does not trigger cassette splitting", {
+  # With just PolIII (~250 nt), no cassette splitting needed
+  plan <- plan_assembly_v2(
+    cds = TEST_LONG_GENE_SEQ,
+    polIII = TEST_POLIII,
+    max_mutable_nt = 243L
+  )
+
+  result <- design_wt_geneblocks(
+    cds = TEST_LONG_GENE_SEQ, polIII = TEST_POLIII,
+    tiles = plan$tiles,
+    oh3 = plan$oh3, oh4 = plan$oh4,
+    paqci_star2 = "AGTC", paqci_star1 = "TCGA",
+    assembly_plan = plan
+  )
+
+  # No oversized blocks
+  over_max <- result$blocks[result$blocks$length > 1800L, ]
+  expect_equal(nrow(over_max), 0L)
+
+  # No cassette sub-blocks (no splitting needed)
+  cassette_blocks <- result$blocks[grepl("cassette", result$blocks$block_name), ]
+  expect_equal(nrow(cassette_blocks), 0L)
 })

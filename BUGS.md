@@ -1,5 +1,5 @@
 # Created: 2026-02-20
-# Last updated: 2026-03-02 — BUG-008 FIXED: standardize on BsmBI cycling P_fid * P_eff, drop HF bonus
+# Last updated: 2026-03-05 — F13 updated: fix oversized gene block when gene_residual + cassette > 1800
 
 # Bug Inventory — DMS GG Oligo Pipeline
 
@@ -77,10 +77,12 @@
 - **Fix:** Minimum 500 initial candidates (5000 on retry); added `filter_barcode_junctions()` call on prefixes to remove those creating enzyme sites at oh3-barcode or barcode-oh4 junctions (48 removed for GRIN2A).
 
 ### F13: Large downstream cassette splitting (was BUG-004)
-- **File:** `R/09_wt_geneblock_design.R` (`find_cassette_split_points`, `build_cassette_blocks`), `R/06_overhang_selection.R`
-- **Fixed in:** cassette splitting implementation (2026-03-01)
+- **File:** `R/09_wt_geneblock_design.R` (`find_cassette_split_points`, `build_cassette_subblocks`), `R/06_overhang_selection.R`
+- **Fixed in:** cassette splitting implementation (2026-03-01), guard condition fix (2026-03-05)
 - **What:** When the downstream cassette (intergene elements + PolIII) exceeds ~1778 nt, it is now automatically split across multiple BsmBI-connected gene block fragments. Split points are chosen at positions with high-fidelity BsmBI overhangs, using the same OOGGA scoring as gene superblock junctions. After ligation, the cassette is reconstructed seamlessly.
-- **Verified:** GRIN2A long cassette test case (P2A-EGFP + WPRE + spacer + hGH polyA = 2133 nt) successfully split into 2 fragments at position 1045 (overhang ACCA), all 64 gene blocks within synthesis limit.
+- **Guard condition fix (2026-03-05):** The original guard required `cassette_alone > 1778` to trigger splitting. This missed the "danger zone" where a medium cassette (400–1778 nt) combined with a large gene residual exceeds 1800 nt total (e.g., TRIO: 1374 nt gene residual + 1090 nt cassette = 2464 nt). Removed the `nchar(polIII_for_block) > max_sub_content` guard from both Path 1 (no gene splits) and Path 2 (with gene splits). When SB DP cassette_splits are available, the gene sub-block now includes cassette content up to the split point (trim-4 convention), and the remaining cassette is built as separate sub-blocks.
+- **Defense-in-depth:** `plan_assembly_v2()` now warns if gene_residual + cassette exceeds limit but no SB DP cassette boundary was placed.
+- **Verified:** GRIN2A long cassette test case (P2A-EGFP + WPRE + spacer + hGH polyA = 2133 nt) successfully split into 2 fragments at position 1045 (overhang ACCA), all 64 gene blocks within synthesis limit. Medium cassette regression test (1100 nt cassette + 2100 nt gene) passes with 0 oversized blocks.
 
 ### F14: BsaI superblock junction overhang collision with tile oh1 (was BUG-007)
 - **File:** `R/06_overhang_selection.R` (`partition_tile_superblocks` Phase 4, iterative DP loop)
