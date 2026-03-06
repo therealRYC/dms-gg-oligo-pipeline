@@ -1,13 +1,13 @@
 # Created: 2026-03-04
-# Last updated: 2026-03-05 — Add medium cassette regression test for BUG-004 guard fix
-# test-plan-assembly-v2.R — Tests for SB-first two-pass assembly planning
+# Last updated: 2026-03-06 — Switch to hybrid plan_assembly() (tile-first DP + constrained SB DP)
+# test-plan-assembly-v2.R — Tests for hybrid assembly planning (plan_assembly)
 
 # =============================================================================
 # SHORT GENE (no superblocks needed)
 # =============================================================================
 
-test_that("plan_assembly_v2 works on short gene (single SB)", {
-  plan <- plan_assembly_v2(
+test_that("plan_assembly works on short gene (single SB)", {
+  plan <- plan_assembly(
     cds = TEST_GENE_SEQ,
     polIII = TEST_POLIII,
     max_mutable_nt = 243L
@@ -24,7 +24,7 @@ test_that("plan_assembly_v2 works on short gene (single SB)", {
   expect_true("tile_partition" %in% names(plan))
   expect_true("reaction_fidelity" %in% names(plan))
   expect_true("summary" %in% names(plan))
-  expect_true("sb_result" %in% names(plan)) # v2-specific
+  expect_true("sb_result" %in% names(plan))
 
   # Short gene should have 1 superblock, 1-2 tiles
   expect_equal(plan$summary$n_superblocks, 1L)
@@ -33,7 +33,7 @@ test_that("plan_assembly_v2 works on short gene (single SB)", {
   # oh_L should be first 4 nt of gene
   expect_equal(plan$oh_L, substring(TEST_GENE_SEQ, 1, 4))
 
-  # No SB collisions in v2
+  # No SB collisions
   expect_equal(plan$summary$n_sb_collisions, 0L)
 
   # Tiles should cover entire gene
@@ -48,8 +48,8 @@ test_that("plan_assembly_v2 works on short gene (single SB)", {
 # LONG GENE (superblocks needed)
 # =============================================================================
 
-test_that("plan_assembly_v2 works on long gene (multiple SBs)", {
-  plan <- plan_assembly_v2(
+test_that("plan_assembly works on long gene (multiple SBs)", {
+  plan <- plan_assembly(
     cds = TEST_LONG_GENE_SEQ,
     polIII = TEST_POLIII,
     max_mutable_nt = 243L
@@ -79,7 +79,7 @@ test_that("plan_assembly_v2 works on long gene (multiple SBs)", {
   # No SB collisions
   expect_equal(plan$summary$n_sb_collisions, 0L)
 
-  # v2 should include cassette_splits field
+  # Should include cassette_splits field
   expect_true("cassette_splits" %in% names(plan))
   expect_true(is.data.frame(plan$cassette_splits))
 
@@ -106,8 +106,8 @@ test_that("plan_assembly_v2 works on long gene (multiple SBs)", {
 # OUTPUT FORMAT COMPATIBILITY
 # =============================================================================
 
-test_that("plan_assembly_v2 output is compatible with v1 format", {
-  plan <- plan_assembly_v2(
+test_that("plan_assembly output is compatible with v1 format", {
+  plan <- plan_assembly(
     cds = TEST_LONG_GENE_SEQ,
     polIII = TEST_POLIII,
     max_mutable_nt = 243L
@@ -168,8 +168,8 @@ test_that("plan_assembly_v2 output is compatible with v1 format", {
 # TILE BOUNDARY OVERHANGS DON'T COLLIDE WITH SB OVERHANGS
 # =============================================================================
 
-test_that("tile boundary overhangs don't collide with SB boundary overhangs", {
-  plan <- plan_assembly_v2(
+test_that("non-boundary tile oh2s don't collide with SB boundary overhangs", {
+  plan <- plan_assembly(
     cds = TEST_LONG_GENE_SEQ,
     polIII = TEST_POLIII,
     max_mutable_nt = 243L
@@ -179,18 +179,16 @@ test_that("tile boundary overhangs don't collide with SB boundary overhangs", {
     !is.na(plan$sb_result$boundaries$boundary_oh)
   ]
 
-  if (length(sb_ohs) > 0) {
-    # After post-extension, no tile oh1 or oh2 should collide with SB boundary OHs.
-    # (Tiles extend past SB boundaries, so their oh2 values are at different positions.)
+  if (length(sb_ohs) > 0 && plan$summary$n_superblocks >= 2L) {
+    # In the hybrid approach, SB boundary OHs ARE the boundary tile's oh2
+    # (by construction). So the boundary tile itself is excluded — only
+    # NON-boundary tiles should have oh2s that don't collide with SB OHs.
+    sbs <- plan$tile_partition$superblocks
+    boundary_tiles <- sbs$end_tile[seq_len(plan$summary$n_superblocks - 1L)]
+
     for (ti in seq_len(nrow(plan$tiles))) {
+      if (ti %in% boundary_tiles) next # Skip boundary tiles (their oh2 IS the SB OH)
       for (sb_oh in sb_ohs) {
-        expect_false(
-          oh_collides(plan$tiles$oh1_seq[ti], sb_oh),
-          info = paste(
-            "Tile", ti, "oh1", plan$tiles$oh1_seq[ti],
-            "collides with SB oh", sb_oh
-          )
-        )
         expect_false(
           oh_collides(plan$tiles$oh2_seq[ti], sb_oh),
           info = paste(
@@ -208,7 +206,7 @@ test_that("tile boundary overhangs don't collide with SB boundary overhangs", {
 # =============================================================================
 
 test_that("per-reaction fidelity is reasonable", {
-  plan <- plan_assembly_v2(
+  plan <- plan_assembly(
     cds = TEST_LONG_GENE_SEQ,
     polIII = TEST_POLIII,
     max_mutable_nt = 243L
@@ -230,9 +228,9 @@ test_that("per-reaction fidelity is reasonable", {
 # DOWNSTREAM CASSETTE SUPPORT
 # =============================================================================
 
-test_that("plan_assembly_v2 handles downstream cassette", {
+test_that("plan_assembly handles downstream cassette", {
   cassette <- paste0("GCTAGCTAGCTAGCTAGCTAGC", TEST_POLIII)
-  plan <- plan_assembly_v2(
+  plan <- plan_assembly(
     cds = TEST_LONG_GENE_SEQ,
     polIII = TEST_POLIII,
     max_mutable_nt = 243L,
@@ -256,12 +254,11 @@ test_that("plan_assembly_v2 handles downstream cassette", {
 # TILE OVERLAP AT SB BOUNDARIES
 # =============================================================================
 
-test_that("tiles overlap at SB boundaries", {
-  plan <- plan_assembly_v2(
+test_that("SB boundaries are at tile end positions (hybrid invariant)", {
+  plan <- plan_assembly(
     cds = TEST_LONG_GENE_SEQ,
     polIII = TEST_POLIII,
-    max_mutable_nt = 243L,
-    config = list(overlap_codons = 4L)
+    max_mutable_nt = 243L
   )
 
   if (plan$summary$n_superblocks >= 2L) {
@@ -269,25 +266,16 @@ test_that("tiles overlap at SB boundaries", {
     gene_len <- nchar(TEST_LONG_GENE_SEQ)
     tiles <- plan$tiles
 
-    # Find SB boundary positions within the gene
+    # Gene-region SB boundary positions must exactly match a tile's end_nt.
+    # This is the core invariant of the hybrid approach: SB DP is constrained
+    # to tile boundary positions.
     sb_boundary_nts <- sb_df$end_nt[!is.na(sb_df$boundary_oh) & sb_df$end_nt <= gene_len]
 
     for (sb_nt in sb_boundary_nts) {
-      # Find tiles that span across this SB boundary (tile covers positions on both sides)
-      tiles_crossing <- which(tiles$start_nt <= sb_nt & tiles$end_nt > sb_nt)
-      expect_true(length(tiles_crossing) >= 1L,
-        info = paste("Expected at least 1 tile crossing SB boundary at nt", sb_nt)
+      matching_tile <- which(tiles$end_nt == sb_nt)
+      expect_true(length(matching_tile) >= 1L,
+        info = paste("SB boundary at nt", sb_nt, "should match a tile end_nt")
       )
-
-      # The tile whose end_nt crosses the SB boundary should extend past it
-      for (ti in tiles_crossing) {
-        expect_true(tiles$end_nt[ti] > sb_nt,
-          info = paste(
-            "Tile", ti, "end_nt", tiles$end_nt[ti],
-            "should extend past SB boundary", sb_nt
-          )
-        )
-      }
     }
   }
 })
@@ -297,7 +285,7 @@ test_that("tiles overlap at SB boundaries", {
 # =============================================================================
 
 test_that("cassette_splits is empty for normal-sized cassettes", {
-  plan <- plan_assembly_v2(
+  plan <- plan_assembly(
     cds = TEST_LONG_GENE_SEQ,
     polIII = TEST_POLIII,
     max_mutable_nt = 243L
@@ -317,7 +305,7 @@ test_that("cassette_splits has rows for oversized cassettes", {
   )
   # big_cassette is ~2400 + 250 = ~2650 nt, well over 1800 synthesis limit
 
-  plan <- plan_assembly_v2(
+  plan <- plan_assembly(
     cds = TEST_LONG_GENE_SEQ,
     polIII = TEST_POLIII,
     max_mutable_nt = 243L,
@@ -351,7 +339,7 @@ test_that("medium cassette with large gene residual has no oversized blocks", {
   filler <- paste(rep("TAGCAACCGT", 85), collapse = "") # 850 nt
   cassette <- paste0(filler, TEST_POLIII) # ~1100 nt
 
-  plan <- plan_assembly_v2(
+  plan <- plan_assembly(
     cds = TEST_LONG_GENE_SEQ,
     polIII = TEST_POLIII,
     max_mutable_nt = 243L,
@@ -379,7 +367,7 @@ test_that("medium cassette with large gene residual has no oversized blocks", {
 
 test_that("normal-sized cassette (250 nt) does not trigger cassette splitting", {
   # With just PolIII (~250 nt), no cassette splitting needed
-  plan <- plan_assembly_v2(
+  plan <- plan_assembly(
     cds = TEST_LONG_GENE_SEQ,
     polIII = TEST_POLIII,
     max_mutable_nt = 243L

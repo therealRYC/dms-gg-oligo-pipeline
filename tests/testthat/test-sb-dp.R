@@ -1,5 +1,5 @@
 # Created: 2026-03-04
-# Last updated: 2026-03-05 — Add hard codon constraint tests
+# Last updated: 2026-03-06 — Add allowed_gene_positions constraint tests
 # test-sb-dp.R — Tests for the SB-first DP superblock boundary search
 #
 # Tests cover:
@@ -471,5 +471,111 @@ test_that("cassette-region SB boundaries are NOT required to be codon-aligned", 
       )
     }
     # No constraint on cassette boundaries — they can be at any nt position
+  }
+})
+
+# =============================================================================
+# Test: allowed_gene_positions constraint
+# =============================================================================
+
+test_that("allowed_gene_positions restricts SB boundaries to specified positions", {
+  # Build a ~3600 nt gene that needs 2 SBs
+  seq_3600 <- make_test_seq(3600)
+  gene_len <- nchar(seq_3600)
+
+  # Simulate tile end positions at every 240 nt (codon-aligned)
+  tile_ends <- seq(240L, gene_len - 240L, by = 240L)
+  # Ensure all are codon-aligned
+  tile_ends <- tile_ends[tile_ends %% 3L == 0L]
+
+  result <- search_superblock_boundaries_dp(
+    full_seq = seq_3600,
+    gene_len = gene_len,
+    max_block_length = 2400L,
+    min_block_length = 300L,
+    allowed_gene_positions = tile_ends
+  )
+
+  # Should still find a valid split
+  expect_gte(result$n_superblocks, 2L)
+
+  # All gene-region boundaries must be in the allowed set
+  for (i in seq_len(result$n_superblocks - 1L)) {
+    boundary_pos <- result$boundaries$end_nt[i]
+    if (boundary_pos <= gene_len) {
+      expect_true(boundary_pos %in% tile_ends,
+        info = paste(
+          "Gene SB boundary at", boundary_pos,
+          "must be in allowed_gene_positions"
+        )
+      )
+    }
+  }
+})
+
+test_that("allowed_gene_positions does not affect cassette-region boundaries", {
+  # Build: 1500 nt gene + 2400 nt cassette = 3900 nt
+  gene_seq <- make_test_seq(1500)
+  cassette_unit <- "TAGCAACCGTGA" # 12 nt
+  cassette_seq <- paste0(rep(cassette_unit, 200), collapse = "")
+  cassette_seq <- substring(cassette_seq, 1, 2400)
+  full_seq <- paste0(gene_seq, cassette_seq)
+  gene_len <- nchar(gene_seq)
+
+  # Restrict gene positions to tile-like boundaries
+  tile_ends <- seq(240L, gene_len - 240L, by = 240L)
+  tile_ends <- tile_ends[tile_ends %% 3L == 0L]
+
+  result <- search_superblock_boundaries_dp(
+    full_seq = full_seq,
+    gene_len = gene_len,
+    max_block_length = 1800L,
+    min_block_length = 300L,
+    allowed_gene_positions = tile_ends
+  )
+
+  expect_gte(result$n_superblocks, 2L)
+
+  # Gene boundaries: must be in allowed set
+  # Cassette boundaries: can be anywhere (not constrained by allowed_gene_positions)
+  for (i in seq_len(result$n_superblocks - 1L)) {
+    boundary_pos <- result$boundaries$end_nt[i]
+    if (boundary_pos <= gene_len) {
+      expect_true(boundary_pos %in% tile_ends,
+        info = paste("Gene boundary at", boundary_pos, "should be in allowed set")
+      )
+    }
+    # No constraint check for cassette boundaries — they should NOT be restricted
+  }
+})
+
+test_that("constrained SB DP still satisfies size limits with tile boundary restriction", {
+  # Build a long gene (~5400 nt) with tile positions at ~240 nt intervals
+  seq_long <- make_test_seq(5400)
+  gene_len <- nchar(seq_long)
+  tile_ends <- seq(240L, gene_len - 240L, by = 240L)
+  tile_ends <- tile_ends[tile_ends %% 3L == 0L]
+
+  result <- search_superblock_boundaries_dp(
+    full_seq = seq_long,
+    gene_len = gene_len,
+    max_block_length = 1800L,
+    min_block_length = 300L,
+    allowed_gene_positions = tile_ends
+  )
+
+  # All SBs within size limits
+  for (i in seq_len(result$n_superblocks)) {
+    seg_len <- result$boundaries$end_nt[i] - result$boundaries$start_nt[i] + 1L
+    expect_lte(seg_len, 1800L)
+    expect_gte(seg_len, 300L)
+  }
+
+  # Gene boundaries at allowed positions
+  for (i in seq_len(result$n_superblocks - 1L)) {
+    boundary_pos <- result$boundaries$end_nt[i]
+    if (boundary_pos <= gene_len) {
+      expect_true(boundary_pos %in% tile_ends)
+    }
   }
 })
