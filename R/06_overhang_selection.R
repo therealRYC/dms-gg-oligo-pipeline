@@ -1285,6 +1285,179 @@ sb_dp_solve_k <- function(K, total_len, min_len, max_len,
 }
 
 
+#' Refine SB boundary positions to ensure unique overhangs
+#'
+#' Post-processing step after DP finds optimal boundary positions. Iterates
+#' through boundaries left-to-right, and for each boundary whose overhang
+#' collides with an already-committed boundary overhang, searches the valid
+#' range for the best-scoring non-colliding alternative position.
+#'
+#' This is necessary because the DP maximizes total overhang score but has no
+#' inter-boundary uniqueness constraint. Without refinement, all boundaries
+#' can land on positions sharing the same high-scoring 4-mer (e.g., GAAA).
+#'
+#' @param boundary_positions Integer vector of K boundary nt positions from DP
+#' @param full_seq Character: the full sequence (gene + cassette)
+#' @param gene_len Integer: length of gene CDS portion (codon constraint)
+#' @param min_block_length Integer: minimum segment size
+#' @param max_block_length Integer: maximum segment size
+#' @param blacklist_set Character vector of blacklisted overhangs (includes RCs)
+#' @param fid_lookup Named numeric vector: overhang -> fidelity
+#' @param eff_lookup Named numeric vector: overhang -> efficiency
+#' @return List with refined boundary_positions (integer vector) and
+#'   n_unresolved (count of remaining collisions, ideally 0)
+refine_sb_boundaries_unique <- function(
+  boundary_positions,
+  full_seq,
+  gene_len,
+  min_block_length,
+  max_block_length,
+  blacklist_set,
+  fid_lookup,
+  eff_lookup
+) {
+  K <- length(boundary_positions)
+  total_len <- nchar(full_seq)
+
+  if (K <= 1L) {
+    # Single boundary — no collisions possible
+    return(list(boundary_positions = boundary_positions, n_unresolved = 0L))
+  }
+
+  # Check if refinement is even needed
+  ohs <- vapply(boundary_positions, function(p) {
+    substring(full_seq, p - 3L, p)
+  }, character(1))
+
+  has_collision <- FALSE
+  for (i in 2L:K) {
+    for (j in seq_len(i - 1L)) {
+      if (oh_collides(ohs[i], ohs[j])) {
+        has_collision <- TRUE
+        break
+      }
+    }
+    if (has_collision) break
+  }
+
+  if (!has_collision) {
+    return(list(boundary_positions = boundary_positions, n_unresolved = 0L))
+  }
+
+  cli::cli_alert_info("Refining SB boundaries to resolve overhang collisions...")
+
+  refined <- integer(K)
+  # Track committed OHs as a set (both oh and RC)
+  committed_ohs <- character(0)
+  n_unresolved <- 0L
+
+  for (i in seq_len(K)) {
+    p <- boundary_positions[i]
+    oh <- substring(full_seq, p - 3L, p)
+    oh_rc <- reverse_complement(oh)
+
+    # Check if this OH collides with any committed OH
+    collides <- any(oh %in% committed_ohs) || any(oh_rc %in% committed_ohs)
+
+    if (!collides) {
+      # No collision — commit as-is
+      refined[i] <- p
+      committed_ohs <- c(committed_ohs, oh, oh_rc)
+      next
+    }
+
+    # Collision detected — search for best alternative position in valid range
+    # Compute valid range for this boundary based on neighbors
+    prev_end <- if (i == 1L) 0L else refined[i - 1L]
+    # Next boundary: original position (or end of sequence for last boundary)
+    next_point <- if (i < K) boundary_positions[i + 1L] else total_len
+
+    # Left segment [prev_end+1 .. refined[i]] must be in [min, max]
+    lo <- prev_end + min_block_length
+    hi <- prev_end + max_block_length
+
+    # Right segment [refined[i]+1 .. next_point] must be in [min, max]
+    lo <- max(lo, next_point - max_block_length)
+    hi <- min(hi, next_point - min_block_length)
+
+    # Global feasibility: enough room for remaining boundaries
+    hi <- min(hi, total_len - (K - i) * min_block_length - min_block_length)
+
+    # Need at least 4 nt for overhang extraction
+    lo <- max(lo, 4L)
+    if (lo > hi) {
+      # No room to shift — keep original (collision remains)
+      refined[i] <- p
+      committed_ohs <- c(committed_ohs, oh, oh_rc)
+      n_unresolved <- n_unresolved + 1L
+      cli::cli_alert_warning(paste0(
+        "SB boundary ", i, ": no room to shift (range [", lo, ",", hi,
+        "]). Keeping colliding OH=", oh
+      ))
+      next
+    }
+
+    # Score all valid candidates in range, pick best non-colliding one
+    best_alt_p <- NA_integer_
+    best_alt_score <- -Inf
+
+    for (cand in lo:hi) {
+      # Codon constraint within gene portion
+      if (cand <= gene_len && (cand %% 3L) != 0L) next
+
+      cand_oh <- substring(full_seq, cand - 3L, cand)
+
+      # Skip blacklisted or palindromic
+      if (cand_oh %in% blacklist_set) next
+      if (cand_oh %in% PALINDROMIC_4NT) next
+
+      # Skip if collides with any committed OH
+      cand_rc <- reverse_complement(cand_oh)
+      if (any(cand_oh %in% committed_ohs) || any(cand_rc %in% committed_ohs)) next
+
+      score <- overhang_score(cand_oh, fid_lookup, eff_lookup)
+      if (score > best_alt_score) {
+        best_alt_score <- score
+        best_alt_p <- cand
+      }
+    }
+
+    if (!is.na(best_alt_p)) {
+      alt_oh <- substring(full_seq, best_alt_p - 3L, best_alt_p)
+      alt_rc <- reverse_complement(alt_oh)
+      refined[i] <- best_alt_p
+      committed_ohs <- c(committed_ohs, alt_oh, alt_rc)
+      if (best_alt_p != p) {
+        cli::cli_alert_info(paste0(
+          "SB boundary ", i, ": shifted ", p, " -> ", best_alt_p,
+          " (OH: ", oh, " -> ", alt_oh,
+          ", score: ", round(best_alt_score, 3), ")"
+        ))
+      }
+    } else {
+      # No non-colliding alternative found — keep original
+      refined[i] <- p
+      committed_ohs <- c(committed_ohs, oh, oh_rc)
+      n_unresolved <- n_unresolved + 1L
+      cli::cli_alert_warning(paste0(
+        "SB boundary ", i, ": no non-colliding alternative in [", lo, ",", hi,
+        "]. Keeping OH=", oh
+      ))
+    }
+  }
+
+  if (n_unresolved == 0L) {
+    cli::cli_alert_success("All SB boundary collisions resolved by local refinement.")
+  } else {
+    cli::cli_alert_warning(paste0(
+      n_unresolved, " SB boundary collision(s) could not be resolved."
+    ))
+  }
+
+  list(boundary_positions = refined, n_unresolved = n_unresolved)
+}
+
+
 #' Search for optimal superblock boundaries using dynamic programming
 #'
 #' Pass 1 of the two-pass assembly planning refactor. Finds optimal positions
@@ -1550,6 +1723,25 @@ search_superblock_boundaries_dp <- function(
   K <- best_result$K
   n_superblocks <- K + 1L
   boundary_positions <- best_result$boundaries # nt positions
+
+  # --- Refine boundaries for overhang uniqueness ---
+  # The DP has no inter-boundary uniqueness constraint, so multiple boundaries
+  # can share the same high-scoring overhang (e.g., all GAAA). This greedy
+  # left-to-right refinement shifts colliding boundaries to nearby positions
+  # with unique overhangs.
+  if (K >= 2L) {
+    refine_result <- refine_sb_boundaries_unique(
+      boundary_positions = boundary_positions,
+      full_seq = full_seq,
+      gene_len = gene_len,
+      min_block_length = min_block_length,
+      max_block_length = max_block_length,
+      blacklist_set = blacklist_set,
+      fid_lookup = fid_lookup,
+      eff_lookup = eff_lookup
+    )
+    boundary_positions <- refine_result$boundary_positions
+  }
 
   # Build SB table: each SB spans from previous boundary+1 to current boundary
   sb_df <- data.frame(
@@ -3119,8 +3311,11 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
   ))
 
   # =========================================================================
-  # Phase 2: SB-level DP (Pass 1)
+  # Phase 2: SB-level DP (Pass 1) with collision avoidance
   # =========================================================================
+  # The SB DP finds optimal boundary positions, then a local refinement step
+  # (inside search_superblock_boundaries_dp) shifts any colliding boundaries
+  # to nearby positions with unique overhangs.
   cli::cli_h3("Phase 2: Superblock boundary search (Pass 1)")
   full_seq <- paste0(cds, cassette_seq)
   block_overhead <- 22L # 2 x 11-nt enzyme sites per block
@@ -3146,6 +3341,18 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
   n_sb <- sb_result$n_superblocks
   sb_df <- sb_result$boundaries
   sb_boundary_ohs <- sb_df$boundary_oh[!is.na(sb_df$boundary_oh)]
+
+  # Count any remaining collisions (should be 0 after refinement)
+  n_sb_collisions <- 0L
+  if (length(sb_boundary_ohs) >= 2L) {
+    for (i in seq_along(sb_boundary_ohs)) {
+      for (j in seq_len(i - 1L)) {
+        if (oh_collides(sb_boundary_ohs[i], sb_boundary_ohs[j])) {
+          n_sb_collisions <- n_sb_collisions + 1L
+        }
+      }
+    }
+  }
 
   cli::cli_alert_success(paste0(
     "SB DP: ", n_sb, " superblock(s), ",
@@ -3609,7 +3816,7 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
       n_boundaries_neither_in_hf = n_neither_hf,
       n_superblocks = n_sb_with_tiles,
       n_superblock_splits = nrow(all_splits),
-      n_sb_collisions = 0L, # No collisions in v2
+      n_sb_collisions = n_sb_collisions,
       cassette_needs_splitting = cassette_needs_splitting,
       overall_min_fidelity = min(reaction_fidelity_df$set_fidelity)
     )

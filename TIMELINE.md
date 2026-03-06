@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-05 20:03:40 | 194 commits | 2026-01-29 to 2026-03-05
+> Auto-generated on 2026-03-05 21:30:37 | 195 commits | 2026-01-29 to 2026-03-05
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-05
 
+- Add local refinement to SB DP for overhang collision avoidance
 - Update validation reports after BUG-004 cassette split fix
 - Add cassette behavior notes doc
 - Fix oversized gene block when gene_residual + cassette > 1800
