@@ -2870,7 +2870,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   # 4. If collision: blacklist the colliding oh2, re-run DP, repeat
   # This replaces the old ±5 tile shift heuristic with a principled DP-based fix.
   max_sb_iterations <- 5L
-  blacklisted_oh2 <- character(0)
+  blacklisted_oh2 <- HOMOPOLYMER_4NT
 
   for (sb_iter in seq_len(max_sb_iterations)) {
     if (sb_iter > 1L) {
@@ -3182,7 +3182,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     cassette_splits <- partition_result$cassette_splits
   } else {
     # Run constrained SB DP with collision avoidance loop
-    max_sb_collision_iters <- 5L
+    max_sb_collision_iters <- 10L
     sb_extra_blacklist <- character(0)
 
     for (sb_coll_iter in seq_len(max_sb_collision_iters)) {
@@ -3261,6 +3261,61 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         if (oh_collides(sb_oh, oh4)) {
           has_collision <- TRUE
           colliding_ohs <- c(colliding_ohs, sb_oh)
+        }
+      }
+      # Check SB boundary OHs vs tile oh1 in tiles whose 5'WT spans the
+      # boundary (BsaI-level collision — BUG-007 equivalent).
+      # The SB boundary OH becomes a BsaI junction overhang for tiles whose
+      # 5'WT region spans past this boundary. If it matches a tile's oh1_seq,
+      # the BsaI reaction has ambiguous ligation.
+      if (partition_result$n_superblocks >= 2L) {
+        sbs <- partition_result$superblocks
+        for (bi in seq_len(partition_result$n_superblocks - 1L)) {
+          boundary_tile <- sbs$end_tile[bi]
+          boundary_oh <- tiles$oh2_seq[boundary_tile]
+          boundary_pos <- tiles$end_nt[boundary_tile]
+          for (t in seq_len(n_tiles)) {
+            if (tiles$start_nt[t] > boundary_pos &&
+              oh_collides(boundary_oh, tiles$oh1_seq[t])) {
+              has_collision <- TRUE
+              colliding_ohs <- c(colliding_ohs, boundary_oh)
+            }
+          }
+        }
+      }
+      # Check SB boundary OHs vs tile oh2 in earlier tiles whose 3'WT spans
+      # past the boundary (BsmBI-level collision).
+      if (partition_result$n_superblocks >= 2L) {
+        sbs <- partition_result$superblocks
+        for (bi in seq_len(partition_result$n_superblocks - 1L)) {
+          boundary_tile <- sbs$end_tile[bi]
+          boundary_oh <- tiles$oh2_seq[boundary_tile]
+          boundary_pos <- tiles$end_nt[boundary_tile]
+          for (t in seq_len(n_tiles)) {
+            if (t == boundary_tile) next
+            if (tiles$end_nt[t] < boundary_pos &&
+              oh_collides(boundary_oh, tiles$oh2_seq[t])) {
+              has_collision <- TRUE
+              colliding_ohs <- c(colliding_ohs, boundary_oh)
+            }
+          }
+        }
+      }
+
+      # Cassette split junction OHs are GLOBAL — they participate in every
+      # tile's BsmBI reaction. Check against ALL tile oh1/oh2 (no spatial filter).
+      if (nrow(cassette_splits) > 0) {
+        for (cj_oh in cassette_splits$junction_oh) {
+          for (t in seq_len(n_tiles)) {
+            if (oh_collides(cj_oh, tiles$oh1_seq[t])) {
+              has_collision <- TRUE
+              colliding_ohs <- c(colliding_ohs, cj_oh)
+            }
+            if (oh_collides(cj_oh, tiles$oh2_seq[t])) {
+              has_collision <- TRUE
+              colliding_ohs <- c(colliding_ohs, cj_oh)
+            }
+          }
         }
       }
 
