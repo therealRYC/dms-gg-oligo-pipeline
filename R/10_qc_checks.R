@@ -295,6 +295,40 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
     )
   }
 
+  # 17. SB boundary overhang collisions (critical — causes ambiguous ligation)
+  if (!is.null(assembly_plan) && !is.null(assembly_plan$sb_result)) {
+    sb_df <- assembly_plan$sb_result$boundaries
+    sb_ohs <- sb_df$boundary_oh[!is.na(sb_df$boundary_oh)]
+    n_sb_collisions <- 0L
+    colliding_ohs <- character(0)
+    if (length(sb_ohs) >= 2L) {
+      for (i in seq_along(sb_ohs)) {
+        for (j in seq_len(i - 1L)) {
+          if (oh_collides(sb_ohs[i], sb_ohs[j])) {
+            n_sb_collisions <- n_sb_collisions + 1L
+            colliding_ohs <- c(colliding_ohs, sb_ohs[i])
+          }
+        }
+      }
+    }
+    colliding_ohs <- unique(colliding_ohs)
+    checks[[length(checks) + 1L]] <- qc_check(
+      name = "sb_overhang_collisions",
+      desc = "Superblock boundary overhangs are unique (no collisions)",
+      pass = n_sb_collisions == 0L,
+      detail = if (n_sb_collisions == 0L) {
+        paste0(length(sb_ohs), " SB boundary OH(s), all unique")
+      } else {
+        paste0(
+          n_sb_collisions, " collision(s) among ", length(sb_ohs),
+          " SB boundaries. Colliding OH(s): ",
+          paste(colliding_ohs, collapse = ", "),
+          ". Assembly will produce ambiguous ligation!"
+        )
+      }
+    )
+  }
+
   # Compile report
   report <- do.call(rbind, checks)
   rownames(report) <- NULL

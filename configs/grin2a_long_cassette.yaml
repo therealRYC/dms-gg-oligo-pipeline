@@ -44,3 +44,5 @@ paqci_star2: "AATG"
 paqci_star1: "GCTA"
 
 barcodes_per_variant: 10
+
+simulate_assembly: true

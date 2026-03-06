@@ -47,7 +47,7 @@ load_config <- function(config_path) {
     codon_table_path = NULL,
     include_synonymous = FALSE,
     auto_domesticate = TRUE,
-    simulate_assembly = FALSE,
+    simulate_assembly = TRUE,
     simulation_samples_per_tile = 1L,
     output_dir = "output"
   )
