@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-06 18:44:30 | 200 commits | 2026-01-29 to 2026-03-06
+> Auto-generated on 2026-03-06 18:55:15 | 201 commits | 2026-01-29 to 2026-03-06
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-06
 
+- Add plan doc for collision loop blacklist scoping fix
 - Scope collision loop blacklisting: cassette vs gene regions
 - Pre-blacklist tile OHs for cassette SB boundaries + fix collision loop reporting
 - Fix cassette junction OH collision + tile DP homopolymer blacklist
