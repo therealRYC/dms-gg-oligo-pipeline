@@ -59,6 +59,9 @@ generate_report <- function(gene, cfg, assembly_plan, geneblock_result,
   # Section 5: QC Summary
   add(report_qc_summary(qc_result))
 
+  # Section 5b: Reaction Fidelity Summary
+  add(report_reaction_fidelity_summary(assembly_plan))
+
   # Section 6: Fixed Overhangs & Helper Plasmid
   add(report_fixed_overhangs(assembly_plan, helper, cfg))
 
@@ -276,6 +279,72 @@ report_qc_summary <- function(qc_result) {
     "## 5. QC Summary", "",
     paste0("**Overall:** ", overall), "",
     md_table(df), ""
+  )
+}
+
+#' Section 5b: Reaction Fidelity Summary
+#'
+#' Shows all BsaI and BsmBI reactions at a glance with their set fidelity.
+#' Values are recomputed from actual block overhangs (post-construction).
+#'
+#' @param assembly_plan List from plan_assembly() (with updated reaction_fidelity)
+#' @return Character vector of Markdown lines
+report_reaction_fidelity_summary <- function(assembly_plan) {
+  rxn_fid <- assembly_plan$reaction_fidelity
+  if (is.null(rxn_fid) || nrow(rxn_fid) == 0) {
+    return(character(0))
+  }
+
+  tiles <- sort(unique(rxn_fid$tile_id))
+  rows <- list()
+  for (tid in tiles) {
+    bsai_row <- rxn_fid[rxn_fid$tile_id == tid & rxn_fid$reaction_type == "BsaI", ]
+    bsmbi_row <- rxn_fid[rxn_fid$tile_id == tid & rxn_fid$reaction_type == "BsmBI", ]
+
+    bsai_n <- if (nrow(bsai_row) > 0) bsai_row$n_overhangs[1] else 0L
+    bsai_fid <- if (nrow(bsai_row) > 0) format_fidelity(bsai_row$set_fidelity[1]) else "--"
+    bsmbi_n <- if (nrow(bsmbi_row) > 0) bsmbi_row$n_overhangs[1] else 0L
+    bsmbi_fid <- if (nrow(bsmbi_row) > 0) format_fidelity(bsmbi_row$set_fidelity[1]) else "--"
+
+    rows[[length(rows) + 1L]] <- data.frame(
+      Tile = tid,
+      `BsaI OHs` = bsai_n,
+      `BsaI Set Fidelity` = bsai_fid,
+      `BsmBI OHs` = bsmbi_n,
+      `BsmBI Set Fidelity` = bsmbi_fid,
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+  }
+
+  df <- do.call(rbind, rows)
+
+  # Summary row
+  all_fid <- rxn_fid$set_fidelity
+  summary_line <- paste0(
+    "**Min:** ", format_fidelity(min(all_fid)),
+    " | **Max:** ", format_fidelity(max(all_fid)),
+    " | **Mean:** ", format_fidelity(mean(all_fid))
+  )
+
+  # Highlight low-fidelity reactions
+  threshold <- assembly_plan$summary$overall_min_fidelity
+  low_fid <- rxn_fid[rxn_fid$set_fidelity < 0.90, ]
+  warn_lines <- character(0)
+  if (nrow(low_fid) > 0) {
+    warn_lines <- paste0(
+      "**Warning:** ", nrow(low_fid), " reaction(s) below 0.90 fidelity — ",
+      "consider alternative split points or overhang reassignment."
+    )
+  }
+
+  c(
+    "## 5b. Reaction Fidelity Summary", "",
+    "Set fidelity for each tile's BsaI and BsmBI reactions,",
+    "computed from the actual block overhangs after construction:", "",
+    md_table(df), "",
+    summary_line, "",
+    warn_lines
   )
 }
 
