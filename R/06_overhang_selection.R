@@ -1500,6 +1500,7 @@ search_superblock_boundaries_dp <- function(
   max_block_length = 1800L,
   min_block_length = 300L,
   blacklist_ohs = character(0),
+  cassette_blacklist_ohs = character(0),
   oh_fidelity = NULL,
   eff_lookup = NULL,
   allowed_gene_positions = NULL
@@ -1547,6 +1548,20 @@ search_superblock_boundaries_dp <- function(
     vapply(blacklist_ohs, reverse_complement, character(1))
   ))
 
+  # --- Build cassette-specific blacklist set ---
+  # These overhangs are additionally excluded for positions in the cassette
+
+  # region (p > gene_len). Cassette junction OHs participate in every tile's
+  # BsmBI reaction, so they must not collide with any tile oh1/oh2.
+  cassette_blacklist_set <- if (length(cassette_blacklist_ohs) > 0) {
+    unique(c(
+      cassette_blacklist_ohs,
+      vapply(cassette_blacklist_ohs, reverse_complement, character(1))
+    ))
+  } else {
+    character(0)
+  }
+
   # --- Build allowed gene positions set for O(1) lookup ---
   # When allowed_gene_positions is provided, gene-region boundaries are
   # restricted to these positions (e.g., tile end positions). Cassette-region
@@ -1570,6 +1585,13 @@ search_superblock_boundaries_dp <- function(
 
     # Skip if overhang is blacklisted (or its RC is blacklisted)
     if (oh %in% blacklist_set) next
+
+    # For cassette-region positions, also check the cassette-specific blacklist
+    # (tile oh1/oh2 values that would collide in every tile's BsmBI reaction)
+    if (p > gene_len && length(cassette_blacklist_set) > 0 &&
+      oh %in% cassette_blacklist_set) {
+      next
+    }
 
     # Skip palindromic overhangs — these cause self-ligation issues in GG
     if (oh %in% PALINDROMIC_4NT) next
@@ -3185,6 +3207,15 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     max_sb_collision_iters <- 10L
     sb_extra_blacklist <- character(0)
 
+    # Build cassette-specific blacklist from all tile oh1/oh2 and their RCs.
+    # Cassette junction OHs participate in every tile's BsmBI reaction, so
+    # they must not match any tile oh1 or oh2 — pre-exclude them from DP.
+    cassette_oh_blacklist <- unique(c(
+      tiles$oh1_seq, tiles$oh2_seq,
+      vapply(tiles$oh1_seq, reverse_complement, character(1)),
+      vapply(tiles$oh2_seq, reverse_complement, character(1))
+    ))
+
     for (sb_coll_iter in seq_len(max_sb_collision_iters)) {
       if (sb_coll_iter > 1L) {
         cli::cli_alert_info(paste0(
@@ -3204,6 +3235,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         max_block_length = max_block_length - block_overhead,
         min_block_length = config$min_geneblock_length %||% MIN_GENEBLOCK_LENGTH,
         blacklist_ohs = current_sb_blacklist,
+        cassette_blacklist_ohs = cassette_oh_blacklist,
         oh_fidelity = oh_fidelity,
         eff_lookup = eff_lookup,
         allowed_gene_positions = tile_end_positions
@@ -3342,6 +3374,17 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       cli::cli_alert_info(paste0(
         "SB collision: blacklisting ", paste(new_blacklist, collapse = ", "),
         ". Re-running constrained SB DP..."
+      ))
+    }
+
+    # Post-loop guard: if loop exhausted iterations without resolving, report
+    if (has_collision && sb_coll_iter == max_sb_collision_iters) {
+      n_unresolved <- length(unique(colliding_ohs))
+      partition_result$n_collisions <- n_unresolved
+      cli::cli_alert_warning(paste0(
+        "SB collision avoidance exhausted ", max_sb_collision_iters,
+        " iterations. ", n_unresolved,
+        " unresolved collision(s): ", paste(unique(colliding_ohs), collapse = ", ")
       ))
     }
   }
@@ -3960,6 +4003,28 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
       paste(cassette_splits$split_pos, collapse = ", "),
       " (overhangs: ", paste(cassette_splits$junction_oh, collapse = ", "), ")"
     ))
+
+    # Check cassette junction OHs against tile oh1/oh2 (cassette OHs are global
+    # — they participate in every tile's BsmBI reaction)
+    cassette_tile_collisions <- character(0)
+    for (cj_oh in cassette_splits$junction_oh) {
+      for (t in seq_len(n_tiles)) {
+        if (oh_collides(cj_oh, tiles$oh1_seq[t]) ||
+          oh_collides(cj_oh, tiles$oh2_seq[t])) {
+          cassette_tile_collisions <- c(cassette_tile_collisions, cj_oh)
+          break # one collision per OH is enough to flag it
+        }
+      }
+    }
+    if (length(cassette_tile_collisions) > 0) {
+      n_sb_collisions <- n_sb_collisions + length(unique(cassette_tile_collisions))
+      cli::cli_alert_warning(paste0(
+        "Cassette junction OH(s) collide with tile oh1/oh2: ",
+        paste(unique(cassette_tile_collisions), collapse = ", "),
+        ". v2 planner cannot pre-blacklist (SB DP runs before tiles). ",
+        "Consider using the hybrid planner (plan_assembly) instead."
+      ))
+    }
   }
 
   # Defense-in-depth: warn if gene residual + cassette exceeds limit but SB DP

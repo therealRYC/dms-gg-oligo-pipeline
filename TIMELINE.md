@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-06 15:06:48 | 198 commits | 2026-01-29 to 2026-03-06
+> Auto-generated on 2026-03-06 17:14:19 | 199 commits | 2026-01-29 to 2026-03-06
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-06
 
+- Pre-blacklist tile OHs for cassette SB boundaries + fix collision loop reporting
 - Fix cassette junction OH collision + tile DP homopolymer blacklist
 - Implement hybrid assembly planner: tile-first DP + constrained SB DP
 
