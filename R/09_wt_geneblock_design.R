@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-05 — Fix oversized gene block: relax guard, trim-4 gene/cassette separation
+# Last updated: 2026-03-07 — Add oh_5/oh_3 columns to all block data frames for correct report display
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -175,6 +175,7 @@ build_cassette_subblocks <- function(cassette_seq, oh_5, oh_3_final,
       block_name = block_name, sequence = block_seq,
       length = nchar(block_seq), enzyme_type = "BsmBI",
       gene_region = paste0("cassette_tile", tile_id, "_frag", cs),
+      oh_5 = cs_oh5, oh_3 = cs_oh3,
       stringsAsFactors = FALSE
     )
     cass_names <- c(cass_names, block_name)
@@ -330,6 +331,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           block_name = block_name, sequence = block_seq,
           length = nchar(block_seq), enzyme_type = "BsaI",
           gene_region = paste0("5wt_tile", tile$tile_id),
+          oh_5 = oh_5, oh_3 = oh_3,
           stringsAsFactors = FALSE
         )
         bsai_parts <- block_name
@@ -415,6 +417,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             block_name = block_name, sequence = block_seq,
             length = nchar(block_seq), enzyme_type = "BsaI",
             gene_region = paste0("5wt_tile", tile$tile_id, "_sub", s),
+            oh_5 = oh_5, oh_3 = oh_3,
             stringsAsFactors = FALSE
           )
           bsai_parts <- c(bsai_parts, block_name)
@@ -531,6 +534,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                 block_name = block_name, sequence = block_seq,
                 length = nchar(block_seq), enzyme_type = "BsmBI",
                 gene_region = paste0("3wt_tile", tile$tile_id),
+                oh_5 = tile$oh2_seq, oh_3 = oh_3_sub,
                 stringsAsFactors = FALSE
               )
               bsmbi_parts <- block_name
@@ -563,6 +567,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                 block_name = block_name, sequence = block_seq,
                 length = nchar(block_seq), enzyme_type = "BsmBI",
                 gene_region = paste0("3wt_tile", tile$tile_id),
+                oh_5 = tile$oh2_seq, oh_3 = gene_cass_oh,
                 stringsAsFactors = FALSE
               )
               bsmbi_parts <- block_name
@@ -592,6 +597,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                 block_name = block_name, sequence = block_seq,
                 length = nchar(block_seq), enzyme_type = "BsmBI",
                 gene_region = paste0("3wt_polIII_tile", tile$tile_id),
+                oh_5 = tile$oh2_seq, oh_3 = oh3,
                 stringsAsFactors = FALSE
               )
               bsmbi_parts <- block_name
@@ -607,6 +613,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
               block_name = block_name, sequence = block_seq,
               length = nchar(block_seq), enzyme_type = "BsmBI",
               gene_region = paste0("3wt_polIII_tile", tile$tile_id),
+              oh_5 = tile$oh2_seq, oh_3 = oh3,
               stringsAsFactors = FALSE
             )
             bsmbi_parts <- block_name
@@ -822,6 +829,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             block_name = block_name, sequence = block_seq,
             length = nchar(block_seq), enzyme_type = "BsmBI",
             gene_region = paste0(gene_region_prefix, tile$tile_id, "_sub", s),
+            oh_5 = oh_5_sub, oh_3 = oh_3_sub,
             stringsAsFactors = FALSE
           )
           bsmbi_parts <- c(bsmbi_parts, block_name)
@@ -919,6 +927,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             block_name = block_name, sequence = block_seq,
             length = nchar(block_seq), enzyme_type = "BsmBI",
             gene_region = paste0("polIII_tile", tile$tile_id),
+            oh_5 = tile$oh2_seq, oh_3 = oh3,
             stringsAsFactors = FALSE
           )
           bsmbi_parts <- block_name
@@ -934,6 +943,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           block_name = block_name, sequence = block_seq,
           length = nchar(block_seq), enzyme_type = "BsmBI",
           gene_region = paste0("polIII_tile", tile$tile_id),
+          oh_5 = tile$oh2_seq, oh_3 = oh3,
           stringsAsFactors = FALSE
         )
         bsmbi_parts <- block_name
