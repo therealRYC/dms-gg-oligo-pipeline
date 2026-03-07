@@ -3360,19 +3360,51 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         break
       }
 
-      # Blacklist colliding OHs and re-run SB DP
-      new_blacklist <- unique(colliding_ohs)
-      new_blacklist <- new_blacklist[!(new_blacklist %in% sb_extra_blacklist)]
-      if (length(new_blacklist) == 0L) {
+      # Classify collisions: cassette-region OHs go to cassette blacklist,
+      # gene-region OHs go to global blacklist. This prevents a cassette
+      # collision from unnecessarily constraining gene-region SB choices.
+      cassette_junction_set <- if (nrow(cassette_splits) > 0) {
+        cassette_splits$junction_oh
+      } else {
+        character(0)
+      }
+      new_cassette_blacklist <- unique(
+        colliding_ohs[colliding_ohs %in% cassette_junction_set]
+      )
+      new_gene_blacklist <- unique(
+        colliding_ohs[!(colliding_ohs %in% cassette_junction_set)]
+      )
+
+      # Remove already-blacklisted OHs
+      new_cassette_blacklist <- new_cassette_blacklist[
+        !(new_cassette_blacklist %in% cassette_oh_blacklist)
+      ]
+      new_gene_blacklist <- new_gene_blacklist[
+        !(new_gene_blacklist %in% sb_extra_blacklist)
+      ]
+
+      if (length(new_cassette_blacklist) == 0L &&
+        length(new_gene_blacklist) == 0L) {
         cli::cli_alert_warning(
           "SB collision detected but no new OH to blacklist. Unresolved collisions remain."
         )
         partition_result$n_collisions <- length(colliding_ohs)
         break
       }
-      sb_extra_blacklist <- unique(c(sb_extra_blacklist, new_blacklist))
+
+      # Add to appropriate blacklists
+      cassette_oh_blacklist <- unique(c(
+        cassette_oh_blacklist, new_cassette_blacklist
+      ))
+      sb_extra_blacklist <- unique(c(sb_extra_blacklist, new_gene_blacklist))
       cli::cli_alert_info(paste0(
-        "SB collision: blacklisting ", paste(new_blacklist, collapse = ", "),
+        "SB collision: blacklisting ",
+        if (length(new_gene_blacklist) > 0) {
+          paste0("gene: ", paste(new_gene_blacklist, collapse = ", "))
+        },
+        if (length(new_cassette_blacklist) > 0) {
+          paste0(" cassette: ", paste(new_cassette_blacklist, collapse = ", "))
+        },
         ". Re-running constrained SB DP..."
       ))
     }
