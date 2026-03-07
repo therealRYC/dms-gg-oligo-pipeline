@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-07 11:44:29 | 204 commits | 2026-01-29 to 2026-03-07
+> Auto-generated on 2026-03-07 11:45:42 | 205 commits | 2026-01-29 to 2026-03-07
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-07
 
+- Recompute reaction fidelity from actual block overhangs
 - Fix report OH display: use block metadata instead of junction indices
 - Add oh_5/oh_3 columns to all block data frames
 

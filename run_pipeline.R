@@ -317,6 +317,19 @@ cli::cli_alert_success(paste0(
   nrow(geneblock_result$blocks), " gene blocks designed. [{round(step_elapsed, 1)}s]"
 ))
 
+# Step 9b: Recompute reaction fidelity from actual block overhangs
+# The pre-computed fidelity uses all_splits junction OHs, which may include
+# phantom overhangs from split points that were filtered out during block
+# construction. Recompute using only OHs present in actual blocks.
+cli::cli_alert_info("Recomputing reaction fidelity from actual block overhangs...")
+assembly_plan$reaction_fidelity <- recompute_reaction_fidelity(
+  geneblock_result, assembly_plan
+)
+min_fid <- min(assembly_plan$reaction_fidelity$set_fidelity)
+cli::cli_alert_success(paste0(
+  "Reaction fidelity recomputed. Min: ", round(min_fid, 4)
+))
+
 # Step 10: QC checks
 cli::cli_h2("Step 10: Running QC checks")
 step_start <- proc.time()

@@ -1154,6 +1154,87 @@ deduplicate_blocks <- function(blocks) {
   list(blocks = result, name_map = name_map)
 }
 
+#' Recompute per-reaction set fidelity from actual block overhangs
+#'
+#' After block construction, some split points may have been filtered out
+#' (merged sub-blocks). The pre-computed reaction_fidelity in assembly_plan
+#' uses ALL junction OHs from all_splits, which may include phantom overhangs
+#' that no longer exist in the final blocks. This function recomputes fidelity
+#' using only the overhangs present in the actual blocks.
+#'
+#' @param geneblock_result List from design_wt_geneblocks()
+#' @param assembly_plan List from plan_assembly()
+#' @return Updated reaction_fidelity data frame with corrected set_fidelity,
+#'   overhangs, and n_overhangs columns
+recompute_reaction_fidelity <- function(geneblock_result, assembly_plan) {
+  blocks <- geneblock_result$blocks
+  manifests <- geneblock_result$tile_manifests
+  n_tiles <- nrow(manifests)
+
+  bsai_matrix <- load_pairwise_matrix("BsaI")
+  bsmbi_matrix <- load_pairwise_matrix("BsmBI")
+
+  oh_L <- assembly_plan$oh_L
+  oh3 <- assembly_plan$oh3
+  oh4 <- assembly_plan$oh4
+
+  reaction_fidelity <- list()
+
+  for (i in seq_len(n_tiles)) {
+    manifest <- manifests[i, ]
+
+    # --- BsaI reaction ---
+    # Collect OHs from BsaI blocks + fixed oligo-contributed OHs (oh_L, oh4)
+    bsai_ohs <- c(oh_L, oh4)
+    if (nzchar(manifest$bsai_parts)) {
+      bsai_part_names <- strsplit(manifest$bsai_parts, ";")[[1]]
+      for (bp in bsai_part_names) {
+        block_row <- blocks[blocks$block_name == bp, ]
+        if (nrow(block_row) > 0) {
+          bsai_ohs <- c(bsai_ohs, block_row$oh_5[1], block_row$oh_3[1])
+        }
+      }
+    }
+    bsai_ohs <- unique(bsai_ohs)
+    bsai_result <- compute_set_fidelity(bsai_ohs, bsai_matrix)
+
+    reaction_fidelity[[length(reaction_fidelity) + 1L]] <- data.frame(
+      tile_id = manifest$tile_id, reaction_type = "BsaI",
+      overhangs = paste(bsai_ohs, collapse = ";"),
+      n_overhangs = length(bsai_ohs),
+      set_fidelity = bsai_result$set_fidelity,
+      stringsAsFactors = FALSE
+    )
+
+    # --- BsmBI reaction ---
+    # Collect OHs from BsmBI blocks + fixed oh3
+    bsmbi_ohs <- c(oh3)
+    if (nzchar(manifest$bsmbi_parts)) {
+      bsmbi_part_names <- strsplit(manifest$bsmbi_parts, ";")[[1]]
+      for (bp in bsmbi_part_names) {
+        block_row <- blocks[blocks$block_name == bp, ]
+        if (nrow(block_row) > 0) {
+          bsmbi_ohs <- c(bsmbi_ohs, block_row$oh_5[1], block_row$oh_3[1])
+        }
+      }
+    }
+    bsmbi_ohs <- unique(bsmbi_ohs)
+    bsmbi_result <- compute_set_fidelity(bsmbi_ohs, bsmbi_matrix)
+
+    reaction_fidelity[[length(reaction_fidelity) + 1L]] <- data.frame(
+      tile_id = manifest$tile_id, reaction_type = "BsmBI",
+      overhangs = paste(bsmbi_ohs, collapse = ";"),
+      n_overhangs = length(bsmbi_ohs),
+      set_fidelity = bsmbi_result$set_fidelity,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  result <- do.call(rbind, reaction_fidelity)
+  rownames(result) <- NULL
+  result
+}
+
 #' Split oversized gene blocks into superblocks
 #'
 #' @param blocks Data frame of gene blocks
