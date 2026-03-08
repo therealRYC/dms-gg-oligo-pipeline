@@ -448,3 +448,40 @@ test_that("MC-optimized pipeline achieves reasonable fidelity on long gene", {
   expect_true(nrow(refined$tiles) >= 5L)
   expect_true(nrow(refined$tiles) <= 20L)
 })
+
+# =============================================================================
+# plan_assembly with boundary_method = "mc_fidelity"
+# =============================================================================
+
+test_that("plan_assembly mc_fidelity mode produces valid assembly plan", {
+  gene <- TEST_LONG_GENE_SEQ
+  plan <- plan_assembly(
+    cds = gene,
+    polIII = TEST_POLIII,
+    max_mutable_nt = 243L,
+    config = list(
+      boundary_method = "mc_fidelity",
+      mc_sb_iterations = 1000L,
+      mc_sb_restarts = 2L,
+      mc_tile_iterations = 1000L,
+      mc_tile_restarts = 2L,
+      mc_refine_iterations = 500L,
+      mc_seed = 42L
+    )
+  )
+
+  # Basic structure checks
+  expect_true(is.list(plan))
+  expect_true(nrow(plan$tiles) >= 5L)
+  expect_true(!is.null(plan$oh3))
+  expect_true(!is.null(plan$oh4))
+  expect_true(!is.null(plan$oh_L))
+
+  # Reaction fidelity should be computed
+  expect_true(nrow(plan$reaction_fidelity) > 0)
+  expect_true(all(plan$reaction_fidelity$set_fidelity > 0))
+
+  # All tiles should have valid OH sequences
+  expect_true(all(nchar(plan$tiles$oh1_seq) == 4L))
+  expect_true(all(nchar(plan$tiles$oh2_seq) == 4L))
+})
