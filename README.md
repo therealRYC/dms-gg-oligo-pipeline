@@ -171,12 +171,9 @@ dms-gg-oligo-pipeline/
 │   ├── AKAP11_NM_016248_CDS.fasta
 │   ├── TRIO_NM_007118_CDS.fasta
 │   └── SLC6A1_NM_003042_CDS.fasta
-├── tools/
-│   └── update_timeline.sh      # Auto-generates TIMELINE.md from git history
 ├── tests/testthat/             # Unit + integration tests (~6100 tests)
-├── Plans/                      # Current design docs and planning references
 ├── archive/                    # Superseded plans, old configs, helper scripts
-├── TIMELINE.md                 # Auto-generated project timeline with milestones
+├── NOTEBOOK.md                 # Lab notebook (22 entries, Jan 29 - Mar 7)
 ├── BUGS.md                     # Known bugs and status tracking
 ├── DESCRIPTION                 # R package metadata
 ├── CLAUDE.md                   # Detailed project context and design rationale
