@@ -2996,8 +2996,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     # MC configuration from config
     mc_sb_iterations <- config$mc_sb_iterations %||% 10000L
     mc_sb_restarts <- config$mc_sb_restarts %||% 5L
-    mc_tile_iterations <- config$mc_tile_iterations %||% 5000L
-    mc_tile_restarts <- config$mc_tile_restarts %||% 3L
     mc_refine_iterations <- config$mc_refine_iterations %||% 2000L
     mc_seed <- config$mc_seed
 
@@ -3026,28 +3024,13 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       overlap_codons = overlap_codons
     )
 
-    # Phase 3b: MC refinement of tile boundaries
-    mc_tiles <- search_tile_boundaries_mc(
-      cds = cds,
-      sb_positions = sb_mc_result$positions,
-      oh_L = oh_L, oh3 = oh3, oh4 = oh4,
-      bsai_matrix = bsai_matrix, bsmbi_matrix = bsmbi_matrix,
-      max_mutable_nt = max_mutable_nt,
-      min_mutable_nt = min_mutable_nt,
-      overlap_codons = overlap_codons,
-      n_iterations = mc_tile_iterations,
-      n_restarts = mc_tile_restarts,
-      seed = mc_seed
-    )
-
-    # Use whichever produces better min set fidelity
-    # (eval by computing fidelity for both — dp_v2 tiles vs mc_tiles)
-    tiles_to_use <- mc_tiles # MC starts from DP and can only match or improve
-
-    # Phase 3c: Joint refinement
+    # Phase 3b: Joint refinement of DP v2 tile boundaries
+    # Benchmarking showed tile MC adds no value over DP v2 (identical on
+    # GRIN2A/AKAP11, actively degraded TRIO from 0.904 → 0.840) while
+    # costing 500-900s. DP v2 → refinement is faster and more robust.
     refined_result <- refine_boundaries_mc(
       cds = cds,
-      tiles = tiles_to_use,
+      tiles = tiles,
       sb_positions = sb_mc_result$positions,
       oh_L = oh_L, oh3 = oh3, oh4 = oh4,
       bsai_matrix = bsai_matrix, bsmbi_matrix = bsmbi_matrix,

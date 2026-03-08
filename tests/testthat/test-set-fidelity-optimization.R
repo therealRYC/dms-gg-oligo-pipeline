@@ -463,8 +463,6 @@ test_that("plan_assembly mc_fidelity mode produces valid assembly plan", {
       boundary_method = "mc_fidelity",
       mc_sb_iterations = 1000L,
       mc_sb_restarts = 2L,
-      mc_tile_iterations = 1000L,
-      mc_tile_restarts = 2L,
       mc_refine_iterations = 500L,
       mc_seed = 42L
     )
