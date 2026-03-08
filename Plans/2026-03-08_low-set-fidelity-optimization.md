@@ -80,5 +80,20 @@ Randomly perturbs one tile boundary at a time by ±3 codons, accepting improveme
 ### Remaining work:
 
 - [x] Integrate into `plan_assembly()` with config option for MC-optimized flow
-- [ ] Benchmark on GRIN2A/AKAP11/TRIO (before/after fidelity comparison)
-- [ ] Compare Phase 3A (DP) vs 3B (MC) on same SB boundaries
+- [x] Benchmark on GRIN2A/AKAP11/TRIO (before/after fidelity comparison)
+- [x] Compare Phase 3A (DP) vs 3B (MC) on same SB boundaries
+
+### Benchmark Results (260308)
+
+| Gene | Approach | Tiles | SBs | Min Set Fid | <0.90 | <0.80 | Time |
+|------|----------|-------|-----|-------------|-------|-------|------|
+| GRIN2A | Legacy DP | 25 | 3 | 0.8940 | 1 | 0 | 6.9s |
+| GRIN2A | **SB MC → DP v2 → refine** | 21 | 3 | **1.0000** | 0 | 0 | ~350s |
+| AKAP11 | Legacy DP | 30 | 4 | 0.8665 | 1 | 0 | 13.6s |
+| AKAP11 | **SB MC → DP v2 → refine** | 27 | 3 | **1.0000** | 0 | 0 | ~356s |
+| TRIO | Legacy DP | 46 | 6 | 0.7829 | 3 | 1 | 28.6s |
+| TRIO | **SB MC → DP v2 → refine** | 43 | 5 | **0.9965** | 0 | 0 | ~687s |
+
+**Decision: Tile MC dropped from production pipeline.** Benchmarking showed tile MC adds zero improvement over DP v2 on GRIN2A/AKAP11 and actively degrades TRIO (0.904 → 0.840). The function `search_tile_boundaries_mc()` is retained for research use but is not called by `plan_assembly()`.
+
+**Final pipeline**: SB MC → DP v2 → Joint Refinement
