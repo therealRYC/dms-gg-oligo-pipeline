@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-08 — Entry 24: Reaction-aware set fidelity optimization (mc_fidelity default) -->
+<!-- Last updated: 2026-03-08 — Entry 25: Convergent U6T7 tornado barcode design feasibility research -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -44,6 +44,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-07 | Remove overhang_fidelity_threshold; BsmBI data everywhere | Threshold was T4-calibrated (117 OH >= 0.95); under BsmBI cycling only 1 passes — meaningless | Entry 23 |
 | 2026-03-08 | SB-first MC + within-SB DP as default boundary method | Reaction-aware scoring achieves min set fidelity ≥0.99 vs 0.78-0.89 legacy | Entry 24 |
 | 2026-03-08 | Drop tile MC from production pipeline | Benchmarking: tile MC = DP v2 on 2/3 genes, degraded TRIO; 500-900s wasted | Entry 24 |
+| 2026-03-08 | Document & shelve convergent U6T7 tornado design | Promising but needs wet-lab validation; current pipeline working; can add as config toggle later | Entry 25 |
 
 ## Entries
 
@@ -629,4 +630,41 @@ Assembly reports regenerated from hard-blacklist scoring runs for validation.
 - `4182772` — Update README for mc_fidelity default boundary method
 
 **Tests**: FAIL 0 | WARN 43 | SKIP 4 | PASS 6425 (421s)
+
+---
+
+### 2026-03-08 14:23 — Research: Convergent U6T7 Tornado Barcode Design Feasibility
+
+**Type**: research
+**Status**: completed
+**Tags**: [construct-design, polII-polIII, convergent, tornado, circRNA, vis-seq, nis-seq, brainstorm]
+
+**Question**: Can the DMS construct be redesigned to place the PolIII barcode cassette in convergent (antisense) orientation relative to the PolII gene, enabling WPRE/polyA to move to the backbone and reducing gene block overhead from ~1145 nt to <100 nt per tile?
+
+**Sources consulted**:
+- Hill et al. 2018, Nat Methods (PMC5882576) — PolII/PolIII co-directional interference: 88% → 29% sgRNA editing
+- Ma et al. 2018, Mol Ther NA (PMC6023835) — α-amanitin boosts U6 2-fold; PolII/PolIII compete
+- Uenaka & Wernig 2026, Cell Stem Cell — TK4: CAG + WPRE = iPSC silencing resistance
+- Litke & Jaffrey 2019, Nat Biotech (MN052909) — Tornado circRNA system (~200× linear RNA)
+- Mefferd et al. 2015, RNA — Chimeric U6T7 promoter (18-bp PSE replacement)
+- Harris & Jan 2025, Nat Methods — CRISPuRe-seq convergent PolII/PolIII validated
+- Datlinger et al. 2024, Nat Biotech — CROPseq-multi convergent design
+- Fowler Lab 2025, bioRxiv — VIS-seq tornado circRNA barcodes (>75K copies/cell)
+
+**Summary of findings**:
+Co-directional PolII upstream of PolIII (Architecture A) causes significant transcriptional interference — user's concern validated. The field consensus is convergent (opposite-direction) PolII/PolIII, used by ALL major dual-promoter vectors (pLKO.1, lentiCRISPRv2, lentiGuide-Puro). A convergent design with tornado circRNA (Architecture C++) achieves: (1) zero PolII/PolIII interference, (2) gene block cassette overhead of ~93 nt (vs. 1145 nt current), (3) WPRE/polyA in backbone, (4) **identical oligo structure** to current pipeline (56 nt overhead, 81 codons/tile), and (5) built-in dual readout (VIS-Seq circRNA + NIS-Seq T7 IVT).
+
+**Implications for our work**:
+- Convergent design is architecturally superior but requires wet-lab validation before committing code changes
+- Can be implemented as a `barcode_orientation: "convergent"` config toggle without disrupting existing pipeline
+- Mainly affects `08_oligo_assembly.R` (barcode RC) and `09_wt_geneblock_design.R` (smaller cassette)
+- The "no tile size penalty" finding is critical — tornado elements go in gene blocks/backbone, not oligo
+
+**Key references**:
+- Full brainstorm: `Brainstorm/260308_barcode-upstream-convergent-design.md`
+
+**Related commits**:
+- `3838172` — brainstorm: Convergent U6T7 tornado barcode design
+
+**Decision**: Document and shelve — promising but needs wet-lab validation first.
 
