@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-07 18:14:11 | 209 commits | 2026-01-29 to 2026-03-07
+> Auto-generated on 2026-03-07 18:33:05 | 210 commits | 2026-01-29 to 2026-03-07
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-07
 
+- Add assembly reports from 260307 hard-blacklist scoring runs
 - Replace soft penalties with hard blacklists in tile boundary scoring
 - Rename Plans/ to Notes/
 - Add assembly reports from 260307 report-OH-fix runs
