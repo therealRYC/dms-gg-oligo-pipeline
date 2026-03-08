@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Lab notebook retroactively constructed from git history, PR descriptions, planning docs, and bug tracking -->
+<!-- Last updated: 2026-03-07 — Entry 23: Remove overhang_fidelity_threshold; BsmBI data everywhere -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -536,4 +536,39 @@ Assembly reports regenerated from report-OH-fix runs.
 **Repo organization:** Renamed `Plans/` directory to `Notes/` to better reflect content (planning docs, design notes, handoff documents — not active task plans).
 
 Assembly reports regenerated from hard-blacklist scoring runs for validation.
+
+---
+
+### Entry 23 — 2026-03-07 22:35 | cleanup: Remove overhang_fidelity_threshold; BsmBI data everywhere
+
+**Type**: session
+**Status**: completed
+**Tags**: [overhang-fidelity, bsmbi, cleanup, config]
+
+**Goal**: Remove the `overhang_fidelity_threshold` config parameter and standardize all fidelity data on BsmBI cycling (Pryor 2020).
+
+**Approach**: The threshold (default 0.95) was calibrated for T4 ligase data (Potapov 2018). Under BsmBI cycling conditions, only 1 of 256 overhangs passes 0.95 vs 117 for T4 — the threshold was effectively meaningless. Traced all uses across 14 files (production code, tests, docs) and removed or replaced them.
+
+**Key findings**:
+- BsmBI cycling fidelity distribution: 1 OH >= 0.95, 8 >= 0.90, 23 >= 0.85, 39 >= 0.80, median 0.64
+- T4 fidelity distribution: 117 OH >= 0.95, 186 >= 0.90, 224 >= 0.85, median 0.94
+- `select_superblock_overhangs()` was still using `builtin_overhang_fidelity()` (T4 data) — inconsistent with rest of pipeline
+- Set fidelity under cycling is typically ~1.0 for 3-5 overhang reactions, so the threshold warning rarely fired
+
+**Decisions made**:
+- Remove `overhang_fidelity_threshold` from config entirely (over lowering it): no meaningful threshold exists for BsmBI cycling individual fidelity
+- Replace with internal `SET_FIDELITY_WARNING_THRESHOLD` (0.80): safety net for set fidelity warnings only
+- Keep `builtin_overhang_fidelity()` as T4 legacy fallback (over deleting it): future option for users who want T4 data
+- Switch all tests to BsmBI data (over keeping T4 for test fixtures): consistency across codebase
+
+**Artifacts**:
+- `R/constants.R` — `SET_FIDELITY_WARNING_THRESHOLD` replaces `DEFAULT_FIDELITY_THRESHOLD`
+- `config_template.yaml` — threshold section removed
+- `R/06_overhang_selection.R` — `select_superblock_overhangs()` now uses BsmBI data
+
+**Related commits**:
+- `2c84e73` — Remove overhang_fidelity_threshold config; use BsmBI data everywhere
+- `1318543` — notebook: Update fidelity data reference to BsmBI cycling
+
+**Tests**: FAIL 0 | WARN 43 | SKIP 4 | PASS 6388 (263s)
 
