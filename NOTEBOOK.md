@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-07 — Entry 23: Remove overhang_fidelity_threshold; BsmBI data everywhere -->
+<!-- Last updated: 2026-03-08 — Entry 24: Reaction-aware set fidelity optimization (mc_fidelity default) -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -42,6 +42,8 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-03 | WT controls (1 per position, always on) | Normalization controls for fitness scoring | Entry 19 |
 | 2026-03-04 | SB-first two-pass DP architecture | Decide globals (SBs) first, locals (tiles) second — natural order | Entry 20 |
 | 2026-03-07 | Remove overhang_fidelity_threshold; BsmBI data everywhere | Threshold was T4-calibrated (117 OH >= 0.95); under BsmBI cycling only 1 passes — meaningless | Entry 23 |
+| 2026-03-08 | SB-first MC + within-SB DP as default boundary method | Reaction-aware scoring achieves min set fidelity ≥0.99 vs 0.78-0.89 legacy | Entry 24 |
+| 2026-03-08 | Drop tile MC from production pipeline | Benchmarking: tile MC = DP v2 on 2/3 genes, degraded TRIO; 500-900s wasted | Entry 24 |
 
 ## Entries
 
@@ -571,4 +573,60 @@ Assembly reports regenerated from hard-blacklist scoring runs for validation.
 - `1318543` — notebook: Update fidelity data reference to BsmBI cycling
 
 **Tests**: FAIL 0 | WARN 43 | SKIP 4 | PASS 6388 (263s)
+
+---
+
+### Entry 24 — 2026-03-08 14:11 | implementation: Reaction-aware set fidelity optimization
+
+**Type**: session
+**Status**: completed
+**Tags**: [set-fidelity, monte-carlo, boundary-optimization, superblocks, mc-fidelity]
+
+**Goal**: Maximize worst-case set fidelity across all ligation reactions by replacing the legacy tile-first DP with a reaction-aware SB-first Monte Carlo approach.
+
+**Problem**: Legacy DP scored SB boundary overhangs individually (`sum(P_fid × P_eff)`) without accounting for pairwise cross-reactivity between overhangs co-occurring in the same reaction. GRIN2A min set fidelity = 0.894 (1 reaction < 0.90); TRIO = 0.783 (3 < 0.90, 1 < 0.80). Worst offenders: extreme tile reactions where ALL SB junction OHs accumulate.
+
+**Key insight**: Each tile has independent BsaI and BsmBI reactions. First tile BsmBI sees all SB junction OHs (downstream); last tile BsaI sees all SB junction OHs (upstream). Optimizing for these two extreme tile reactions automatically optimizes for all tiles.
+
+**Approach — three-phase pipeline**:
+1. **SB-first MC** (`search_sb_boundaries_mc`): Simulated annealing places SB boundaries at any codon boundary (not restricted to tile ends), scoring by min set fidelity across extreme tile reactions using 256×256 BsaI/BsmBI pairwise matrices. Multiple restarts (5×10K iterations).
+2. **Within-SB DP** (`search_tile_boundaries_dp_v2`): Max-min DP places tile boundaries within each SB segment. Scores by `min(BsaI_set_fid, BsmBI_set_fid)` per tile, accounting for which SB junction OHs appear in each reaction.
+3. **Joint refinement** (`refine_boundaries_mc`): MC perturbation of individual tile boundaries (±3 codons), accepting improvements to min set fidelity.
+
+**Benchmark results**:
+
+| Gene | Codons | Legacy min_fid | Legacy <0.90 | New min_fid | New <0.90 |
+|------|--------|----------------|--------------|-------------|-----------|
+| GRIN2A | 1465 | 0.8940 | 1 | **1.0000** | 0 |
+| AKAP11 | 1902 | 0.8665 | 1 | **1.0000** | 0 |
+| TRIO | 3098 | 0.7829 | 3 (1 <0.80) | **0.9965** | 0 |
+
+**Decisions made**:
+- SB-first MC + within-SB DP as default `boundary_method` (over legacy tile-first DP): reaction-aware scoring achieves min set fidelity ≥0.99 vs 0.78-0.89
+- Drop tile MC from production pipeline (over keeping it): benchmarking showed tile MC = DP v2 on GRIN2A/AKAP11, actively degraded TRIO (0.904 → 0.840 by changing tile count 43→45); 500-900s wasted. Function retained for research.
+- Gene-edge OHs skip hard filters (over hard-rejecting): first tile oh1 = oh_L and last tile oh2 = gene-end-derived are fixed by the sequence — their quality is captured in set fidelity scoring instead
+
+**Bugs found and fixed**:
+- Gene-edge palindrome hard rejection: last tile oh2 (e.g. "TTAA" from TAA stop) hard-rejected as palindromic → tile MC returned -Inf. Fix: skip hard filters for gene-edge OHs.
+- SA acceptance NaN crash: `-Inf - (-Inf) = NaN` → guard with `if (!is.finite(new_score)) next`
+- `refine_boundaries_mc` return value: returns list with `$tiles`, not a data frame
+
+**Artifacts**:
+- `R/06_overhang_selection.R` — 5 new functions: `evaluate_sb_config`, `search_sb_boundaries_mc`, `search_tile_boundaries_dp_v2`, `search_tile_boundaries_mc`, `refine_boundaries_mc`
+- `tests/testthat/test-set-fidelity-optimization.R` — 55 tests (all passing)
+- `scripts/benchmark_set_fidelity.R` — Benchmark comparing legacy DP vs MC approaches
+- `Plans/2026-03-08_low-set-fidelity-optimization.md` — Algorithm design and benchmark results
+- `config_template.yaml` — Updated default: `boundary_method: "mc_fidelity"`
+
+**Related commits**:
+- `159818c` — Add reaction-aware set fidelity optimization functions
+- `30e283d` — Fix gene-edge OH handling in set fidelity optimization
+- `59dba80` — Integrate mc_fidelity mode into plan_assembly
+- `231125b` — Fix SA acceptance NaN crash; add benchmark script
+- `c0c5e7a` — Remove tile MC from mc_fidelity pipeline; use DP v2 → refinement directly
+- `b087b70` — Update plan with benchmark results; mark all items complete
+- `43cb765` — Change default boundary_method from "dp" to "mc_fidelity"
+- `4182772` — Update README for mc_fidelity default boundary method
+
+**Tests**: FAIL 0 | WARN 43 | SKIP 4 | PASS 6425 (421s)
 
