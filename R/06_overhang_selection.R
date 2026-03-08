@@ -711,6 +711,16 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
       valid[b] <- FALSE
       next
     }
+    # Hard filter: palindromic overhangs cause self-ligation
+    if (oh1 %in% PALINDROMIC_4NT || oh2 %in% PALINDROMIC_4NT) {
+      valid[b] <- FALSE
+      next
+    }
+    # Hard filter: homopolymer overhangs cause slippage during annealing
+    if (oh1 %in% HOMOPOLYMER_4NT || oh2 %in% HOMOPOLYMER_4NT) {
+      valid[b] <- FALSE
+      next
+    }
     valid[b] <- TRUE
 
     oh1_in <- oh1 %in% POTAPOV_TABLE1_SET3_25
@@ -718,27 +728,11 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
     oh1_hf[b] <- oh1_in
     oh2_hf[b] <- oh2_in
 
-    # Base scores: P_fid * P_eff (both from BsmBI cycling, BUG-008)
+    # Score = P_fid * P_eff for each overhang (both from BsmBI cycling, BUG-008)
     oh1_base <- overhang_score(oh1, fid_lookup, eff_lookup)
     oh2_base <- overhang_score(oh2, fid_lookup, eff_lookup)
 
-    # Low-fidelity safety floor: penalize boundaries where either overhang
-    # has very low individual fidelity (< 0.50 under BsmBI cycling conditions).
-    # Catches truly awful CG-rich overhangs (CGCC: 0.35, CCGC: 0.38).
-    fid_penalty <- 0.0
-    oh1_ind_fid <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else 0.5
-    oh2_ind_fid <- if (oh2 %in% names(fid_lookup)) unname(fid_lookup[oh2]) else 0.5
-    if (oh1_ind_fid < 0.50 || oh2_ind_fid < 0.50) fid_penalty <- -5.0
-
-    # Palindrome penalty (OPT-003): palindromic overhangs enable self-ligation
-    # and inverted insertion. Heavy penalty but not impossible — a gene ending
-    # in TAA forces oh2 = TTAA (palindrome), which we can't avoid.
-    palindrome_penalty <- 0.0
-    if (oh1 %in% PALINDROMIC_4NT || oh2 %in% PALINDROMIC_4NT) {
-      palindrome_penalty <- -10.0
-    }
-
-    scores[b] <- oh1_base + oh2_base + fid_penalty + palindrome_penalty
+    scores[b] <- oh1_base + oh2_base
   }
 
   precomp_elapsed <- (proc.time() - precomp_start)[["elapsed"]]
