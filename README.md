@@ -79,7 +79,7 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 | `barcodes_per_variant` | 10 | Number of unique barcodes per variant |
 | `barcode_gc_range` | [0.25, 0.75] | Acceptable GC content range for barcodes |
 | `barcode_max_homopolymer` | 4 | Maximum homopolymer run length in barcodes |
-| `boundary_method` | `"dp"` | `"dp"` (global optimum) or `"greedy"` (local search) |
+| `boundary_method` | `"mc_fidelity"` | `"mc_fidelity"` (SB-first MC + within-SB DP, best fidelity), `"dp"` (legacy tile-first DP), or `"greedy"` (local search) |
 | `multi_k_search` | `true` | Try multiple tile counts to find best overhang quality |
 | `dp_k_range` | 5 | Search K_ideal +/- this many tile counts; stops early when gain < 0.5% |
 | `paqci_star2` | *(required)* | 4-nt PaqCI overhang at the 5' end of the insert (PaqCI\*\*). **Must match your destination vector.** |
@@ -115,7 +115,7 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 3. **Enzyme site scan** (`02_enzyme_site_scan.R`) -- Find endogenous BsaI/BsmBI/PaqCI sites, suggest silent mutations for domestication
 4. **Codon table** (`03_codon_table.R`) -- Human codon usage table, preferred codon lookup
 5. **Mutation design** (`04_mutation_design.R`) -- Generate 19 missense + 1 nonsense + 1 WT control per position (+ optional synonymous) using preferred human codons
-6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- DP optimizer for tile boundary placement maximizing overhang quality (P_fid * P_eff from BsmBI cycling data); oh3/oh4 auto-selection by score ranking; superblock split-point optimization
+6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- Reaction-aware boundary optimization: SB boundaries placed first via simulated annealing MC (maximizing min set fidelity across all reactions), then tile boundaries within SB segments via max-min DP + joint refinement; oh3/oh4 auto-selection by score ranking
 7. **Barcode design** (`07_barcode_design.R`) -- Unified hierarchical prefix-suffix barcodes with Hamming distance guarantee on prefixes
 8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles)
 9. **Gene block design** (`09_wt_geneblock_design.R`) -- WT gene blocks with correct flanking enzyme sites; superblock splitting for fragments >1800 bp
@@ -128,11 +128,11 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 
 **Mutation strategy**: Fully specified codons (no degenerate NNK/NNS). Each oligo encodes exactly one mutation using the most-preferred human codon.
 
-**Tile boundary optimization**: A dynamic programming optimizer searches all valid codon-boundary positions to find tile placements where gene-derived overhangs have high ligation fidelity and efficiency. Scoring uses BsmBI cycling data (Pryor et al. 2020): `Score = P_fid * P_eff`, where P_fid measures accuracy and P_eff measures relative ligation yield. Supports multi-K search across different tile counts.
+**Boundary optimization**: The default `mc_fidelity` mode uses a three-phase approach: (1) **SB-first MC** — simulated annealing places superblock boundaries at codon positions that maximize min set fidelity across all ligation reactions, accounting for pairwise overhang cross-reactivity from the 256×256 BsaI/BsmBI matrices (Pryor et al. 2020); (2) **Within-SB DP** — max-min dynamic programming places tile boundaries within each superblock segment, scoring by `min(BsaI_set_fid, BsmBI_set_fid)` per tile; (3) **Joint refinement** — MC perturbation of individual tile boundaries (±3 codons) to further improve worst-case fidelity. This achieves min set fidelity ≥0.99 on all tested genes (vs. 0.78–0.89 with legacy tile-first DP). Legacy `"dp"` mode remains available for faster runs.
 
 **Barcode design**: Unified hierarchical prefix-suffix mode -- each variant gets a unique high-Hamming-distance prefix (12 nt), extended with filtered random suffixes to the full barcode length (20 nt). Cross-variant Hamming distance is guaranteed by the prefix; within-variant replicates differ only in their suffix. Configurable `barcodes_per_variant` (default 10) for experimental replication. Prefixes that create enzyme sites at junction boundaries are automatically filtered. For `min_hamming <= 3`, prefixes are generated using GF(4) linear codes (algebraically guaranteed distance, deterministic). For `min_hamming >= 4`, prefixes are generated using DNABarcodes lexicodes (Conway/Ashlock heuristics).
 
-**Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split into superblocks at tile boundaries, using gene-derived overhangs (oh2) as junction sequences. This tile-boundary partitioning ensures each tile's reaction uses only locally-relevant overhangs, avoiding global exclusion conflicts. Overhang collisions at SB boundaries are resolved by iterative DP with blacklisting: colliding oh2 sequences are blacklisted, the DP boundary optimizer re-runs with those overhangs excluded, and the process repeats (up to 5 iterations) until collision-free. For very long downstream cassettes (>~1700 nt, e.g., multiple intergene elements), the cassette itself is split across multiple BsmBI-connected fragments — no user action required.
+**Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split into superblocks. In the default `mc_fidelity` mode, SB boundaries are placed first (at any codon boundary, not restricted to tile ends) via simulated annealing MC that directly optimizes min set fidelity across all reactions. SB junction overhangs are chosen to minimize pairwise cross-reactivity with each other and with the fixed overhangs (oh_L, oh3, oh4). In legacy `dp` mode, SBs are placed at tile boundaries with iterative collision blacklisting. For very long downstream cassettes (>~1700 nt), the cassette itself is split across multiple BsmBI-connected fragments — no user action required.
 
 ## Repository Structure
 
@@ -154,7 +154,7 @@ dms-gg-oligo-pipeline/
 │   ├── 03_codon_table.R        # Human codon usage table
 │   ├── 04_mutation_design.R    # Single-AA substitution + stop codon generation
 │   ├── 05_tiling.R             # Gene partitioning into tiles
-│   ├── 06_overhang_selection.R # DP boundary optimizer + overhang selection
+│   ├── 06_overhang_selection.R # Boundary optimizer (MC fidelity + DP) + overhang selection
 │   ├── 07_barcode_design.R     # Programmed barcode generation (unified hierarchical)
 │   ├── 07b_linear_codes.R      # GF(4) Hamming code prefix generation (d <= 3)
 │   ├── 08_oligo_assembly.R     # Full oligo sequence construction (universal structure)
