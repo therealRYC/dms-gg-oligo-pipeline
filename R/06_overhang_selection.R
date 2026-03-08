@@ -4087,9 +4087,12 @@ search_sb_boundaries_mc <- function(full_seq, gene_len, oh_L, oh3, oh4,
         proposed, full_seq, gene_len, oh_L, oh3, oh4, bsai_matrix, bsmbi_matrix
       )
 
+      # Skip invalid configurations
+      if (!is.finite(new_score)) next
+
       # Accept/reject with Metropolis criterion
       delta <- new_score - current_score
-      if (delta > 0 || (is.finite(new_score) && runif(1) < exp(delta / max(T, 1e-10)))) {
+      if (delta > 0 || (is.finite(current_score) && runif(1) < exp(delta / max(T, 1e-10)))) {
         current <- proposed
         current_score <- new_score
         n_accepted <- n_accepted + 1L
