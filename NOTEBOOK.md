@@ -71,7 +71,7 @@ Implemented the complete pipeline in a single session — 14 R source modules, a
 
 **Architecture implemented:**
 - Universal oligo structure: `BsaI_fwd + oh1 + [mutant tile] + BsmBI_rev_oh2 + BsmBI_fwd_oh3 + [barcode] + BsaI_rev_oh4` (56 nt overhead, 243 nt max mutable region at 300 nt oligo limit)
-- Full 256-overhang NEB fidelity data (Potapov 2018), 117 overhangs >= 0.95 threshold
+- Full 256-overhang NEB fidelity data (BsmBI cycling, Pryor 2020; T4 legacy data retained as fallback)
 - Vectorized prefix-first barcode algorithm (~14,800 capacity at k=8/d=3 in ~1.4s)
 - Automatic superblock splitting for WT gene blocks exceeding synthesis limit
 - Silent codon domestication for endogenous BsaI, BsmBI, and PaqCI sites
