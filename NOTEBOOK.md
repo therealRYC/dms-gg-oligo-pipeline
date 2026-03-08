@@ -41,6 +41,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-02 | BsmBI cycling matrix for all scoring | Standardize on one experimental condition; T4 data overestimates fidelity | Entry 18 |
 | 2026-03-03 | WT controls (1 per position, always on) | Normalization controls for fitness scoring | Entry 19 |
 | 2026-03-04 | SB-first two-pass DP architecture | Decide globals (SBs) first, locals (tiles) second — natural order | Entry 20 |
+| 2026-03-07 | Remove overhang_fidelity_threshold; BsmBI data everywhere | Threshold was T4-calibrated (117 OH >= 0.95); under BsmBI cycling only 1 passes — meaningless | Entry 23 |
 
 ## Entries
 
