@@ -83,9 +83,11 @@ barcodes_per_variant: 10                   # Number of unique barcodes per varia
                                            # set to 1 for single-barcode-per-variant designs.
 
 # --- Tile Boundary Optimization ---
-boundary_method: "dp"                        # "dp" (default) or "greedy". DP uses dynamic programming
-                                             # to find globally optimal tile boundaries; greedy uses a
-                                             # local forward search within +/- search_window_K codons.
+boundary_method: "mc_fidelity"               # "mc_fidelity" (default): SB-first Monte Carlo with
+                                             # reaction-aware set fidelity scoring, followed by
+                                             # within-SB DP tile placement and joint refinement.
+                                             # "dp": legacy tile-first DP (faster but lower fidelity).
+                                             # "greedy": local forward search (fastest, lowest quality).
 multi_k_search: true                         # Try multiple tile counts to find the tiling with best
                                              # average overhang quality. Default true.
 dp_k_range: 5                                # Search K_ideal +/- dp_k_range tile counts (default 5).

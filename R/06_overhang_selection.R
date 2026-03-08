@@ -2858,7 +2858,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   manual_oh4 <- config$manual_oh4
   search_window_K <- config$search_window_K %||% 15L
   dp_k_range <- config$dp_k_range %||% 5L
-  boundary_method <- config$boundary_method %||% "dp"
+  boundary_method <- config$boundary_method %||% "mc_fidelity"
   multi_k <- config$multi_k %||% TRUE
   overlap_codons <- config$overlap_codons %||% 4L
   min_geneblock_length <- config$min_geneblock_length %||% MIN_GENEBLOCK_LENGTH
