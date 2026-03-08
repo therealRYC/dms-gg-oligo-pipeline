@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-07 11:52:03 | 206 commits | 2026-01-29 to 2026-03-07
+> Auto-generated on 2026-03-07 17:23:43 | 207 commits | 2026-01-29 to 2026-03-07
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-07
 
+- Add assembly reports from 260307 report-OH-fix runs
 - Add reaction fidelity summary table to assembly report
 - Recompute reaction fidelity from actual block overhangs
 - Fix report OH display: use block metadata instead of junction indices
