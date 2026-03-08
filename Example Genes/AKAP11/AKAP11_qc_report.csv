@@ -1,0 +1,17 @@
+check_name,desc,pass,detail
+oligo_lengths,All oligos within synthesis length limit,TRUE,Range: 167-290 nt (limit: 300)
+block_lengths,All gene blocks within synthesis length limit,TRUE,Range: 117-1736 nt (limit: 1800)
+barcode_junction_sites,No enzyme sites at barcode-context junctions,TRUE,"0 barcode(s) with junction enzyme sites (left='CACACC', right='AGAATG')"
+barcode_uniqueness,All barcodes are unique,TRUE,398580 unique / 398580 total
+tile_coverage,Tiles cover entire gene without gaps,TRUE,5706 / 5706 nt covered
+variant_count,Expected number of variants generated,TRUE,39858 unique variants (expected: 39858 across 1898/1900 mutable positions; 36062 missense + 1898 nonsense + 1898 wt_control; 2 position(s) skipped)
+single_codon_change,Each non-control variant differs by exactly one codon from WT,TRUE,379600 / 379600 variants confirmed (WT controls excluded)
+oligo_gc_content,Oligo GC content within reasonable range (25-75%),TRUE,GC range: 32.1-51.9% | 0 oligo(s) with extreme GC
+domestication_complete,"Gene domesticated for all 3 enzymes (BsaI, BsmBI, PaqCI)",TRUE,No enzyme sites in gene
+overhang_fidelity,Tile boundary overhangs have adequate fidelity,FALSE,23 tile(s) with low-fidelity boundary overhangs (<0.80)
+tile_manifests,Per-tile assembly manifests complete,TRUE,31 tile manifest(s) generated
+helper_plasmid,Helper plasmid free of unintended BsmBI sites,TRUE,OK
+reaction_fidelity,Per-reaction set-level overhang fidelity,TRUE,Min set fidelity: 0.8583 across 62 reactions | 4 reaction(s) below 0.90
+barcode_poliii_term,No barcodes contain PolIII terminator signal (TTTT),TRUE,0 / 398580 barcode(s) contain TTTT
+block_min_length,All gene blocks above synthesis minimum length,FALSE,3 block(s) below 300 nt minimum. Range: 117-1736 nt
+sb_overhang_collisions,Superblock boundary overhangs are unique (no collisions),TRUE,"5 SB boundary OH(s), all unique"
