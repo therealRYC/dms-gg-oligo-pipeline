@@ -75,8 +75,10 @@ Randomly perturbs one tile boundary at a time by ±3 codons, accepting improveme
 2. **Gene-end palindrome hard rejection**: Last tile oh2 is gene-derived and unavoidable; skip hard filters for gene-edge OHs.
 3. **MC init_boundaries extraction**: Used `end_codon - overlap` instead of `start_codon - 1`.
 
+4. **refine_boundaries_mc return value**: Returns a list with `$tiles`, not a data frame — was being assigned directly as `tiles` instead of `refined_result$tiles`.
+
 ### Remaining work:
 
-- [ ] Integrate into `plan_assembly()` with config option for MC-optimized flow
+- [x] Integrate into `plan_assembly()` with config option for MC-optimized flow
 - [ ] Benchmark on GRIN2A/AKAP11/TRIO (before/after fidelity comparison)
 - [ ] Compare Phase 3A (DP) vs 3B (MC) on same SB boundaries
