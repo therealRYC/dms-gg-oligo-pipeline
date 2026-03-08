@@ -4374,27 +4374,49 @@ search_tile_boundaries_mc <- function(cds, sb_positions,
       oh1_t <- substring(cds, sn, sn + 3L)
       oh2_t <- substring(cds, en - 3L, en)
 
-      # Hard filters — return -Inf for invalid configurations
+      # Hard filters — return -Inf for invalid configurations.
+      # Gene-edge OHs (first tile oh1, last tile oh2) are determined by the
+      # gene sequence and cannot be changed by boundary placement. We skip
+      # palindrome/homopolymer/collision hard filters for these fixed OHs;
+      # their quality is reflected in set fidelity instead.
+      is_first_tile <- (ti == 1L)
+      is_last_tile <- (ti == n_tiles)
+
       if (nchar(oh1_t) != 4L || nchar(oh2_t) != 4L) {
         return(-Inf)
       }
-      if (oh1_t %in% PALINDROMIC_4NT || oh2_t %in% PALINDROMIC_4NT) {
+
+      # Palindrome / homopolymer — skip for gene-edge OHs
+      if (!is_first_tile && (oh1_t %in% PALINDROMIC_4NT)) {
         return(-Inf)
       }
-      if (oh1_t %in% HOMOPOLYMER_4NT || oh2_t %in% HOMOPOLYMER_4NT) {
+      if (!is_last_tile && (oh2_t %in% PALINDROMIC_4NT)) {
         return(-Inf)
       }
-      if (oh_collides(oh1_t, oh_L)) {
+      if (!is_first_tile && (oh1_t %in% HOMOPOLYMER_4NT)) {
         return(-Inf)
       }
-      if (oh_collides(oh1_t, oh4)) {
+      if (!is_last_tile && (oh2_t %in% HOMOPOLYMER_4NT)) {
         return(-Inf)
       }
-      if (oh_collides(oh2_t, oh3)) {
+
+      # Collision checks — skip for gene-edge OHs.
+      # First tile's oh1 IS oh_L (gene start), so oh1==oh_L is expected.
+      # Last tile's oh2 is gene-end derived, skip collision checks for it.
+      if (!is_first_tile && oh_collides(oh1_t, oh_L)) {
+        return(-Inf)
+      }
+      if (!is_first_tile && oh_collides(oh1_t, oh4)) {
+        return(-Inf)
+      }
+      if (!is_last_tile && oh_collides(oh2_t, oh3)) {
         return(-Inf)
       }
       for (sb_oh in sb_ohs) {
-        if (oh_collides(oh1_t, sb_oh) || oh_collides(oh2_t, sb_oh)) {
+        if (!is_first_tile && oh_collides(oh1_t, sb_oh)) {
+          return(-Inf)
+        }
+        if (!is_last_tile && oh_collides(oh2_t, sb_oh)) {
           return(-Inf)
         }
       }
@@ -4453,20 +4475,25 @@ search_tile_boundaries_mc <- function(cds, sb_positions,
     cds, sb_positions, oh_L, oh3, oh4, bsai_matrix, bsmbi_matrix,
     max_mutable_nt, min_mutable_nt, overlap_codons
   )
-  # Extract internal boundaries (codon positions between tiles)
-  # These are (end_codon - overlap_codons) for non-last tiles
+  # Extract internal boundaries (codon positions between tiles).
+  # The core boundary between tile ti and ti+1 is at start_codon[ti+1] - 1
+  # (the last codon of the non-overlapped region of tile ti).
   init_boundaries <- integer(0)
   if (nrow(init_tiles) >= 2L) {
-    for (ti in seq_len(nrow(init_tiles) - 1L)) {
-      # Core end of tile ti (before overlap)
-      core_end <- init_tiles$end_codon[ti] - overlap_codons
-      if (core_end <= 0L) core_end <- init_tiles$end_codon[ti]
-      # Snap to the nearest valid boundary
-      dists <- abs(valid_boundaries - core_end)
-      if (length(dists) > 0L) {
-        closest <- valid_boundaries[which.min(dists)]
-        if (!(closest %in% init_boundaries)) {
-          init_boundaries <- c(init_boundaries, closest)
+    for (ti in 2L:nrow(init_tiles)) {
+      core_boundary <- init_tiles$start_codon[ti] - 1L
+      if (core_boundary > 0L && core_boundary < n_codons) {
+        # Snap to nearest valid boundary if exact position isn't valid
+        if (core_boundary %in% valid_boundaries) {
+          init_boundaries <- c(init_boundaries, core_boundary)
+        } else {
+          dists <- abs(valid_boundaries - core_boundary)
+          if (length(dists) > 0L) {
+            closest <- valid_boundaries[which.min(dists)]
+            if (!(closest %in% init_boundaries)) {
+              init_boundaries <- c(init_boundaries, closest)
+            }
+          }
         }
       }
     }
