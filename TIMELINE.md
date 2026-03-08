@@ -3,7 +3,7 @@
 
 # Project Timeline
 
-> Auto-generated on 2026-03-07 20:35:18 | 211 commits | 2026-01-29 to 2026-03-07
+> Auto-generated on 2026-03-07 20:39:42 | 212 commits | 2026-01-29 to 2026-03-07
 
 <!-- MANUAL_MILESTONES_START -->
 ## Milestones
@@ -28,6 +28,7 @@
 
 ### 2026-03-07
 
+- notebook: Retroactive lab notebook (22 entries, Jan 29 - Mar 7)
 - notebook: Initialize lab notebook for dms-gg-oligo-pipeline
 - Add assembly reports from 260307 hard-blacklist scoring runs
 - Replace soft penalties with hard blacklists in tile boundary scoring
