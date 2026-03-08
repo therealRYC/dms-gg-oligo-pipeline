@@ -280,7 +280,7 @@ Two major efforts: flexible downstream cassette support and first real-gene debu
 
 ### Entry 12 — 2026-02-26 | session: Architecture day — OOGGA scoring + tile-boundary SBs + HF set fix
 
-**PRs:** #24, #25, #26, #27, #28, #29 | **Commits:** `75e6bc1`..`1891deb` | **Bugs fixed:** F16
+**PRs:** #24, #25, #26, #27, #28, #29 | **Commits:** `75e6bc1`..`1891deb` | **Bugs fixed:** F15 (eliminated), F16
 
 Most productive day of the project — 6 PRs merged implementing three major architectural changes, using parallel worktree development.
 
