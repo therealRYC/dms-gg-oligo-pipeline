@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-03-06 — Switch to hybrid plan_assembly() (tile-first DP + constrained SB DP)
+# Last updated: 2026-03-07 — oh3/oh4 selected before tile DP (constrained-first ordering)
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
