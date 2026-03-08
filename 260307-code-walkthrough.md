@@ -642,9 +642,33 @@ When WT gene blocks exceed the 1800 bp synthesis limit, they're split into "supe
 
 The pipeline uses a **hybrid approach**:
 1. **Tile-first DP**: Find optimal tile boundaries for the entire gene
-2. **Constrained SB DP**: Within the space between tiles, find optimal split points for oversized blocks
+2. **Constrained SB DP**: Find optimal split points for oversized blocks, **constrained to tile boundaries within the gene region**
 
-SB junction overhangs are derived from the gene sequence at the split position. The SB DP uses the same scoring formula (P_fid × P_eff) and applies collision checks to ensure SB junction overhangs don't collide with tile boundary overhangs.
+**Critical constraint**: SB boundaries within the gene are restricted to tile `end_nt` positions. This is enforced in `search_superblock_boundaries_dp()` via the `allowed_gene_positions` parameter:
+
+```r
+# In plan_assembly():
+tile_end_positions <- tiles$end_nt[-n_tiles]
+
+sb_result <- search_superblock_boundaries_dp(
+  ...
+  allowed_gene_positions = tile_end_positions
+)
+
+# Inside search_superblock_boundaries_dp(), boundary candidates are filtered:
+if (p <= gene_len) {
+  if ((p %% 3L) != 0L) next                                                  # codon boundary
+  if (!is.null(allowed_gene_pos_set) && !(p %in% allowed_gene_pos_set)) next  # tile boundary
+}
+```
+
+This means each superblock is a **contiguous group of tiles**. The constraint provides two benefits:
+- **Overhang diversity**: tiles are spaced ~240 nt apart, so gene-derived overhangs at tile boundaries are naturally different 4-mers — avoiding the collision problem where a naive SB DP would repeatedly land on the same high-scoring 4-mer.
+- **Clean mapping**: each SB maps to a range of tiles, simplifying gene block design in `09_wt_geneblock_design.R`.
+
+Positions in the downstream cassette (past `gene_len`) remain **unrestricted** — they can split at any nucleotide position with a high-scoring overhang.
+
+SB junction overhangs are derived from the gene sequence at the split position. The SB DP uses the same scoring formula (P_fid × P_eff) and applies collision checks to ensure SB junction overhangs don't collide with tile boundary overhangs, oh3, oh4, or each other.
 
 #### `plan_assembly()` — Master Orchestrator
 
@@ -938,7 +962,7 @@ This accounts for WT controls (1 per position) and optional synonymous variants.
 **Check 7 (single codon change)** excludes WT controls (their codon IS the WT codon by design) and verifies that the recorded `wt_codon` matches the actual gene codon at that position.
 
 **Things to verify:**
-- Check 10 uses a fidelity threshold of 0.80 (hardcoded), which is different from the config's `overhang_fidelity_threshold` (default 0.95). The QC check is more lenient — it flags truly problematic overhangs rather than just non-ideal ones.
+- Check 10 uses an internal fidelity threshold of 0.80 (hardcoded in `SET_FIDELITY_WARNING_THRESHOLD`). This flags truly problematic overhangs rather than just non-ideal ones.
 - Check 13 (reaction fidelity) uses a minimum threshold of 0.80 for the entire SET fidelity (product of per-overhang fidelities). This is reasonable — even with 6 overhangs in a reaction, each would need ~0.97 individual fidelity for the set to be ≥0.80.
 
 ---

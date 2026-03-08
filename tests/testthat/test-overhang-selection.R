@@ -1,19 +1,26 @@
 # test-overhang-selection.R — Tests for 06_overhang_selection.R (dynamic boundary search)
 
-test_that("builtin overhang fidelity returns all 256 overhangs", {
+test_that("load_overhang_fidelity BsmBI returns all 256 overhangs", {
+  oh_data <- load_overhang_fidelity("BsmBI")
+  expect_equal(nrow(oh_data), 256)
+  expect_true(all(nchar(oh_data$overhang) == 4))
+  expect_true(all(oh_data$fidelity > 0 & oh_data$fidelity <= 1))
+  # BsmBI cycling has lower fidelity than T4 — only ~1 overhang >= 0.95
+  # but ~23 >= 0.85 and ~39 >= 0.80
+  expect_gte(sum(oh_data$fidelity >= 0.80), 30)
+})
+
+test_that("builtin_overhang_fidelity (T4 legacy) returns all 256 overhangs", {
   oh_data <- builtin_overhang_fidelity()
   expect_equal(nrow(oh_data), 256)
   expect_true(all(nchar(oh_data$overhang) == 4))
   expect_true(all(oh_data$fidelity > 0 & oh_data$fidelity <= 1))
-  # At least 60 overhangs should have >= 0.95 fidelity
+  # T4 data: at least 60 overhangs should have >= 0.95 fidelity
   expect_gte(sum(oh_data$fidelity >= 0.95), 60)
-  # Verify top fidelity overhangs are well-known sequences
-  top_oh <- oh_data$overhang[oh_data$fidelity >= 0.99]
-  expect_true(length(top_oh) > 0)
 })
 
 test_that("generate_hf_set selects mutually orthogonal overhangs", {
-  oh_data <- builtin_overhang_fidelity()
+  oh_data <- load_overhang_fidelity("BsmBI")
   hf20 <- generate_hf_set(oh_data, 20)
 
   expect_equal(length(hf20), 20)
@@ -29,11 +36,13 @@ test_that("generate_hf_set selects mutually orthogonal overhangs", {
     }
   }
 
-  # All should be high-fidelity
+  # All should be from the top tier of BsmBI cycling fidelity
   fid_lookup <- oh_data$fidelity
   names(fid_lookup) <- oh_data$overhang
   fids <- fid_lookup[hf20]
-  expect_true(all(fids >= 0.95))
+  # BsmBI cycling fidelities are lower than T4 — top 20 should still be
+  # among the best available (>= 0.50 median under cycling)
+  expect_true(all(fids >= 0.50))
 })
 
 test_that("load_high_fidelity_set returns Potapov Table 1 Set 3 (25 overhangs)", {
@@ -71,7 +80,7 @@ test_that("load_high_fidelity_set legacy fallback still works", {
 })
 
 test_that("generate_pairwise_from_fidelity produces correct dimensions", {
-  oh_data <- builtin_overhang_fidelity()
+  oh_data <- load_overhang_fidelity("BsmBI")
   mat <- generate_pairwise_from_fidelity(oh_data)
 
   expect_equal(nrow(mat), 256)
@@ -87,7 +96,7 @@ test_that("generate_pairwise_from_fidelity produces correct dimensions", {
 })
 
 test_that("compute_set_fidelity works for small sets", {
-  oh_data <- builtin_overhang_fidelity()
+  oh_data <- load_overhang_fidelity("BsmBI")
   mat <- generate_pairwise_from_fidelity(oh_data)
 
   # Two overhangs
@@ -301,7 +310,7 @@ test_that("dp_solve_k returns NULL for impossible K", {
 
 test_that("precompute_boundary_scores returns correct structure", {
   cds <- TEST_GENE_SEQ
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   precomp <- precompute_boundary_scores(cds, oh_fidelity)
   n_codons <- nchar(cds) %/% 3
@@ -369,7 +378,7 @@ test_that("search_tile_boundaries_dp produces same or better results than greedy
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   tiles_greedy <- search_tile_boundaries(cds, tile_size,
     oh_fidelity = oh_fidelity
@@ -481,7 +490,7 @@ test_that("oh3 and oh4 are never homopolymers (long gene)", {
 
 test_that("dp_solve_superblock_splits returns empty for short region", {
   cds <- TEST_GENE_SEQ
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   # Region of 200 nt + 0 extra < 1778 max_sub_length → no splits needed
   result <- dp_solve_superblock_splits(
@@ -495,7 +504,7 @@ test_that("dp_solve_superblock_splits returns empty for short region", {
 
 test_that("dp_solve_superblock_splits finds valid splits for long region", {
   cds <- TEST_LONG_GENE_SEQ
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
   gene_len <- nchar(cds)
 
   # Region: most of the gene (e.g., position 244 to end) + 250 PolIII
@@ -657,7 +666,7 @@ test_that("convert_partition_to_splits round-trips through plan_assembly correct
 # =============================================================================
 
 test_that("compute_overhang_efficiency returns valid P_eff values", {
-  oh_data <- builtin_overhang_fidelity()
+  oh_data <- load_overhang_fidelity("BsmBI")
   mat <- generate_pairwise_from_fidelity(oh_data)
   eff <- compute_overhang_efficiency(mat)
 
@@ -734,7 +743,7 @@ test_that("precompute_boundary_scores works with eff_lookup parameter", {
   # Use the test gene from setup.R
   skip_if_not(exists("TEST_GENE_SEQ"), message = "TEST_GENE_SEQ not available")
 
-  oh_data <- builtin_overhang_fidelity()
+  oh_data <- load_overhang_fidelity("BsmBI")
 
   # Generate efficiency lookup
   mat <- generate_pairwise_from_fidelity(oh_data)

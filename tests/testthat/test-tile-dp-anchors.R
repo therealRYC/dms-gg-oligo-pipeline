@@ -40,7 +40,7 @@ TEST_600NT_GENE <- paste0(
 
 test_that("sb_blacklist excludes boundaries where oh2 matches", {
   cds <- TEST_600NT_GENE
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   # Run without blacklist to find what boundaries are chosen
   suppressMessages({
@@ -89,7 +89,7 @@ test_that("sb_blacklist excludes boundaries where oh2 matches", {
 
 test_that("sb_blacklist blocks oh1 too (not just oh2)", {
   cds <- TEST_600NT_GENE
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   # Run without blacklist first
   suppressMessages({
@@ -133,7 +133,7 @@ test_that("sb_blacklist blocks oh1 too (not just oh2)", {
 
 test_that("precompute_boundary_scores respects blacklisted_oh1", {
   cds <- TEST_600NT_GENE
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   # Pick an oh1 that appears at a known position (codon boundary 50 -> nt 151)
   b <- 50L
@@ -297,7 +297,7 @@ test_that("search_tile_boundaries_dp without new params works as before", {
 
 test_that("precompute_boundary_scores without new params works as before", {
   cds <- TEST_GENE_SEQ
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   # Call with NO blacklisted_oh1 — should work identically to before
   suppressMessages({

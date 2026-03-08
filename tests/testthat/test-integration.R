@@ -22,7 +22,6 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
     "barcode_gc_range: [0.25, 0.75]",
     "barcode_max_homopolymer: 4",
     "barcodes_per_variant: 1",
-    "overhang_fidelity_threshold: 0.95",
     "search_window_K: 15",
     "auto_domesticate: true",
     "paqci_star2: AGTC",
@@ -73,7 +72,6 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
     max_mutable_nt = tile_size,
     max_block_length = cfg$max_geneblock_length,
     config = list(
-      fidelity_threshold = cfg$overhang_fidelity_threshold,
       search_window_K = cfg$search_window_K
     )
   )
@@ -240,7 +238,6 @@ test_that("full pipeline runs on long test gene with superblocking", {
     "barcode_gc_range: [0.25, 0.75]",
     "barcode_max_homopolymer: 4",
     "barcodes_per_variant: 1",
-    "overhang_fidelity_threshold: 0.95",
     "search_window_K: 15",
     "auto_domesticate: true",
     "paqci_star2: AGTC",
@@ -289,7 +286,6 @@ test_that("full pipeline runs on long test gene with superblocking", {
     max_mutable_nt = tile_size,
     max_block_length = cfg$max_geneblock_length,
     config = list(
-      fidelity_threshold = cfg$overhang_fidelity_threshold,
       search_window_K = cfg$search_window_K
     )
   )
@@ -443,7 +439,6 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
     "barcode_gc_range: [0.25, 0.75]",
     "barcode_max_homopolymer: 4",
     "barcodes_per_variant: 1",
-    "overhang_fidelity_threshold: 0.95",
     "search_window_K: 15",
     "auto_domesticate: true",
     "paqci_star2: AGTC",
@@ -496,7 +491,6 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
     max_mutable_nt = tile_size,
     max_block_length = cfg$max_geneblock_length,
     config = list(
-      fidelity_threshold = cfg$overhang_fidelity_threshold,
       search_window_K = cfg$search_window_K
     )
   )
@@ -638,7 +632,6 @@ test_that("gene_cds config option works as alternative to gene_fasta", {
     "min_hamming_distance: 3",
     "barcode_prefix_length: 12",
     "barcodes_per_variant: 1",
-    "overhang_fidelity_threshold: 0.95",
     "auto_domesticate: true",
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",

@@ -117,13 +117,13 @@ PALINDROMIC_4NT <- c(
   "GATC", "GTAC", "GCGC", "GGCC"
 )
 
-# --- Overhang Fidelity Threshold ---
-# Based on NEB Ligase Fidelity data (Potapov et al. 2018, 37C, 18h)
-# Fidelity = M[X][RC(X)] / sum(M[X][*]) (correct Watson-Crick pairing)
-# 0.95 threshold gives ~117 high-fidelity overhangs
-# 0.90 threshold gives ~186 overhangs
-# 0.85 threshold gives ~224 overhangs
-DEFAULT_FIDELITY_THRESHOLD <- 0.95
+# --- Set Fidelity Warning Threshold (internal safety net) ---
+# Used to warn when a tile reaction's set fidelity is unexpectedly low.
+# Under BsmBI cycling conditions (Pryor et al. 2020), set fidelity for
+# 3-5 overhang reactions is typically ~1.0. A threshold of 0.80 catches
+# genuinely problematic overhang combinations without false alarms.
+# This is NOT user-configurable — it's an internal diagnostic threshold.
+SET_FIDELITY_WARNING_THRESHOLD <- 0.80
 
 # --- Overhang Scoring (BUG-008 fix) ---
 # Scoring formula: Score = P_fid_bsmbi(oh) * P_eff_bsmbi(oh)

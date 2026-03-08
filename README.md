@@ -82,7 +82,6 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 | `boundary_method` | `"dp"` | `"dp"` (global optimum) or `"greedy"` (local search) |
 | `multi_k_search` | `true` | Try multiple tile counts to find best overhang quality |
 | `dp_k_range` | 5 | Search K_ideal +/- this many tile counts; stops early when gain < 0.5% |
-| `overhang_fidelity_threshold` | 0.95 | Minimum fidelity for auto-selected overhangs |
 | `paqci_star2` | *(required)* | 4-nt PaqCI overhang at the 5' end of the insert (PaqCI\*\*). **Must match your destination vector.** |
 | `paqci_star1` | *(required)* | 4-nt PaqCI overhang at the 3' end of the insert (PaqCI\*). **Must match your destination vector.** |
 | `auto_domesticate` | `true` | Automatically apply silent mutations to remove enzyme sites |

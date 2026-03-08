@@ -6,7 +6,7 @@
 
 test_that("find_cassette_split_points returns empty for small cassette", {
   small_cassette <- paste(rep("A", 500), collapse = "")
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   result <- find_cassette_split_points(
     cassette_seq = small_cassette,
@@ -23,7 +23,7 @@ test_that("find_cassette_split_points splits a 2200 nt cassette into 2 fragments
   bases <- c("A", "C", "G", "T")
   cassette <- paste(sample(bases, 2200, replace = TRUE), collapse = "")
 
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   result <- find_cassette_split_points(
     cassette_seq = cassette,
@@ -54,7 +54,7 @@ test_that("find_cassette_split_points handles a 4000 nt cassette", {
   bases <- c("A", "C", "G", "T")
   cassette <- paste(sample(bases, 4000, replace = TRUE), collapse = "")
 
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   result <- find_cassette_split_points(
     cassette_seq = cassette,
@@ -86,7 +86,7 @@ test_that("build_cassette_subblocks produces valid BsmBI blocks", {
   bases <- c("A", "C", "G", "T")
   cassette <- paste(sample(bases, 2200, replace = TRUE), collapse = "")
 
-  oh_fidelity <- builtin_overhang_fidelity()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   splits <- find_cassette_split_points(
     cassette_seq = cassette,

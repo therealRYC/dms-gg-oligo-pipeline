@@ -50,10 +50,14 @@ POTAPOV_TABLE1_SET3_25 <- c(
 # DATA LOADING
 # =============================================================================
 
-#' Built-in fidelity data for all 256 4-nt overhangs
+#' Built-in T4 ligase fidelity data for all 256 4-nt overhangs (legacy)
 #'
 #' Data from Potapov et al. 2018 (T4 DNA Ligase, 37C, 18h incubation).
 #' Fidelity = M[X][RC(X)] / sum(M[X][*]) — correct Watson-Crick pairing.
+#'
+#' NOTE: This is legacy T4 data retained as an optional fallback. The pipeline
+#' defaults to BsmBI cycling data (Pryor et al. 2020) via load_overhang_fidelity().
+#' T4 fidelity values are substantially higher than BsmBI cycling (median 0.94 vs 0.64).
 #'
 #' @return Data frame with overhang and fidelity columns (256 rows, sorted by fidelity desc)
 builtin_overhang_fidelity <- function() {
@@ -2835,7 +2839,7 @@ sb_dp_to_partition <- function(sb_result, tiles, gene_len, polIII_len,
 #' @param polIII PolIII promoter sequence
 #' @param max_mutable_nt Max mutable region in nt (from compute_max_tile_size)
 #' @param max_block_length Max synthesis length (default 1800)
-#' @param config List with fidelity_threshold, manual_oh3, manual_oh4,
+#' @param config List with manual_oh3, manual_oh4,
 #'   search_window_K, min_mutable_codons
 #' @param downstream_cassette Full downstream cassette sequence (intergene + polIII).
 #'   When NULL (default), uses polIII only — backward compatible.
@@ -2850,7 +2854,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   polIII_len <- if (!is.null(downstream_cassette)) nchar(downstream_cassette) else nchar(polIII)
 
   # Unpack config with defaults
-  fidelity_threshold <- config$fidelity_threshold %||% DEFAULT_FIDELITY_THRESHOLD
   manual_oh3 <- config$manual_oh3
   manual_oh4 <- config$manual_oh4
   search_window_K <- config$search_window_K %||% 15L
@@ -3502,18 +3505,18 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   reaction_fidelity_df <- do.call(rbind, reaction_fidelity)
   rownames(reaction_fidelity_df) <- NULL
 
-  # Warn about low-fidelity reactions
-  low_fid <- reaction_fidelity_df$set_fidelity < fidelity_threshold
+  # Warn about low-fidelity reactions (internal safety net)
+  low_fid <- reaction_fidelity_df$set_fidelity < SET_FIDELITY_WARNING_THRESHOLD
   if (any(low_fid)) {
     n_low <- sum(low_fid)
     min_fid <- min(reaction_fidelity_df$set_fidelity)
     cli::cli_alert_warning(paste0(
-      n_low, " reaction(s) below fidelity threshold (",
-      fidelity_threshold, "). Min: ", round(min_fid, 4)
+      n_low, " reaction(s) below set fidelity warning threshold (",
+      SET_FIDELITY_WARNING_THRESHOLD, "). Min: ", round(min_fid, 4)
     ))
   } else {
     cli::cli_alert_success(paste0(
-      "All ", nrow(reaction_fidelity_df), " reactions above fidelity threshold. ",
+      "All ", nrow(reaction_fidelity_df), " reactions above set fidelity threshold. ",
       "Min: ", round(min(reaction_fidelity_df$set_fidelity), 4)
     ))
   }
@@ -3603,7 +3606,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
 #' @param polIII PolIII promoter sequence
 #' @param max_mutable_nt Max mutable region in nt (from compute_max_tile_size)
 #' @param max_block_length Max synthesis length (default 1800)
-#' @param config List with fidelity_threshold, manual_oh3, manual_oh4,
+#' @param config List with manual_oh3, manual_oh4,
 #'   dp_k_range, overlap_codons, min_mutable_nt, min_geneblock_length
 #' @param downstream_cassette Full downstream cassette sequence (intergene + polIII).
 #'   If NULL, polIII is used directly as the cassette.
@@ -3619,7 +3622,6 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
   cassette_seq <- if (!is.null(downstream_cassette)) downstream_cassette else polIII
 
   # Unpack config with defaults
-  fidelity_threshold <- config$fidelity_threshold %||% DEFAULT_FIDELITY_THRESHOLD
   manual_oh3 <- config$manual_oh3
   manual_oh4 <- config$manual_oh4
   dp_k_range <- config$dp_k_range %||% 5L
@@ -4179,18 +4181,18 @@ plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
   reaction_fidelity_df <- do.call(rbind, reaction_fidelity)
   rownames(reaction_fidelity_df) <- NULL
 
-  # Warn about low-fidelity reactions
-  low_fid <- reaction_fidelity_df$set_fidelity < fidelity_threshold
+  # Warn about low-fidelity reactions (internal safety net)
+  low_fid <- reaction_fidelity_df$set_fidelity < SET_FIDELITY_WARNING_THRESHOLD
   if (any(low_fid)) {
     n_low <- sum(low_fid)
     min_fid <- min(reaction_fidelity_df$set_fidelity)
     cli::cli_alert_warning(paste0(
-      n_low, " reaction(s) below fidelity threshold (",
-      fidelity_threshold, "). Min: ", round(min_fid, 4)
+      n_low, " reaction(s) below set fidelity warning threshold (",
+      SET_FIDELITY_WARNING_THRESHOLD, "). Min: ", round(min_fid, 4)
     ))
   } else {
     cli::cli_alert_success(paste0(
-      "All ", nrow(reaction_fidelity_df), " reactions above fidelity threshold. ",
+      "All ", nrow(reaction_fidelity_df), " reactions above set fidelity threshold. ",
       "Min: ", round(min(reaction_fidelity_df$set_fidelity), 4)
     ))
   }
@@ -4350,21 +4352,22 @@ select_orthogonal_set <- function(candidates, n) {
 #'
 #' Picks n_additional high-fidelity, mutually orthogonal overhangs that don't
 #' collide with any already-used overhangs (or their reverse complements).
+#' Uses BsmBI cycling fidelity data (Pryor et al. 2020) for ranking.
 #'
 #' @param existing_overhangs Already-used overhangs to exclude
 #' @param n_additional Number of new overhangs needed
-#' @param fidelity_threshold Minimum fidelity score (default 0.90)
 #' @return Character vector of additional overhangs
 select_superblock_overhangs <- function(existing_overhangs,
-                                        n_additional,
-                                        fidelity_threshold = DEFAULT_FIDELITY_THRESHOLD) {
+                                        n_additional) {
   if (n_additional == 0) {
     return(character(0))
   }
 
-  oh_data <- builtin_overhang_fidelity()
+  # Use BsmBI cycling data (default) — sorted by fidelity descending so
+  # select_orthogonal_set picks the best available overhangs
+  oh_data <- load_overhang_fidelity("BsmBI")
   oh_data <- oh_data[order(oh_data$fidelity, decreasing = TRUE), ]
-  candidates <- oh_data$overhang[oh_data$fidelity >= fidelity_threshold]
+  candidates <- oh_data$overhang
 
   used <- character(0)
   for (oh in existing_overhangs) {

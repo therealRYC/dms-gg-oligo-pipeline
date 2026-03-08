@@ -717,7 +717,7 @@ report_config <- function(cfg) {
       "max_oligo_length", "max_geneblock_length",
       "barcode_length", "min_hamming_distance",
       "barcode_prefix_length", "barcodes_per_variant",
-      "overhang_fidelity_threshold", "boundary_method",
+      "boundary_method",
       "multi_k_search", "auto_domesticate"
     ),
     Value = c(
@@ -727,7 +727,6 @@ report_config <- function(cfg) {
       cfg$min_hamming_distance %||% 3,
       cfg$barcode_prefix_length %||% 8,
       cfg$barcodes_per_variant %||% 1,
-      cfg$overhang_fidelity_threshold %||% 0.95,
       cfg$boundary_method %||% "dp",
       cfg$multi_k_search %||% TRUE,
       cfg$auto_domesticate %||% TRUE

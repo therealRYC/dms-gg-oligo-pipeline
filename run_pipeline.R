@@ -190,7 +190,6 @@ assembly_plan <- plan_assembly(
   max_mutable_nt = tile_size,
   max_block_length = cfg$max_geneblock_length,
   config = list(
-    fidelity_threshold = cfg$overhang_fidelity_threshold,
     manual_oh3 = cfg$oh3,
     manual_oh4 = cfg$oh4,
     multi_k = cfg$multi_k_search,
@@ -308,7 +307,6 @@ geneblock_result <- design_wt_geneblocks(
   paqci_star1 = cfg$paqci_star1,
   max_block_length = cfg$max_geneblock_length,
   min_block_length = cfg$min_geneblock_length,
-  fidelity_threshold = cfg$overhang_fidelity_threshold,
   assembly_plan = assembly_plan
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]

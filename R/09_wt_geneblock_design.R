@@ -195,7 +195,6 @@ build_cassette_subblocks <- function(cassette_seq, oh_5, oh_3_final,
 #' @param paqci_star2 PaqCI** overhang (5' end of insert in helper plasmid)
 #' @param paqci_star1 PaqCI* overhang (3' end of insert)
 #' @param max_block_length Maximum gene block synthesis length (default 1800)
-#' @param fidelity_threshold Overhang fidelity threshold for superblock splitting
 #' @param assembly_plan assembly_plan from plan_assembly(); provides pre-computed
 #'   superblock splits (gene-derived, HF-optimized)
 #' @return List with:
@@ -206,7 +205,6 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                                  oh3, oh4, paqci_star2, paqci_star1,
                                  max_block_length = MAX_GENEBLOCK_LENGTH,
                                  min_block_length = MIN_GENEBLOCK_LENGTH,
-                                 fidelity_threshold = DEFAULT_FIDELITY_THRESHOLD,
                                  assembly_plan = NULL) {
   n_tiles <- nrow(tiles)
   gene_len <- nchar(cds)
@@ -1004,7 +1002,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       " nt synthesis limit. Applying superblock splitting..."
     ))
     all_blocks <- apply_superblock_splitting(
-      all_blocks, cds, polIII, oh3, max_block_length, fidelity_threshold
+      all_blocks, cds, polIII, oh3, max_block_length
     )
   } else if (any(over_limit) && use_precomputed_splits) {
     cli::cli_alert_warning(paste0(
@@ -1242,10 +1240,9 @@ recompute_reaction_fidelity <- function(geneblock_result, assembly_plan) {
 #' @param polIII PolIII promoter
 #' @param oh3 Fixed BsmBI overhang
 #' @param max_block_length Max synthesis length
-#' @param fidelity_threshold Overhang fidelity threshold
 #' @return Updated blocks data frame with oversized blocks split
 apply_superblock_splitting <- function(blocks, cds, polIII, oh3,
-                                       max_block_length, fidelity_threshold) {
+                                       max_block_length) {
   new_blocks <- list()
 
   # Collect all existing overhangs for exclusion
@@ -1267,7 +1264,7 @@ apply_superblock_splitting <- function(blocks, cds, polIII, oh3,
     n_junctions <- n_subblocks - 1L
     junction_ohs <- select_superblock_overhangs(
       c(existing_ohs, oh3),
-      n_junctions, fidelity_threshold
+      n_junctions
     )
     existing_ohs <- c(existing_ohs, junction_ohs)
 

@@ -37,7 +37,6 @@ load_config <- function(config_path) {
     barcode_prefix_length = 12L,
     barcode_gc_range = c(0.25, 0.75),
     barcode_max_homopolymer = 4L,
-    overhang_fidelity_threshold = 0.95,
     search_window_K = 15L,
     dp_k_range = 5L,
     boundary_method = "dp",
@@ -72,7 +71,6 @@ load_config <- function(config_path) {
   cfg$barcode_prefix_length <- as.integer(cfg$barcode_prefix_length)
   cfg$barcode_max_homopolymer <- as.integer(cfg$barcode_max_homopolymer)
   cfg$barcode_gc_range <- as.numeric(cfg$barcode_gc_range)
-  cfg$overhang_fidelity_threshold <- as.numeric(cfg$overhang_fidelity_threshold)
   cfg$search_window_K <- as.integer(cfg$search_window_K)
   cfg$dp_k_range <- as.integer(cfg$dp_k_range %||% 5L)
   cfg$boundary_method <- as.character(cfg$boundary_method)
