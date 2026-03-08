@@ -162,6 +162,7 @@ MIN_GENEBLOCK_LENGTH <- 300L   # Twist gene fragment synthesis minimum
 - `AA_TO_CODONS`: Reverse lookup (amino acid → all codons)
 - `PALINDROMIC_4NT`: 16 palindromic 4-mers — hard-blacklisted for freely-chosen overhangs because they enable self-circularization
 - `POLIII_TERM_SEQ`: `"TTTT"` — RNA PolIII terminates at ≥4 T's; barcodes must avoid this
+- `SET_FIDELITY_WARNING_THRESHOLD`: 0.80 — internal safety net for per-reaction set fidelity warnings (not user-configurable)
 - `DEFAULT_BARCODE_LENGTH`: 20 nt
 - `DEFAULT_BARCODES_PER_VARIANT`: 10
 
@@ -672,26 +673,33 @@ SB junction overhangs are derived from the gene sequence at the split position. 
 
 #### `plan_assembly()` — Master Orchestrator
 
-This is the main entry point called from `run_pipeline.R`. It:
+This is the main entry point called from `run_pipeline.R`. It follows a **constrained-first ordering**: fixed overhangs are committed before the tile DP runs, so the DP can route around them.
 
-1. **Loads data**: BsaI/BsmBI pairwise matrices, HF set, fidelity tables
-2. **Iterative tile boundary DP** (up to 5 iterations):
+1. **Load data**: BsaI/BsmBI pairwise matrices, HF set, fidelity tables, efficiency lookup
+2. **Phase 1 — Select fixed overhangs (oh_L, oh3, oh4)**:
+   - `oh_L` = first 4 nt of gene (physical constraint)
+   - `oh3` (BsmBI, same for all tiles): prefer promoter-derived oh3 from the PolIII promoter's terminal 5 nt. If the promoter-derived 4-mer is a homopolymer or palindrome, fall back to highest-scoring overhang by P_fid × P_eff
+   - `oh4` (BsaI, same for all tiles): highest-scoring overhang that doesn't collide with oh_L
+   - oh3 and oh4 do NOT check against oh1/oh2 (which don't exist yet) — the tile DP will blacklist them and route around them
+3. **Phase 2 — Tile boundary DP** (with iterative SB-aware refinement, up to 5 iterations):
+   - Pass oh3 + oh4 (+ RCs) as `sb_blacklist` to the tile DP so no tile boundary lands on these overhangs
    - Run DP to find optimal boundaries
-   - Select oh3/oh4
-   - Trial SB partitioning to check for collisions
+   - Trial SB partitioning to check for collisions between SB junction overhangs and tile oh2 values
    - If collision: blacklist the colliding oh2 and re-run DP
-3. **Select oh3** (BsmBI overhang, same for all tiles):
-   - Prefer promoter-derived oh3 (if the first 4 nt of the PolIII promoter work)
-   - Otherwise, select the highest-scoring overhang that doesn't collide with any tile oh2
-4. **Select oh4** (BsaI overhang, same for all tiles):
-   - Select highest-scoring overhang that doesn't collide with any tile oh1
-5. **Final SB partitioning** and reaction fidelity computation
+4. **Phase 3 — Constrained SB DP** on gene+cassette:
+   - Gene-region SB boundaries constrained to tile `end_nt` positions (as described above)
+   - Cassette-region boundaries unrestricted
+   - Collision checks against tile overhangs, oh3, oh4, and other SB junctions
+5. **Phase 4 — Per-reaction pairwise validation**:
+   - Compute set fidelity for each BsaI and BsmBI reaction
+   - Warn if any reaction falls below `SET_FIDELITY_WARNING_THRESHOLD` (0.80)
 6. Return `assembly_plan` with tiles, oh3, oh4, superblocks, reaction fidelity
 
 **Things to verify:**
-- The iterative SB collision resolution correctly blacklists oh2 values that cause problems, not oh1 values. This is because oh2 is at tile ends (where SB boundaries tend to land), while oh1 is at tile starts.
+- The iterative SB collision resolution (Phase 2) correctly blacklists oh2 values that cause problems, not oh1 values. This is because oh2 is at tile ends (where SB boundaries tend to land), while oh1 is at tile starts.
 - The `oh_collides()` helper checks both identity and RC collision: `oh1 == oh2 || oh1 == RC(oh2)`.
 - `compute_set_fidelity()` computes the Potapov 2018 metric: `set_fidelity = product of per-overhang fidelities`, where each `f(X) = M[X,X] / sum(M[X,Y] for Y in set)`.
+- The constrained-first ordering means oh3 never needs to check against oh2 (the DP avoids oh3), and oh4 never needs to check against oh1 (the DP avoids oh4). This eliminates the iterative oh3/oh4 reselection that was previously needed.
 
 ---
 
