@@ -1,6 +1,6 @@
 # Created: 2026-03-04
-# Last updated: 2026-03-06 — Switch to hybrid plan_assembly() (tile-first DP + constrained SB DP)
-# test-plan-assembly-v2.R — Tests for hybrid assembly planning (plan_assembly)
+# Last updated: 2026-03-07 — Rename from test-plan-assembly-v2.R; oh3/oh4 selected before tile DP
+# test-plan-assembly-hybrid.R — Tests for hybrid assembly planning (plan_assembly)
 
 # =============================================================================
 # SHORT GENE (no superblocks needed)
