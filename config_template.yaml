@@ -124,10 +124,12 @@ include_synonymous: false                  # Add synonymous codon controls (defa
 # --- Enzyme Site Domestication ---
 auto_domesticate: true                     # Automatically apply silent mutations to remove sites
 
-# --- Assembly Simulation (optional) ---
-simulate_assembly: false                   # Run in-silico GG assembly simulation after design.
+# --- Assembly Simulation ---
+simulate_assembly: true                    # Run in-silico GG assembly simulation after design.
                                            # Verifies that oligos + gene blocks assemble correctly
                                            # by simulating BsaI and BsmBI digestion + ligation.
+                                           # STRONGLY RECOMMENDED to leave enabled — catches overhang
+                                           # collisions, missing blocks, and assembly errors.
 simulation_samples_per_tile: 1             # Number of randomly sampled variants per tile to simulate.
                                            # Higher values increase coverage but take longer.
 

@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-04 — Replace synthetic pairwise matrices with real Pryor 2020 data
+# Last updated: 2026-03-05 — Hard codon constraint, remove anchors, SB overlap, cassette pass-through
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -644,6 +644,9 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
 #' @param blacklisted_oh2 Character vector of oh2 sequences to invalidate
 #'   (OPT-005: SB-aware blacklisting). Boundaries where oh2 is in this set
 #'   are marked invalid. Default NULL (no blacklisting).
+#' @param blacklisted_oh1 Character vector of oh1 sequences to invalidate
+#'   (SB boundary collision prevention). Boundaries where oh1 matches any
+#'   element (identity or RC) are marked invalid. Default NULL (no blacklisting).
 #' @param overlap_codons Integer, tile overlap (rightward extension). oh2 is
 #'   computed at the EXTENDED tile end (b + overlap_codons), not at the core
 #'   boundary (b). Default 0 (no overlap, oh2 at core boundary).
@@ -651,6 +654,7 @@ search_tile_boundaries <- function(cds, max_mutable_nt,
 precompute_boundary_scores <- function(cds, oh_fidelity,
                                        eff_lookup = NULL,
                                        blacklisted_oh2 = NULL,
+                                       blacklisted_oh1 = NULL,
                                        overlap_codons = 0L) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
@@ -694,9 +698,26 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
       valid[b] <- FALSE
       next
     }
+    # SB blacklist: oh1 must not collide with any SB boundary overhang
+    # (prevents tile boundary overhangs from reusing SB junction overhangs)
+    if (!is.null(blacklisted_oh1) &&
+      (oh1 %in% blacklisted_oh1 || reverse_complement(oh1) %in% blacklisted_oh1)) {
+      valid[b] <- FALSE
+      next
+    }
     # OPT-005: blacklisted oh2 values (SB boundary collision prevention)
     if (!is.null(blacklisted_oh2) &&
       (oh2 %in% blacklisted_oh2 || reverse_complement(oh2) %in% blacklisted_oh2)) {
+      valid[b] <- FALSE
+      next
+    }
+    # Hard filter: palindromic overhangs cause self-ligation
+    if (oh1 %in% PALINDROMIC_4NT || oh2 %in% PALINDROMIC_4NT) {
+      valid[b] <- FALSE
+      next
+    }
+    # Hard filter: homopolymer overhangs cause slippage during annealing
+    if (oh1 %in% HOMOPOLYMER_4NT || oh2 %in% HOMOPOLYMER_4NT) {
       valid[b] <- FALSE
       next
     }
@@ -707,27 +728,11 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
     oh1_hf[b] <- oh1_in
     oh2_hf[b] <- oh2_in
 
-    # Base scores: P_fid * P_eff (both from BsmBI cycling, BUG-008)
+    # Score = P_fid * P_eff for each overhang (both from BsmBI cycling, BUG-008)
     oh1_base <- overhang_score(oh1, fid_lookup, eff_lookup)
     oh2_base <- overhang_score(oh2, fid_lookup, eff_lookup)
 
-    # Low-fidelity safety floor: penalize boundaries where either overhang
-    # has very low individual fidelity (< 0.50 under BsmBI cycling conditions).
-    # Catches truly awful CG-rich overhangs (CGCC: 0.35, CCGC: 0.38).
-    fid_penalty <- 0.0
-    oh1_ind_fid <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else 0.5
-    oh2_ind_fid <- if (oh2 %in% names(fid_lookup)) unname(fid_lookup[oh2]) else 0.5
-    if (oh1_ind_fid < 0.50 || oh2_ind_fid < 0.50) fid_penalty <- -5.0
-
-    # Palindrome penalty (OPT-003): palindromic overhangs enable self-ligation
-    # and inverted insertion. Heavy penalty but not impossible — a gene ending
-    # in TAA forces oh2 = TTAA (palindrome), which we can't avoid.
-    palindrome_penalty <- 0.0
-    if (oh1 %in% PALINDROMIC_4NT || oh2 %in% PALINDROMIC_4NT) {
-      palindrome_penalty <- -10.0
-    }
-
-    scores[b] <- oh1_base + oh2_base + fid_penalty + palindrome_penalty
+    scores[b] <- oh1_base + oh2_base
   }
 
   precomp_elapsed <- (proc.time() - precomp_start)[["elapsed"]]
@@ -867,6 +872,11 @@ dp_solve_k <- function(K, n_codons, min_codons, max_codons,
 #' @param overlap_codons Number of overlap codons between adjacent tiles
 #' @param eff_lookup Named numeric vector (overhang -> efficiency). If NULL,
 #'   efficiency is treated as 1.0 for all overhangs.
+#' @param blacklisted_oh2 Character vector of oh2 overhangs to exclude from
+#'   tile boundaries (OPT-005 legacy). Default NULL.
+#' @param sb_blacklist Character vector of SB boundary overhangs to avoid at
+#'   tile boundaries. Merged into both oh1 and oh2 blacklists so that no tile
+#'   boundary reuses an SB junction overhang. Default NULL.
 #' @return Data frame with tile info (same format as search_tile_boundaries)
 search_tile_boundaries_dp <- function(cds, max_mutable_nt,
                                       min_mutable_nt = NULL,
@@ -876,7 +886,8 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
                                       k_range = NULL,
                                       overlap_codons = 4L,
                                       eff_lookup = NULL,
-                                      blacklisted_oh2 = NULL) {
+                                      blacklisted_oh2 = NULL,
+                                      sb_blacklist = NULL) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
 
@@ -930,11 +941,18 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
     ))
   }
 
+  # Merge SB blacklist into oh2 blacklist (both prevent those overhangs at
+  # tile boundaries). SB boundary overhangs must not appear as oh1 or oh2 at
+  # any tile boundary, so we pass sb_blacklist as blacklisted_oh1 separately.
+  combined_oh2_blacklist <- unique(c(blacklisted_oh2, sb_blacklist))
+  if (length(combined_oh2_blacklist) == 0L) combined_oh2_blacklist <- NULL
+
   # Precompute scores for all boundary positions
   # Pass overlap_codons so oh2 is computed at the EXTENDED tile end
   precomp <- precompute_boundary_scores(cds, oh_fidelity,
     eff_lookup = eff_lookup,
-    blacklisted_oh2 = blacklisted_oh2,
+    blacklisted_oh2 = combined_oh2_blacklist,
+    blacklisted_oh1 = sb_blacklist,
     overlap_codons = overlap_codons
   )
 
@@ -1101,6 +1119,700 @@ search_tile_boundaries_dp <- function(cds, max_mutable_nt,
   ))
 
   tiles
+}
+
+#' Search tile boundaries within a single superblock
+#'
+#' Wrapper around search_tile_boundaries_dp() for use in the two-pass
+#' SB-first assembly planning. Operates on a subsequence of the gene
+#' (one superblock's coding region).
+#'
+#' @param cds Full domesticated gene CDS (the SB's portion is extracted)
+#' @param sb_start_nt 1-based start position of this SB in the gene (nt)
+#' @param sb_end_nt 1-based end position of this SB in the gene (nt)
+#' @param max_mutable_nt Max mutable region size from compute_max_tile_size()
+#' @param sb_blacklist Character vector of ALL SB boundary overhangs to avoid
+#'   at internal tile boundaries. Default NULL.
+#' @param ... Additional arguments passed to search_tile_boundaries_dp()
+#' @return Data frame of tiles (same format as search_tile_boundaries_dp),
+#'   with start_codon/end_codon/start_nt/end_nt adjusted to gene-level
+#'   coordinates.
+search_tile_boundaries_within_sb <- function(cds, sb_start_nt, sb_end_nt,
+                                             max_mutable_nt,
+                                             sb_blacklist = NULL,
+                                             ...) {
+  # Extract the SB's portion of the gene
+  sb_seq <- substring(cds, sb_start_nt, sb_end_nt)
+
+  # Run tile DP on the subsequence, passing blacklist info
+  tiles <- search_tile_boundaries_dp(
+    cds = sb_seq,
+    max_mutable_nt = max_mutable_nt,
+    sb_blacklist = sb_blacklist,
+    ...
+  )
+
+  # Adjust coordinates back to gene-level (SB subsequence starts at
+  # sb_start_nt in the full gene, so offset all positions accordingly)
+  offset_nt <- sb_start_nt - 1L
+  offset_codons <- offset_nt %/% 3L
+  tiles$start_codon <- tiles$start_codon + offset_codons
+  tiles$end_codon <- tiles$end_codon + offset_codons
+  tiles$start_nt <- tiles$start_nt + offset_nt
+  tiles$end_nt <- tiles$end_nt + offset_nt
+
+  tiles
+}
+
+# =============================================================================
+# SUPERBLOCK BOUNDARY SEARCH (SB-FIRST DP)
+# =============================================================================
+
+#' Solve the SB boundary placement DP for a fixed number of boundaries K
+#'
+#' Finds the K boundary positions (in nucleotide coordinates) that maximize
+#' total boundary overhang score, subject to segment length constraints.
+#' This is the nucleotide-level analog of dp_solve_k (which works in codons).
+#'
+#' @param K Number of internal boundaries (superblocks = K + 1)
+#' @param total_len Total sequence length in nucleotides
+#' @param min_len Minimum segment length in nucleotides
+#' @param max_len Maximum segment length in nucleotides
+#' @param boundary_scores Numeric vector of scores per nucleotide position
+#'   (length = total_len). Score at position p is for placing a boundary after
+#'   nucleotide p (the overhang is derived from nts p-3..p).
+#' @param boundary_valid Logical vector of valid positions (length = total_len)
+#' @return List with boundaries (integer vector of nt positions) and total_score,
+#'   or NULL if no feasible solution exists
+sb_dp_solve_k <- function(K, total_len, min_len, max_len,
+                          boundary_scores, boundary_valid) {
+  if (K == 0L) {
+    return(NULL)
+  }
+
+  # Early feasibility check: need at least (K+1)*min_len nucleotides
+  if ((K + 1L) * min_len > total_len) {
+    return(NULL)
+  }
+
+  # dp_prev[p] = best total score with previous boundary layer ending at nt p
+  dp_prev <- rep(-Inf, total_len)
+  # Parent pointers: parent[k, p] = optimal predecessor position for boundary k at p
+  parent <- matrix(NA_integer_, nrow = K, ncol = total_len)
+
+  # Layer k=1: first boundary, first segment spans [1..p]
+  lo_p <- min_len
+  hi_p <- min(max_len, total_len - 1L)
+  if (lo_p <= hi_p) {
+    for (p in lo_p:hi_p) {
+      if (!boundary_valid[p]) next
+      dp_prev[p] <- boundary_scores[p]
+    }
+  }
+
+  # Layers k=2..K
+  if (K >= 2L) {
+    for (k in 2L:K) {
+      dp_curr <- rep(-Inf, total_len)
+
+      lo_p <- k * min_len
+      hi_p <- min(total_len - 1L, total_len - min_len)
+      if (lo_p > hi_p) {
+        dp_prev <- dp_curr
+        next
+      }
+
+      for (p in lo_p:hi_p) {
+        if (!boundary_valid[p]) next
+
+        # Predecessor range: p' must give segment size [min_len, max_len]
+        lo <- max(1L, p - max_len)
+        hi <- p - min_len
+        if (hi < lo) next
+
+        # Scan for best predecessor in [lo, hi]
+        best_score <- -Inf
+        best_pos <- NA_integer_
+        for (pp in lo:hi) {
+          if (dp_prev[pp] > best_score) {
+            best_score <- dp_prev[pp]
+            best_pos <- pp
+          }
+        }
+
+        if (is.finite(best_score)) {
+          dp_curr[p] <- best_score + boundary_scores[p]
+          parent[k, p] <- best_pos
+        }
+      }
+
+      dp_prev <- dp_curr
+    }
+  }
+
+  # Find optimal last boundary: last segment must be [min_len, max_len]
+  best_total <- -Inf
+  best_p <- NA_integer_
+  for (p in seq_len(total_len - 1L)) {
+    last_seg <- total_len - p
+    if (last_seg < min_len || last_seg > max_len) next
+    if (dp_prev[p] > best_total) {
+      best_total <- dp_prev[p]
+      best_p <- p
+    }
+  }
+
+  if (!is.finite(best_total)) {
+    return(NULL)
+  }
+
+  # Backtrack to recover boundary positions
+  boundaries <- integer(K)
+  boundaries[K] <- best_p
+  if (K >= 2L) {
+    for (k in K:2L) {
+      boundaries[k - 1L] <- parent[k, boundaries[k]]
+    }
+  }
+
+  list(boundaries = boundaries, total_score = best_total)
+}
+
+
+#' Refine SB boundary positions to ensure unique overhangs
+#'
+#' Post-processing step after DP finds optimal boundary positions. Iterates
+#' through boundaries left-to-right, and for each boundary whose overhang
+#' collides with an already-committed boundary overhang, searches the valid
+#' range for the best-scoring non-colliding alternative position.
+#'
+#' This is necessary because the DP maximizes total overhang score but has no
+#' inter-boundary uniqueness constraint. Without refinement, all boundaries
+#' can land on positions sharing the same high-scoring 4-mer (e.g., GAAA).
+#'
+#' @param boundary_positions Integer vector of K boundary nt positions from DP
+#' @param full_seq Character: the full sequence (gene + cassette)
+#' @param gene_len Integer: length of gene CDS portion (codon constraint)
+#' @param min_block_length Integer: minimum segment size
+#' @param max_block_length Integer: maximum segment size
+#' @param blacklist_set Character vector of blacklisted overhangs (includes RCs)
+#' @param fid_lookup Named numeric vector: overhang -> fidelity
+#' @param eff_lookup Named numeric vector: overhang -> efficiency
+#' @return List with refined boundary_positions (integer vector) and
+#'   n_unresolved (count of remaining collisions, ideally 0)
+refine_sb_boundaries_unique <- function(
+  boundary_positions,
+  full_seq,
+  gene_len,
+  min_block_length,
+  max_block_length,
+  blacklist_set,
+  fid_lookup,
+  eff_lookup
+) {
+  K <- length(boundary_positions)
+  total_len <- nchar(full_seq)
+
+  if (K <= 1L) {
+    # Single boundary — no collisions possible
+    return(list(boundary_positions = boundary_positions, n_unresolved = 0L))
+  }
+
+  # Check if refinement is even needed
+  ohs <- vapply(boundary_positions, function(p) {
+    substring(full_seq, p - 3L, p)
+  }, character(1))
+
+  has_collision <- FALSE
+  for (i in 2L:K) {
+    for (j in seq_len(i - 1L)) {
+      if (oh_collides(ohs[i], ohs[j])) {
+        has_collision <- TRUE
+        break
+      }
+    }
+    if (has_collision) break
+  }
+
+  if (!has_collision) {
+    return(list(boundary_positions = boundary_positions, n_unresolved = 0L))
+  }
+
+  cli::cli_alert_info("Refining SB boundaries to resolve overhang collisions...")
+
+  refined <- integer(K)
+  # Track committed OHs as a set (both oh and RC)
+  committed_ohs <- character(0)
+  n_unresolved <- 0L
+
+  for (i in seq_len(K)) {
+    p <- boundary_positions[i]
+    oh <- substring(full_seq, p - 3L, p)
+    oh_rc <- reverse_complement(oh)
+
+    # Check if this OH collides with any committed OH
+    collides <- any(oh %in% committed_ohs) || any(oh_rc %in% committed_ohs)
+
+    if (!collides) {
+      # No collision — commit as-is
+      refined[i] <- p
+      committed_ohs <- c(committed_ohs, oh, oh_rc)
+      next
+    }
+
+    # Collision detected — search for best alternative position in valid range
+    # Compute valid range for this boundary based on neighbors
+    prev_end <- if (i == 1L) 0L else refined[i - 1L]
+    # Next boundary: original position (or end of sequence for last boundary)
+    next_point <- if (i < K) boundary_positions[i + 1L] else total_len
+
+    # Left segment [prev_end+1 .. refined[i]] must be in [min, max]
+    lo <- prev_end + min_block_length
+    hi <- prev_end + max_block_length
+
+    # Right segment [refined[i]+1 .. next_point] must be in [min, max]
+    lo <- max(lo, next_point - max_block_length)
+    hi <- min(hi, next_point - min_block_length)
+
+    # Global feasibility: enough room for remaining boundaries
+    hi <- min(hi, total_len - (K - i) * min_block_length - min_block_length)
+
+    # Need at least 4 nt for overhang extraction
+    lo <- max(lo, 4L)
+    if (lo > hi) {
+      # No room to shift — keep original (collision remains)
+      refined[i] <- p
+      committed_ohs <- c(committed_ohs, oh, oh_rc)
+      n_unresolved <- n_unresolved + 1L
+      cli::cli_alert_warning(paste0(
+        "SB boundary ", i, ": no room to shift (range [", lo, ",", hi,
+        "]). Keeping colliding OH=", oh
+      ))
+      next
+    }
+
+    # Score all valid candidates in range, pick best non-colliding one
+    best_alt_p <- NA_integer_
+    best_alt_score <- -Inf
+
+    for (cand in lo:hi) {
+      # Codon constraint within gene portion
+      if (cand <= gene_len && (cand %% 3L) != 0L) next
+
+      cand_oh <- substring(full_seq, cand - 3L, cand)
+
+      # Skip blacklisted or palindromic
+      if (cand_oh %in% blacklist_set) next
+      if (cand_oh %in% PALINDROMIC_4NT) next
+
+      # Skip if collides with any committed OH
+      cand_rc <- reverse_complement(cand_oh)
+      if (any(cand_oh %in% committed_ohs) || any(cand_rc %in% committed_ohs)) next
+
+      score <- overhang_score(cand_oh, fid_lookup, eff_lookup)
+      if (score > best_alt_score) {
+        best_alt_score <- score
+        best_alt_p <- cand
+      }
+    }
+
+    if (!is.na(best_alt_p)) {
+      alt_oh <- substring(full_seq, best_alt_p - 3L, best_alt_p)
+      alt_rc <- reverse_complement(alt_oh)
+      refined[i] <- best_alt_p
+      committed_ohs <- c(committed_ohs, alt_oh, alt_rc)
+      if (best_alt_p != p) {
+        cli::cli_alert_info(paste0(
+          "SB boundary ", i, ": shifted ", p, " -> ", best_alt_p,
+          " (OH: ", oh, " -> ", alt_oh,
+          ", score: ", round(best_alt_score, 3), ")"
+        ))
+      }
+    } else {
+      # No non-colliding alternative found — keep original
+      refined[i] <- p
+      committed_ohs <- c(committed_ohs, oh, oh_rc)
+      n_unresolved <- n_unresolved + 1L
+      cli::cli_alert_warning(paste0(
+        "SB boundary ", i, ": no non-colliding alternative in [", lo, ",", hi,
+        "]. Keeping OH=", oh
+      ))
+    }
+  }
+
+  if (n_unresolved == 0L) {
+    cli::cli_alert_success("All SB boundary collisions resolved by local refinement.")
+  } else {
+    cli::cli_alert_warning(paste0(
+      n_unresolved, " SB boundary collision(s) could not be resolved."
+    ))
+  }
+
+  list(boundary_positions = refined, n_unresolved = n_unresolved)
+}
+
+
+#' Search for optimal superblock boundaries using dynamic programming
+#'
+#' Pass 1 of the two-pass assembly planning refactor. Finds optimal positions
+#' to split the full sequence (gene CDS + downstream cassette) into superblocks,
+#' each within synthesis length limits, maximizing the overhang quality at
+#' each split point.
+#'
+#' The DP operates on nucleotide positions (not codons), but prefers codon
+#' boundaries within the gene portion. Positions in the cassette portion
+#' (past gene_len) have no codon constraint.
+#'
+#' @param full_seq Character: gene CDS + downstream cassette concatenated
+#' @param gene_len Integer: length of gene CDS portion only (for codon
+#'   boundary preference). Set equal to nchar(full_seq) if no cassette.
+#' @param max_block_length Integer: max synthesis length per superblock
+#'   (default 1800, the Twist gene fragment limit)
+#' @param min_block_length Integer: min synthesis length per superblock
+#'   (default 300, the Twist gene fragment minimum)
+#' @param blacklist_ohs Character vector: overhangs to avoid at SB boundaries
+#'   (e.g., oh_L, oh3, oh4, palindromes, homopolymers). Both the overhang and
+#'   its reverse complement are checked.
+#' @param oh_fidelity Data frame with overhang + fidelity columns. If NULL,
+#'   loads BsmBI default fidelity data.
+#' @param eff_lookup Named numeric vector of overhang efficiencies (P_eff).
+#'   If NULL, loads from BsmBI pairwise matrix.
+#' @param allowed_gene_positions Integer vector of valid SB boundary positions
+#'   within the gene portion (e.g., tile end_nt values). When provided, gene-
+#'   region boundaries (p <= gene_len) are restricted to these positions only.
+#'   Cassette-region positions (p > gene_len) remain unrestricted. Default NULL
+#'   (any codon-aligned position is valid).
+#' @return List with:
+#'   \item{n_superblocks}{Integer count of superblocks}
+#'   \item{boundaries}{Data frame with columns: sb_id, start_nt, end_nt,
+#'     boundary_oh (4-nt overhang at 3' end of each non-final SB, NA for
+#'     last SB), boundary_score (score at that boundary, NA for last SB)}
+#'   \item{total_score}{Sum of boundary scores (0 if no splits needed)}
+search_superblock_boundaries_dp <- function(
+  full_seq,
+  gene_len,
+  max_block_length = 1800L,
+  min_block_length = 300L,
+  blacklist_ohs = character(0),
+  cassette_blacklist_ohs = character(0),
+  oh_fidelity = NULL,
+  eff_lookup = NULL,
+  allowed_gene_positions = NULL
+) {
+  total_len <- nchar(full_seq)
+
+  # --- Input validation ---
+  stopifnot(is.character(full_seq), length(full_seq) == 1, total_len > 0)
+  stopifnot(is.numeric(gene_len), gene_len >= 1, gene_len <= total_len)
+  stopifnot(max_block_length > min_block_length)
+
+  # --- Load fidelity/efficiency data if not provided ---
+  if (is.null(oh_fidelity)) oh_fidelity <- load_overhang_fidelity("BsmBI")
+  if (is.null(eff_lookup)) {
+    bsmbi_pw <- load_pairwise_matrix("BsmBI")
+    eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+  }
+
+  # Build fidelity lookup
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+
+  # --- Edge case: sequence fits in a single block ---
+  if (total_len <= max_block_length) {
+    cli::cli_alert_info(
+      "Sequence length ({total_len} bp) <= max_block_length ({max_block_length} bp). No SB split needed."
+    )
+    return(list(
+      n_superblocks = 1L,
+      boundaries = data.frame(
+        sb_id = 1L,
+        start_nt = 1L,
+        end_nt = total_len,
+        boundary_oh = NA_character_,
+        boundary_score = NA_real_,
+        stringsAsFactors = FALSE
+      ),
+      total_score = 0
+    ))
+  }
+
+  # --- Build blacklist set (include reverse complements) ---
+  blacklist_set <- unique(c(
+    blacklist_ohs,
+    vapply(blacklist_ohs, reverse_complement, character(1))
+  ))
+
+  # --- Build cassette-specific blacklist set ---
+  # These overhangs are additionally excluded for positions in the cassette
+
+  # region (p > gene_len). Cassette junction OHs participate in every tile's
+  # BsmBI reaction, so they must not collide with any tile oh1/oh2.
+  cassette_blacklist_set <- if (length(cassette_blacklist_ohs) > 0) {
+    unique(c(
+      cassette_blacklist_ohs,
+      vapply(cassette_blacklist_ohs, reverse_complement, character(1))
+    ))
+  } else {
+    character(0)
+  }
+
+  # --- Build allowed gene positions set for O(1) lookup ---
+  # When allowed_gene_positions is provided, gene-region boundaries are
+  # restricted to these positions (e.g., tile end positions). Cassette-region
+  # positions (p > gene_len) remain unrestricted.
+  allowed_gene_pos_set <- NULL
+  if (!is.null(allowed_gene_positions)) {
+    allowed_gene_pos_set <- as.integer(allowed_gene_positions)
+  }
+
+  # --- Precompute boundary scores for every nucleotide position ---
+  # At position p, the overhang is the 4 nt ending at p: substring(full_seq, p-3, p)
+  # Positions 1-3 can't form a 4-nt overhang, so they're invalid.
+  boundary_scores <- rep(-Inf, total_len)
+  boundary_valid <- rep(FALSE, total_len)
+
+  cli::cli_alert_info("Precomputing SB boundary scores for {total_len} positions...")
+
+  for (p in 4L:total_len) {
+    # Extract the 4-nt overhang at this position
+    oh <- substring(full_seq, p - 3L, p)
+
+    # Skip if overhang is blacklisted (or its RC is blacklisted)
+    if (oh %in% blacklist_set) next
+
+    # For cassette-region positions, also check the cassette-specific blacklist
+    # (tile oh1/oh2 values that would collide in every tile's BsmBI reaction)
+    if (p > gene_len && length(cassette_blacklist_set) > 0 &&
+      oh %in% cassette_blacklist_set) {
+      next
+    }
+
+    # Skip palindromic overhangs — these cause self-ligation issues in GG
+    if (oh %in% PALINDROMIC_4NT) next
+
+    # Compute overhang score: P_fid * P_eff
+    score <- overhang_score(oh, fid_lookup, eff_lookup)
+
+    # Within the gene portion, apply constraints:
+    # 1. Codon boundary: p must be divisible by 3 (never split a codon)
+    # 2. Tile boundary (if allowed_gene_positions provided): p must be in the
+    #    allowed set (restricts SB boundaries to tile end positions)
+    # Positions in the cassette portion (p > gene_len) have no constraint.
+    if (p <= gene_len) {
+      if ((p %% 3L) != 0L) next
+      if (!is.null(allowed_gene_pos_set) && !(p %in% allowed_gene_pos_set)) next
+    }
+
+    boundary_scores[p] <- score
+    boundary_valid[p] <- TRUE
+  }
+
+  n_valid <- sum(boundary_valid)
+  cli::cli_alert_info("{n_valid} valid SB boundary candidates out of {total_len} positions.")
+
+  if (n_valid == 0L) {
+    cli::cli_alert_warning(
+      "No valid SB boundary positions found! All overhangs blacklisted or palindromic."
+    )
+    # Return single SB even though it exceeds max_block_length
+    return(list(
+      n_superblocks = 1L,
+      boundaries = data.frame(
+        sb_id = 1L,
+        start_nt = 1L,
+        end_nt = total_len,
+        boundary_oh = NA_character_,
+        boundary_score = NA_real_,
+        stringsAsFactors = FALSE
+      ),
+      total_score = 0
+    ))
+  }
+
+  # --- Determine K range ---
+  # K = number of internal boundaries (superblocks = K + 1)
+  K_min <- ceiling(total_len / max_block_length) - 1L
+  K_min <- max(1L, K_min) # At least 1 boundary needed (we already handled single-block case)
+
+  # Search K_min to K_min + 2 (narrow range — SB count is tightly constrained)
+  K_max <- K_min + 2L
+  # Upper bound: can't have more boundaries than segments of min_block_length
+  K_upper <- floor(total_len / min_block_length) - 1L
+  K_max <- min(K_max, K_upper)
+  k_range <- seq(K_min, K_max)
+
+  cli::cli_alert_info(
+    "SB boundary DP: {total_len} bp, K range [{K_min}, {K_max}]"
+  )
+
+  # --- Run DP for each K, track best ---
+  best_result <- NULL
+  best_avg_score <- -Inf
+  k_results <- list()
+  prev_avg <- -Inf
+  diminishing_stop_pct <- 0.005 # 0.5% threshold
+
+  dp_start <- proc.time()
+  for (K in k_range) {
+    result <- sb_dp_solve_k(
+      K, total_len, min_block_length, max_block_length,
+      boundary_scores, boundary_valid
+    )
+    if (!is.null(result)) {
+      avg <- result$total_score / K
+      k_results[[as.character(K)]] <- list(K = K, score = result$total_score, avg = avg)
+      if (avg > best_avg_score) {
+        best_avg_score <- avg
+        best_result <- result
+        best_result$K <- K
+      }
+      # Diminishing returns stopping (same pattern as tile DP)
+      if (K > K_min && is.finite(prev_avg) && prev_avg > 0) {
+        improvement <- (avg - prev_avg) / prev_avg
+        if (improvement < diminishing_stop_pct) {
+          cli::cli_alert_info(sprintf(
+            "Stopping SB K search at K=%d: avg score improvement %.2f%% < %.1f%% threshold",
+            K, improvement * 100, diminishing_stop_pct * 100
+          ))
+          break
+        }
+      }
+      prev_avg <- avg
+    }
+  }
+
+  dp_elapsed <- (proc.time() - dp_start)[["elapsed"]]
+  cli::cli_alert_info(
+    "SB boundary DP completed in {round(dp_elapsed, 1)}s ({length(k_range)} K values)."
+  )
+
+  if (is.null(best_result)) {
+    # Defensive fallback: retry with soft penalty instead of hard constraint.
+    # This should never trigger in practice — with ~600 codon-aligned positions
+    # per 1800 bp and ~14% exclusion rate, there are always enough candidates.
+    cli::cli_alert_warning(
+      "SB DP found no valid solution with hard codon constraint. Retrying with soft penalty (-0.5)."
+    )
+    boundary_scores_soft <- rep(-Inf, total_len)
+    boundary_valid_soft <- rep(FALSE, total_len)
+    for (p in 4L:total_len) {
+      oh <- substring(full_seq, p - 3L, p)
+      if (oh %in% blacklist_set) next
+      if (oh %in% PALINDROMIC_4NT) next
+      score <- overhang_score(oh, fid_lookup, eff_lookup)
+      codon_penalty <- 0.0
+      if (p <= gene_len) {
+        if ((p %% 3L) != 0L) {
+          codon_penalty <- -0.5
+        }
+        # In soft fallback, still enforce tile-boundary constraint (these
+        # positions are the only ones that produce valid SB partitions)
+        if (!is.null(allowed_gene_pos_set) && !(p %in% allowed_gene_pos_set)) next
+      }
+      boundary_scores_soft[p] <- score + codon_penalty
+      boundary_valid_soft[p] <- TRUE
+    }
+    for (K in k_range) {
+      result <- sb_dp_solve_k(
+        K, total_len, min_block_length, max_block_length,
+        boundary_scores_soft, boundary_valid_soft
+      )
+      if (!is.null(result)) {
+        avg <- result$total_score / K
+        if (is.null(best_result) || avg > best_avg_score) {
+          best_avg_score <- avg
+          best_result <- result
+          best_result$K <- K
+        }
+      }
+    }
+  }
+
+  if (is.null(best_result)) {
+    cli::cli_alert_warning(
+      "SB DP found no valid solution even with soft penalty; returning single oversized superblock."
+    )
+    return(list(
+      n_superblocks = 1L,
+      boundaries = data.frame(
+        sb_id = 1L,
+        start_nt = 1L,
+        end_nt = total_len,
+        boundary_oh = NA_character_,
+        boundary_score = NA_real_,
+        stringsAsFactors = FALSE
+      ),
+      total_score = 0
+    ))
+  }
+
+  # Log multi-K comparison
+  if (length(k_results) > 1) {
+    k_summary <- vapply(k_results, function(r) {
+      sprintf("K=%d score=%.3f", r$K, r$score)
+    }, character(1))
+    cli::cli_alert_info(paste0(
+      "SB multi-K: ", paste(k_summary, collapse = ", "),
+      " | best K=", best_result$K
+    ))
+  }
+
+  # --- Build output boundaries data frame ---
+  K <- best_result$K
+  n_superblocks <- K + 1L
+  boundary_positions <- best_result$boundaries # nt positions
+
+  # Build SB table: each SB spans from previous boundary+1 to current boundary
+  sb_df <- data.frame(
+    sb_id = integer(n_superblocks),
+    start_nt = integer(n_superblocks),
+    end_nt = integer(n_superblocks),
+    boundary_oh = character(n_superblocks),
+    boundary_score = numeric(n_superblocks),
+    stringsAsFactors = FALSE
+  )
+
+  for (i in seq_len(n_superblocks)) {
+    sb_df$sb_id[i] <- i
+
+    if (i == 1L) {
+      sb_df$start_nt[i] <- 1L
+    } else {
+      sb_df$end_nt[i - 1L] <- boundary_positions[i - 1L]
+      sb_df$start_nt[i] <- boundary_positions[i - 1L] + 1L
+    }
+
+    if (i == n_superblocks) {
+      sb_df$end_nt[i] <- total_len
+      sb_df$boundary_oh[i] <- NA_character_
+      sb_df$boundary_score[i] <- NA_real_
+    } else {
+      sb_df$end_nt[i] <- boundary_positions[i]
+      oh <- substring(full_seq, boundary_positions[i] - 3L, boundary_positions[i])
+      sb_df$boundary_oh[i] <- oh
+      sb_df$boundary_score[i] <- overhang_score(oh, fid_lookup, eff_lookup)
+    }
+  }
+
+  # Verify segment sizes
+  for (i in seq_len(n_superblocks)) {
+    seg_len <- sb_df$end_nt[i] - sb_df$start_nt[i] + 1L
+    if (seg_len > max_block_length) {
+      cli::cli_alert_warning(
+        "SB {i} is {seg_len} bp, exceeding max_block_length ({max_block_length})."
+      )
+    }
+  }
+
+  cli::cli_alert_success(
+    "SB boundary search: {n_superblocks} superblocks, {K} boundaries, total score = {round(best_result$total_score, 4)}"
+  )
+
+  list(
+    n_superblocks = n_superblocks,
+    boundaries = sb_df,
+    total_score = best_result$total_score
+  )
 }
 
 # =============================================================================
@@ -1986,15 +2698,137 @@ derive_oh3_from_promoter <- function(polIII) {
 }
 
 # =============================================================================
-# MASTER ASSEMBLY PLANNER
+# SB DP → PARTITION CONVERSION
+# =============================================================================
+
+#' Convert SB DP result to partition_result format for downstream compatibility
+#'
+#' Maps SB DP boundary positions to tile indices. Since gene-region boundaries
+#' are constrained to tile end positions (via allowed_gene_positions), every
+#' gene-portion boundary maps to exactly one tile's end_nt. Cassette-region
+#' boundaries are extracted separately for the gene block designer.
+#'
+#' @param sb_result List from search_superblock_boundaries_dp()
+#' @param tiles Data frame of tiles (must have end_nt, oh2_seq columns)
+#' @param gene_len Integer, length of gene CDS in nucleotides
+#' @param polIII_len Integer, length of downstream cassette
+#' @param max_block_length Integer, max synthesis length
+#' @param block_overhead Integer, overhead per block (enzyme sites)
+#' @param oh_fidelity Data frame with overhang + fidelity columns
+#' @return List with n_superblocks, superblocks (tile-indexed), n_collisions,
+#'   cassette_needs_splitting, cassette_splits
+sb_dp_to_partition <- function(sb_result, tiles, gene_len, polIII_len,
+                               max_block_length, block_overhead,
+                               oh_fidelity = NULL) {
+  sb_df <- sb_result$boundaries
+  n_sb_total <- sb_result$n_superblocks
+  n_tiles <- nrow(tiles)
+
+  # Build fidelity lookup if provided
+  fid_lookup <- NULL
+  if (!is.null(oh_fidelity)) {
+    fid_lookup <- oh_fidelity$fidelity
+    names(fid_lookup) <- oh_fidelity$overhang
+  }
+
+  # --- Map gene-region SB boundaries to tile indices ---
+  # Each gene-region boundary (end_nt of a non-final SB, where end_nt <= gene_len)
+  # should be at a tile's end_nt. Build a lookup from end_nt → tile index.
+  tile_end_lookup <- tiles$end_nt
+  names(tile_end_lookup) <- seq_len(n_tiles)
+
+  # Collect gene-region SB boundaries (positions where SB ends within gene)
+  gene_sb_boundary_positions <- integer(0)
+  for (i in seq_len(n_sb_total - 1L)) {
+    if (sb_df$end_nt[i] <= gene_len) {
+      gene_sb_boundary_positions <- c(gene_sb_boundary_positions, sb_df$end_nt[i])
+    }
+  }
+
+  # Map boundary positions to tile indices
+  sb_end_tiles <- integer(0)
+  for (bp in gene_sb_boundary_positions) {
+    tile_match <- which(tiles$end_nt == bp)
+    if (length(tile_match) == 0L) {
+      cli::cli_alert_warning(paste0(
+        "SB boundary at position ", bp,
+        " does not match any tile end_nt. Skipping."
+      ))
+      next
+    }
+    sb_end_tiles <- c(sb_end_tiles, tile_match[1])
+  }
+  # Close the last SB with the last tile
+  sb_end_tiles <- c(sb_end_tiles, n_tiles)
+
+  n_sb_gene <- length(sb_end_tiles)
+  sb_start_tiles <- c(1L, sb_end_tiles[-n_sb_gene] + 1L)
+
+  # Compute gene content per SB
+  gene_contents <- integer(n_sb_gene)
+  for (i in seq_len(n_sb_gene)) {
+    left_nt <- if (i == 1L) 0L else tiles$end_nt[sb_end_tiles[i - 1L]]
+    right_nt <- if (i == n_sb_gene) gene_len else tiles$end_nt[sb_end_tiles[i]]
+    gene_contents[i] <- right_nt - left_nt
+  }
+
+  superblocks <- data.frame(
+    sb_id = seq_len(n_sb_gene),
+    start_tile = sb_start_tiles,
+    end_tile = sb_end_tiles,
+    gene_content = gene_contents,
+    stringsAsFactors = FALSE
+  )
+
+  # --- Extract cassette-region SB boundaries ---
+  cassette_splits <- data.frame(
+    split_pos = integer(0), junction_oh = character(0),
+    stringsAsFactors = FALSE
+  )
+  for (i in seq_len(n_sb_total - 1L)) {
+    if (sb_df$end_nt[i] > gene_len && !is.na(sb_df$boundary_oh[i])) {
+      cassette_splits <- rbind(cassette_splits, data.frame(
+        split_pos = sb_df$end_nt[i] - gene_len,
+        junction_oh = sb_df$boundary_oh[i],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+
+  # Determine if cassette needs splitting
+  max_sub_content <- max_block_length - block_overhead
+  cassette_needs_splitting <- polIII_len > max_sub_content
+
+  if (nrow(cassette_splits) > 0) {
+    cli::cli_alert_info(paste0(
+      "SB DP placed ", nrow(cassette_splits), " cassette boundary(ies) at positions ",
+      paste(cassette_splits$split_pos, collapse = ", "),
+      " (overhangs: ", paste(cassette_splits$junction_oh, collapse = ", "), ")"
+    ))
+  }
+
+  list(
+    n_superblocks = n_sb_gene,
+    superblocks = superblocks,
+    n_collisions = 0L,
+    cassette_needs_splitting = cassette_needs_splitting,
+    cassette_splits = cassette_splits
+  )
+}
+
+# =============================================================================
+# MASTER ASSEMBLY PLANNER (Hybrid: Tile-First DP + Constrained SB DP)
 # =============================================================================
 
 #' Plan the complete assembly: tiles, overhangs, and superblock splits
 #'
-#' Master function that orchestrates:
-#'   Phase 1-3: Dynamic tile boundary search
-#'   Phase 4: oh3 derivation from promoter + oh4 selection from HF set
-#'   Phase 5: Superblock split-point optimization
+#' Hybrid assembly planner combining tile-first DP (natural overhang diversity)
+#' with constrained SB DP (optimal segment sizing + cassette splitting).
+#'
+#'   Pass 1 (Phase 1-3): Tile DP on gene only → tile boundaries with diverse oh2s
+#'   Phase 4: oh3 derivation from promoter + oh4 selection
+#'   Pass 2 (Phase 5): SB DP on gene+cassette, constrained to tile boundary
+#'     positions (gene) + any position (cassette)
 #'   Phase 6: Per-reaction pairwise validation
 #'
 #' @param cds Domesticated gene sequence
@@ -2052,7 +2886,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   # 4. If collision: blacklist the colliding oh2, re-run DP, repeat
   # This replaces the old ±5 tile shift heuristic with a principled DP-based fix.
   max_sb_iterations <- 5L
-  blacklisted_oh2 <- character(0)
+  blacklisted_oh2 <- HOMOPOLYMER_4NT
 
   for (sb_iter in seq_len(max_sb_iterations)) {
     if (sb_iter > 1L) {
@@ -2299,27 +3133,289 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     if (oh4_in_hf) " (HF)" else " (non-HF)"
   ))
 
-  # Phase 5: Tile-boundary superblock partitioning
+  # Phase 5: Constrained SB DP on gene+cassette
   #
-  # Groups contiguous tiles into superblocks at tile boundaries, replacing the
-  # old global DP system. Each SB's gene content fits within the synthesis limit.
-  # SB boundary overhangs (oh2 of boundary tiles) are checked for collisions
-  # with oh3 and each other.
-  cli::cli_h3("Partitioning tiles into superblocks")
+  # Runs the SB DP with gene-region boundaries constrained to tile end positions
+  # (allowed_gene_positions). This gives optimal segment sizing with natural
+  # overhang diversity (tile oh2s are inherently different at ~240 nt spacing).
+  # Cassette-region boundaries remain unrestricted.
+  cli::cli_h3("Superblock partitioning (constrained SB DP)")
   block_overhead <- 22L # 2 x 11-nt enzyme sites per block
   n_tiles <- nrow(tiles)
 
-  partition_result <- partition_tile_superblocks(
-    tiles = tiles,
-    gene_len = gene_len,
-    polIII_len = polIII_len,
-    max_sub_length = max_block_length - block_overhead,
-    oh3 = oh3,
-    oh4 = oh4
-  )
+  # Build the full sequence: gene + cassette (for SB DP to consider both)
+  cassette_seq <- if (!is.null(downstream_cassette) && !is.null(core_polIII)) {
+    # Trim last 5 nt (oh3+spacer, encoded by BsmBI junction) from downstream_cassette
+    substring(downstream_cassette, 1, nchar(downstream_cassette) - 5L)
+  } else if (!is.null(core_polIII)) {
+    core_polIII
+  } else {
+    ""
+  }
+
+  # Blacklist: oh_L, oh3, oh4, their RCs, homopolymers — these overhangs
+  # must not appear at SB boundaries since they're committed elsewhere
+  sb_blacklist_ohs <- unique(c(
+    oh_L, reverse_complement(oh_L),
+    oh3, reverse_complement(oh3),
+    oh4, reverse_complement(oh4),
+    HOMOPOLYMER_4NT
+  ))
+
+  # Tile end positions = allowed gene-region boundary positions for SB DP.
+  # Exclude the last tile's end (gene end = always the SB terminus, never a
+  # boundary position — no SB boundary can be placed at the very end of the gene).
+  tile_end_positions <- tiles$end_nt[-n_tiles]
+
+  # If gene + cassette is short enough for 1 block, skip the SB DP
+  full_seq_for_sb <- paste0(cds, cassette_seq)
+  total_content_len <- nchar(full_seq_for_sb)
+
+  if (total_content_len <= (max_block_length - block_overhead)) {
+    # No SB split needed
+    partition_result <- list(
+      n_superblocks = 1L,
+      superblocks = data.frame(
+        sb_id = 1L, start_tile = 1L, end_tile = n_tiles,
+        gene_content = gene_len, stringsAsFactors = FALSE
+      ),
+      n_collisions = 0L,
+      cassette_needs_splitting = FALSE,
+      cassette_splits = data.frame(
+        split_pos = integer(0), junction_oh = character(0),
+        stringsAsFactors = FALSE
+      )
+    )
+    sb_result <- list(
+      n_superblocks = 1L,
+      boundaries = data.frame(
+        sb_id = 1L, start_nt = 1L, end_nt = total_content_len,
+        boundary_oh = NA_character_, boundary_score = NA_real_,
+        stringsAsFactors = FALSE
+      ),
+      total_score = 0
+    )
+    cassette_splits <- partition_result$cassette_splits
+  } else {
+    # Run constrained SB DP with collision avoidance loop
+    max_sb_collision_iters <- 10L
+    sb_extra_blacklist <- character(0)
+
+    # Build cassette-specific blacklist from all tile oh1/oh2 and their RCs.
+    # Cassette junction OHs participate in every tile's BsmBI reaction, so
+    # they must not match any tile oh1 or oh2 — pre-exclude them from DP.
+    cassette_oh_blacklist <- unique(c(
+      tiles$oh1_seq, tiles$oh2_seq,
+      vapply(tiles$oh1_seq, reverse_complement, character(1)),
+      vapply(tiles$oh2_seq, reverse_complement, character(1))
+    ))
+
+    for (sb_coll_iter in seq_len(max_sb_collision_iters)) {
+      if (sb_coll_iter > 1L) {
+        cli::cli_alert_info(paste0(
+          "SB collision avoidance iteration ", sb_coll_iter,
+          " (extra blacklist: ", paste(sb_extra_blacklist, collapse = ", "), ")"
+        ))
+      }
+
+      current_sb_blacklist <- unique(c(
+        sb_blacklist_ohs, sb_extra_blacklist,
+        vapply(sb_extra_blacklist, reverse_complement, character(1))
+      ))
+
+      sb_result <- search_superblock_boundaries_dp(
+        full_seq = full_seq_for_sb,
+        gene_len = gene_len,
+        max_block_length = max_block_length - block_overhead,
+        min_block_length = config$min_geneblock_length %||% MIN_GENEBLOCK_LENGTH,
+        blacklist_ohs = current_sb_blacklist,
+        cassette_blacklist_ohs = cassette_oh_blacklist,
+        oh_fidelity = oh_fidelity,
+        eff_lookup = eff_lookup,
+        allowed_gene_positions = tile_end_positions
+      )
+
+      # Convert SB DP result to partition format
+      partition_result <- sb_dp_to_partition(
+        sb_result = sb_result,
+        tiles = tiles,
+        gene_len = gene_len,
+        polIII_len = polIII_len,
+        max_block_length = max_block_length,
+        block_overhead = block_overhead,
+        oh_fidelity = oh_fidelity
+      )
+      cassette_splits <- partition_result$cassette_splits
+
+      # --- Collision check ---
+      # SB boundary OHs must not collide with each other, oh3, oh4, or
+      # tile oh1/oh2 in other reactions visible across SB boundaries.
+      sb_boundary_ohs <- character(0)
+      if (partition_result$n_superblocks >= 2L) {
+        sbs <- partition_result$superblocks
+        for (bi in seq_len(partition_result$n_superblocks - 1L)) {
+          sb_boundary_ohs <- c(sb_boundary_ohs, tiles$oh2_seq[sbs$end_tile[bi]])
+        }
+      }
+      # Also include cassette boundary OHs
+      if (nrow(cassette_splits) > 0) {
+        sb_boundary_ohs <- c(sb_boundary_ohs, cassette_splits$junction_oh)
+      }
+
+      # Check pairwise collisions among all SB boundary OHs
+      has_collision <- FALSE
+      colliding_ohs <- character(0)
+      if (length(sb_boundary_ohs) >= 2L) {
+        for (i in 2L:length(sb_boundary_ohs)) {
+          for (j in seq_len(i - 1L)) {
+            if (oh_collides(sb_boundary_ohs[i], sb_boundary_ohs[j])) {
+              has_collision <- TRUE
+              colliding_ohs <- c(colliding_ohs, sb_boundary_ohs[i])
+            }
+          }
+        }
+      }
+      # Check SB boundary OHs vs oh3
+      for (sb_oh in sb_boundary_ohs) {
+        if (oh_collides(sb_oh, oh3)) {
+          has_collision <- TRUE
+          colliding_ohs <- c(colliding_ohs, sb_oh)
+        }
+      }
+      # Check SB boundary OHs vs oh4
+      for (sb_oh in sb_boundary_ohs) {
+        if (oh_collides(sb_oh, oh4)) {
+          has_collision <- TRUE
+          colliding_ohs <- c(colliding_ohs, sb_oh)
+        }
+      }
+      # Check SB boundary OHs vs tile oh1 in tiles whose 5'WT spans the
+      # boundary (BsaI-level collision — BUG-007 equivalent).
+      # The SB boundary OH becomes a BsaI junction overhang for tiles whose
+      # 5'WT region spans past this boundary. If it matches a tile's oh1_seq,
+      # the BsaI reaction has ambiguous ligation.
+      if (partition_result$n_superblocks >= 2L) {
+        sbs <- partition_result$superblocks
+        for (bi in seq_len(partition_result$n_superblocks - 1L)) {
+          boundary_tile <- sbs$end_tile[bi]
+          boundary_oh <- tiles$oh2_seq[boundary_tile]
+          boundary_pos <- tiles$end_nt[boundary_tile]
+          for (t in seq_len(n_tiles)) {
+            if (tiles$start_nt[t] > boundary_pos &&
+              oh_collides(boundary_oh, tiles$oh1_seq[t])) {
+              has_collision <- TRUE
+              colliding_ohs <- c(colliding_ohs, boundary_oh)
+            }
+          }
+        }
+      }
+      # Check SB boundary OHs vs tile oh2 in earlier tiles whose 3'WT spans
+      # past the boundary (BsmBI-level collision).
+      if (partition_result$n_superblocks >= 2L) {
+        sbs <- partition_result$superblocks
+        for (bi in seq_len(partition_result$n_superblocks - 1L)) {
+          boundary_tile <- sbs$end_tile[bi]
+          boundary_oh <- tiles$oh2_seq[boundary_tile]
+          boundary_pos <- tiles$end_nt[boundary_tile]
+          for (t in seq_len(n_tiles)) {
+            if (t == boundary_tile) next
+            if (tiles$end_nt[t] < boundary_pos &&
+              oh_collides(boundary_oh, tiles$oh2_seq[t])) {
+              has_collision <- TRUE
+              colliding_ohs <- c(colliding_ohs, boundary_oh)
+            }
+          }
+        }
+      }
+
+      # Cassette split junction OHs are GLOBAL — they participate in every
+      # tile's BsmBI reaction. Check against ALL tile oh1/oh2 (no spatial filter).
+      if (nrow(cassette_splits) > 0) {
+        for (cj_oh in cassette_splits$junction_oh) {
+          for (t in seq_len(n_tiles)) {
+            if (oh_collides(cj_oh, tiles$oh1_seq[t])) {
+              has_collision <- TRUE
+              colliding_ohs <- c(colliding_ohs, cj_oh)
+            }
+            if (oh_collides(cj_oh, tiles$oh2_seq[t])) {
+              has_collision <- TRUE
+              colliding_ohs <- c(colliding_ohs, cj_oh)
+            }
+          }
+        }
+      }
+
+      if (!has_collision) {
+        if (sb_coll_iter > 1L) {
+          cli::cli_alert_success(paste0(
+            "SB collision resolved after ", sb_coll_iter, " iteration(s)."
+          ))
+        }
+        break
+      }
+
+      # Classify collisions: cassette-region OHs go to cassette blacklist,
+      # gene-region OHs go to global blacklist. This prevents a cassette
+      # collision from unnecessarily constraining gene-region SB choices.
+      cassette_junction_set <- if (nrow(cassette_splits) > 0) {
+        cassette_splits$junction_oh
+      } else {
+        character(0)
+      }
+      new_cassette_blacklist <- unique(
+        colliding_ohs[colliding_ohs %in% cassette_junction_set]
+      )
+      new_gene_blacklist <- unique(
+        colliding_ohs[!(colliding_ohs %in% cassette_junction_set)]
+      )
+
+      # Remove already-blacklisted OHs
+      new_cassette_blacklist <- new_cassette_blacklist[
+        !(new_cassette_blacklist %in% cassette_oh_blacklist)
+      ]
+      new_gene_blacklist <- new_gene_blacklist[
+        !(new_gene_blacklist %in% sb_extra_blacklist)
+      ]
+
+      if (length(new_cassette_blacklist) == 0L &&
+        length(new_gene_blacklist) == 0L) {
+        cli::cli_alert_warning(
+          "SB collision detected but no new OH to blacklist. Unresolved collisions remain."
+        )
+        partition_result$n_collisions <- length(colliding_ohs)
+        break
+      }
+
+      # Add to appropriate blacklists
+      cassette_oh_blacklist <- unique(c(
+        cassette_oh_blacklist, new_cassette_blacklist
+      ))
+      sb_extra_blacklist <- unique(c(sb_extra_blacklist, new_gene_blacklist))
+      cli::cli_alert_info(paste0(
+        "SB collision: blacklisting ",
+        if (length(new_gene_blacklist) > 0) {
+          paste0("gene: ", paste(new_gene_blacklist, collapse = ", "))
+        },
+        if (length(new_cassette_blacklist) > 0) {
+          paste0(" cassette: ", paste(new_cassette_blacklist, collapse = ", "))
+        },
+        ". Re-running constrained SB DP..."
+      ))
+    }
+
+    # Post-loop guard: if loop exhausted iterations without resolving, report
+    if (has_collision && sb_coll_iter == max_sb_collision_iters) {
+      n_unresolved <- length(unique(colliding_ohs))
+      partition_result$n_collisions <- n_unresolved
+      cli::cli_alert_warning(paste0(
+        "SB collision avoidance exhausted ", max_sb_collision_iters,
+        " iterations. ", n_unresolved,
+        " unresolved collision(s): ", paste(unique(colliding_ohs), collapse = ", ")
+      ))
+    }
+  }
 
   # Convert partition to legacy all_splits format for downstream consumers
-  # (design_wt_geneblocks, R/12_report.R)
   all_splits <- convert_partition_to_splits(
     partition_result = partition_result,
     tiles = tiles,
@@ -2328,9 +3424,9 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   )
 
   if (partition_result$n_superblocks > 1L) {
-    n_boundaries <- partition_result$n_superblocks - 1L
+    n_boundaries_sb <- partition_result$n_superblocks - 1L
     n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
-      seq_len(n_boundaries)
+      seq_len(n_boundaries_sb)
     ]])
     cass_msg <- if (partition_result$cassette_needs_splitting) {
       " Cassette will be split into fragments."
@@ -2338,8 +3434,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       ""
     }
     cli::cli_alert_info(paste0(
-      "Tile-boundary partition: ", partition_result$n_superblocks,
-      " superblocks, ", n_boundaries, " boundary(ies). ",
+      "Constrained SB DP: ", partition_result$n_superblocks,
+      " superblocks, ", n_boundaries_sb, " boundary(ies). ",
       n_hf, " junction(s) in HF set. ",
       nrow(all_splits), " per-tile split entries. ",
       partition_result$n_collisions, " unresolved collision(s).",
@@ -2459,12 +3555,14 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     core_downstream_cassette = core_downstream_cassette, # full cassette minus last 5 nt (NULL if not derived)
     oh3_spacer = oh3_spacer, # terminal nt of promoter (NULL if not derived)
     superblock_splits = all_splits,
-    tile_partition = partition_result, # new tile-boundary partition (native format)
+    tile_partition = partition_result, # tile-boundary partition (native format)
     reaction_fidelity = reaction_fidelity_df,
     strategy_used = strategy_used,
     hf_set_used = hf_set,
     oh_fidelity_used = oh_fidelity,
     cassette_needs_splitting = partition_result$cassette_needs_splitting,
+    sb_result = sb_result, # SB DP result for inspection
+    cassette_splits = cassette_splits, # pre-computed cassette boundaries
     summary = list(
       n_tiles = n_tiles,
       n_boundaries = n_boundaries,
@@ -2475,6 +3573,678 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       n_superblock_splits = nrow(all_splits),
       n_sb_collisions = partition_result$n_collisions,
       cassette_needs_splitting = partition_result$cassette_needs_splitting,
+      overall_min_fidelity = min(reaction_fidelity_df$set_fidelity)
+    )
+  )
+
+  assembly_plan
+}
+
+# =============================================================================
+# SB-FIRST TWO-PASS ASSEMBLY PLANNER (v2)
+# =============================================================================
+
+#' Plan assembly using SB-first two-pass DP
+#'
+#' Two-pass assembly planning: superblock boundaries first (gene-level DP),
+#' then tile boundaries within each superblock (per-SB DP). This eliminates
+#' the OPT-005 collision iteration loop from plan_assembly() and allows
+#' overhang reuse across superblocks.
+#'
+#' Pass 1: SB DP on gene+cassette → SB boundary positions + overhangs
+#' Pass 2: Per-SB tile DP → tile boundaries with SB anchors + blacklist
+#'
+#' The physical assembly scheme is unchanged from v1:
+#'   BsaI L1: oligo + 5'WT blocks → helper plasmid
+#'   BsmBI L1b: 3'WT+cassette blocks → between tile and barcode
+#'   PaqCI L2: full insert → backbone
+#'
+#' @param cds Domesticated gene sequence
+#' @param polIII PolIII promoter sequence
+#' @param max_mutable_nt Max mutable region in nt (from compute_max_tile_size)
+#' @param max_block_length Max synthesis length (default 1800)
+#' @param config List with fidelity_threshold, manual_oh3, manual_oh4,
+#'   dp_k_range, overlap_codons, min_mutable_nt, min_geneblock_length
+#' @param downstream_cassette Full downstream cassette sequence (intergene + polIII).
+#'   If NULL, polIII is used directly as the cassette.
+#' @return List with same structure as plan_assembly() for downstream compatibility:
+#'   tiles, oh3, oh4, oh_L, core_polIII, core_downstream_cassette, oh3_spacer,
+#'   superblock_splits, tile_partition, reaction_fidelity, summary, etc.
+plan_assembly_v2 <- function(cds, polIII, max_mutable_nt,
+                             max_block_length = MAX_GENEBLOCK_LENGTH,
+                             config = list(),
+                             downstream_cassette = NULL) {
+  gene_len <- nchar(cds)
+  polIII_len <- if (!is.null(downstream_cassette)) nchar(downstream_cassette) else nchar(polIII)
+  cassette_seq <- if (!is.null(downstream_cassette)) downstream_cassette else polIII
+
+  # Unpack config with defaults
+  fidelity_threshold <- config$fidelity_threshold %||% DEFAULT_FIDELITY_THRESHOLD
+  manual_oh3 <- config$manual_oh3
+  manual_oh4 <- config$manual_oh4
+  dp_k_range <- config$dp_k_range %||% 5L
+  multi_k <- config$multi_k %||% TRUE
+  overlap_codons <- config$overlap_codons %||% 4L
+  min_geneblock_length <- config$min_geneblock_length %||% MIN_GENEBLOCK_LENGTH
+  min_mutable_nt <- config$min_mutable_nt
+  if (is.null(min_mutable_nt)) {
+    min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
+    min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
+  }
+
+  cli::cli_h2("SB-First Two-Pass Assembly Planning (v2)")
+
+  # =========================================================================
+  # Load data
+  # =========================================================================
+  hf_set <- load_high_fidelity_set()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  bsai_matrix <- load_pairwise_matrix("BsaI")
+  bsmbi_matrix <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_matrix)
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+
+  # =========================================================================
+  # Phase 1: Select oh3 and oh4 (before any DP — both DPs blacklist these)
+  # =========================================================================
+  cli::cli_h3("Phase 1: Selecting fixed overhangs (oh3, oh4)")
+  oh_L <- substring(cds, 1, 4)
+  strategy_used <- "promoter_derived"
+  core_polIII <- NULL
+  oh3_spacer <- NULL
+
+  if (!is.null(manual_oh3) && !is.null(manual_oh4)) {
+    validate_fixed_overhangs(manual_oh3, manual_oh4)
+    oh3 <- toupper(manual_oh3)
+    oh4 <- toupper(manual_oh4)
+    oh3_in_hf <- oh3 %in% hf_set
+    oh4_in_hf <- oh4 %in% hf_set
+    strategy_used <- "manual"
+    cli::cli_alert_info("Using manual overhangs: oh3={oh3}, oh4={oh4}")
+  } else {
+    # --- oh3: derive from PolIII promoter 3' end ---
+    promoter_derived <- derive_oh3_from_promoter(polIII)
+
+    if (!is.null(promoter_derived) &&
+      !(promoter_derived$oh3 %in% HOMOPOLYMER_4NT) &&
+      !(promoter_derived$oh3 %in% PALINDROMIC_4NT)) {
+      oh3 <- promoter_derived$oh3
+      core_polIII <- promoter_derived$core_polIII
+      oh3_spacer <- promoter_derived$spacer
+      oh3_in_hf <- oh3 %in% hf_set
+      oh3_fid <- if (oh3 %in% names(fid_lookup)) unname(fid_lookup[oh3]) else NA_real_
+      cli::cli_alert_info(
+        "Derived oh3={oh3} from PolIII promoter 3' end (fidelity={round(oh3_fid, 3)})"
+      )
+    } else {
+      if (is.null(promoter_derived)) {
+        cli::cli_alert_warning("PolIII promoter too short for oh3 derivation. Falling back to score-based selection.")
+      } else {
+        cli::cli_alert_warning(paste0(
+          "Promoter-derived oh3=", promoter_derived$oh3,
+          " is homopolymer or palindromic. Falling back to score-based selection."
+        ))
+      }
+      strategy_used <- "score_based"
+      oh3_candidates <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.50]
+      oh3_candidates <- oh3_candidates[!(oh3_candidates %in% HOMOPOLYMER_4NT)]
+      oh3_candidates <- oh3_candidates[!(oh3_candidates %in% PALINDROMIC_4NT)]
+      if (length(oh3_candidates) == 0) stop("Cannot find any valid oh3 candidate.")
+      oh3_scores <- unname(fid_lookup[oh3_candidates]) * unname(eff_lookup[oh3_candidates])
+      oh3 <- oh3_candidates[which.max(oh3_scores)]
+      oh3_in_hf <- oh3 %in% hf_set
+    }
+
+    # --- oh4: auto-select by P_fid * P_eff ---
+    oh4_exclude <- unique(c(oh_L, reverse_complement(oh_L)))
+    oh4_candidates <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.50]
+    oh4_candidates <- oh4_candidates[!(oh4_candidates %in% oh4_exclude)]
+    oh4_candidates <- oh4_candidates[!(oh4_candidates %in% HOMOPOLYMER_4NT)]
+    oh4_candidates <- oh4_candidates[!(oh4_candidates %in% PALINDROMIC_4NT)]
+    if (length(oh4_candidates) == 0) stop("Cannot find any valid oh4 candidate.")
+    oh4_scores <- unname(fid_lookup[oh4_candidates]) * unname(eff_lookup[oh4_candidates])
+    oh4 <- oh4_candidates[which.max(oh4_scores)]
+    oh4_in_hf <- oh4 %in% hf_set
+  }
+
+  cli::cli_alert_success(paste0(
+    "Fixed overhangs: oh3=", oh3,
+    if (oh3_in_hf) " (HF)" else " (non-HF)",
+    ", oh4=", oh4,
+    if (oh4_in_hf) " (HF)" else " (non-HF)"
+  ))
+
+  # =========================================================================
+  # Phase 2: SB-level DP (Pass 1) with collision avoidance
+  # =========================================================================
+  # The SB DP finds optimal boundary positions, then a local refinement step
+  # (inside search_superblock_boundaries_dp) shifts any colliding boundaries
+  # to nearby positions with unique overhangs.
+  cli::cli_h3("Phase 2: Superblock boundary search (Pass 1)")
+  full_seq <- paste0(cds, cassette_seq)
+  block_overhead <- 22L # 2 x 11-nt enzyme sites per block
+
+  # Blacklist: oh_L, oh3, oh4, their RCs, palindromes, homopolymers
+  sb_blacklist_ohs <- unique(c(
+    oh_L, reverse_complement(oh_L),
+    oh3, reverse_complement(oh3),
+    oh4, reverse_complement(oh4),
+    HOMOPOLYMER_4NT
+  ))
+
+  sb_result <- search_superblock_boundaries_dp(
+    full_seq = full_seq,
+    gene_len = gene_len,
+    max_block_length = max_block_length - block_overhead,
+    min_block_length = min_geneblock_length,
+    blacklist_ohs = sb_blacklist_ohs,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup
+  )
+
+  n_sb <- sb_result$n_superblocks
+  sb_df <- sb_result$boundaries
+  sb_boundary_ohs <- sb_df$boundary_oh[!is.na(sb_df$boundary_oh)]
+
+  # Count any remaining collisions (should be 0 after refinement)
+  n_sb_collisions <- 0L
+  if (length(sb_boundary_ohs) >= 2L) {
+    for (i in seq_along(sb_boundary_ohs)) {
+      for (j in seq_len(i - 1L)) {
+        if (oh_collides(sb_boundary_ohs[i], sb_boundary_ohs[j])) {
+          n_sb_collisions <- n_sb_collisions + 1L
+        }
+      }
+    }
+  }
+
+  cli::cli_alert_success(paste0(
+    "SB DP: ", n_sb, " superblock(s), ",
+    length(sb_boundary_ohs), " boundary(ies). ",
+    "Total score: ", round(sb_result$total_score, 3)
+  ))
+
+  # =========================================================================
+  # Phase 3: Per-SB tile DP (Pass 2)
+  # =========================================================================
+  cli::cli_h3("Phase 3: Tile boundary search within each superblock (Pass 2)")
+
+  # Build the blacklist for tile DPs: SB boundary OHs + oh3 + oh4 + oh_L
+  tile_sb_blacklist <- unique(c(
+    sb_boundary_ohs,
+    vapply(sb_boundary_ohs, reverse_complement, character(1)),
+    oh3, reverse_complement(oh3),
+    oh4, reverse_complement(oh4)
+  ))
+
+  all_tiles_list <- list()
+
+  for (si in seq_len(n_sb)) {
+    sb_start <- sb_df$start_nt[si]
+    sb_end <- sb_df$end_nt[si]
+
+    # Only tile the gene-coding portion of this SB
+    gene_start_in_sb <- sb_start
+    gene_end_in_sb <- min(sb_end, gene_len)
+
+    # Skip SBs that are entirely cassette (no gene content to tile)
+    if (gene_start_in_sb > gene_len) {
+      cli::cli_alert_info("SB {si}: entirely cassette ({sb_end - sb_start + 1L} bp), no tiles.")
+      next
+    }
+
+    sb_gene_len <- gene_end_in_sb - gene_start_in_sb + 1L
+    sb_gene_codons <- sb_gene_len %/% 3L
+
+    cli::cli_alert_info(paste0(
+      "SB ", si, ": gene region [", gene_start_in_sb, ", ", gene_end_in_sb,
+      "] (", sb_gene_codons, " codons)"
+    ))
+
+    # Single-tile SB: if gene content fits in one tile, no DP needed
+    max_codons <- max_mutable_nt %/% 3L
+    if (sb_gene_codons <= max_codons) {
+      sb_seq <- substring(cds, gene_start_in_sb, gene_end_in_sb)
+      oh1 <- substring(sb_seq, 1, 4)
+      oh2 <- substring(sb_seq, nchar(sb_seq) - 3, nchar(sb_seq))
+      oh1_fid <- if (oh1 %in% names(fid_lookup)) unname(fid_lookup[oh1]) else NA_real_
+      oh2_fid <- if (oh2 %in% names(fid_lookup)) unname(fid_lookup[oh2]) else NA_real_
+
+      offset_codons <- (gene_start_in_sb - 1L) %/% 3L
+      n_codons_sb <- sb_gene_codons
+
+      tile_df <- data.frame(
+        tile_id = 1L,
+        start_codon = offset_codons + 1L,
+        end_codon = offset_codons + n_codons_sb,
+        start_nt = gene_start_in_sb,
+        end_nt = gene_end_in_sb,
+        oh1_seq = oh1,
+        oh2_seq = oh2,
+        oh1_in_hf = oh1 %in% POTAPOV_TABLE1_SET3_25,
+        oh2_in_hf = oh2 %in% POTAPOV_TABLE1_SET3_25,
+        oh1_fidelity = oh1_fid,
+        oh2_fidelity = oh2_fid,
+        tile_seq = sb_seq,
+        boundary_shift = 0L,
+        stringsAsFactors = FALSE
+      )
+
+      all_tiles_list[[si]] <- tile_df
+      next
+    }
+
+    # Run tile DP on this SB's gene portion
+    sb_tiles <- search_tile_boundaries_within_sb(
+      cds = cds,
+      sb_start_nt = gene_start_in_sb,
+      sb_end_nt = gene_end_in_sb,
+      max_mutable_nt = max_mutable_nt,
+      min_mutable_nt = min_mutable_nt,
+      sb_blacklist = tile_sb_blacklist,
+      oh_fidelity = oh_fidelity,
+      multi_k = multi_k,
+      dp_k_range = dp_k_range,
+      overlap_codons = overlap_codons,
+      eff_lookup = eff_lookup
+    )
+
+    all_tiles_list[[si]] <- sb_tiles
+
+    # Post-extension: extend the last tile past the SB boundary so that
+    # adjacent SBs' tiles overlap, ensuring no unmutatable codons at SB gaps.
+    # The DP used effective_max_codons = max_codons - overlap_codons, so the
+    # last tile's core span is at most effective_max_codons. Post-extension
+    # adds up to overlap_codons → total tile size stays within max_codons.
+    if (gene_end_in_sb < gene_len && overlap_codons > 0L) {
+      last_idx <- nrow(sb_tiles)
+      total_gene_codons <- gene_len %/% 3L
+      current_ec <- sb_tiles$end_codon[last_idx]
+
+      extended <- FALSE
+      for (ext in seq(overlap_codons, 1L)) {
+        ext_ec <- min(current_ec + ext, total_gene_codons)
+        if (ext_ec <= current_ec) next
+        ext_en <- ext_ec * 3L
+        new_oh2 <- substring(cds, ext_en - 3L, ext_en)
+        new_oh2_rc <- reverse_complement(new_oh2)
+
+        if (!(new_oh2 %in% tile_sb_blacklist) &&
+          !(new_oh2_rc %in% tile_sb_blacklist) &&
+          !(new_oh2 %in% PALINDROMIC_4NT)) {
+          # Valid extension — apply it
+          sb_tiles$end_codon[last_idx] <- ext_ec
+          sb_tiles$end_nt[last_idx] <- ext_en
+          sb_tiles$oh2_seq[last_idx] <- new_oh2
+          new_fid <- if (new_oh2 %in% names(fid_lookup)) {
+            unname(fid_lookup[new_oh2])
+          } else {
+            NA_real_
+          }
+          sb_tiles$oh2_fidelity[last_idx] <- new_fid
+          sb_tiles$oh2_in_hf[last_idx] <- new_oh2 %in% POTAPOV_TABLE1_SET3_25
+          sb_tiles$tile_seq[last_idx] <- substring(
+            cds, sb_tiles$start_nt[last_idx], ext_en
+          )
+          extended <- TRUE
+          cli::cli_alert_info(paste0(
+            "SB ", si, ": extended last tile by ", ext, " codons past SB boundary ",
+            "(new end_codon=", ext_ec, ", oh2=", new_oh2, ")"
+          ))
+          break
+        }
+      }
+      if (!extended) {
+        cli::cli_alert_warning(paste0(
+          "SB ", si, ": could not extend last tile past SB boundary ",
+          "(all overlap positions blacklisted or palindromic)"
+        ))
+      }
+      all_tiles_list[[si]] <- sb_tiles
+    }
+  }
+
+  # =========================================================================
+  # Phase 4: Merge tiles across SBs into unified tile table
+  # =========================================================================
+  cli::cli_h3("Phase 4: Merging tiles across superblocks")
+  tiles <- do.call(rbind, all_tiles_list)
+  rownames(tiles) <- NULL
+  # Reassign sequential tile IDs
+  tiles$tile_id <- seq_len(nrow(tiles))
+  n_tiles <- nrow(tiles)
+
+  cli::cli_alert_success(paste0(
+    "Merged ", n_tiles, " tile(s) across ", n_sb, " superblock(s)."
+  ))
+
+  # =========================================================================
+  # Phase 5: Build partition structure for downstream compatibility
+  # =========================================================================
+  # We need to produce the same output format as plan_assembly() v1:
+  # - tile_partition: partition_tile_superblocks()-style result
+  # - superblock_splits: convert_partition_to_splits()-style result
+  #
+  # In v2, SB boundaries are NOT at tile boundaries — they're at gene-level
+  # DP positions. We build the partition by mapping each tile to its SB.
+
+  # Map tiles to SBs
+  tile_sb_assignment <- integer(n_tiles)
+  for (ti in seq_len(n_tiles)) {
+    tile_mid <- (tiles$start_nt[ti] + tiles$end_nt[ti]) %/% 2L
+    for (si in seq_len(n_sb)) {
+      sb_start <- sb_df$start_nt[si]
+      sb_end <- min(sb_df$end_nt[si], gene_len)
+      if (tile_mid >= sb_start && tile_mid <= sb_end) {
+        tile_sb_assignment[ti] <- si
+        break
+      }
+    }
+  }
+
+  # Build SB-to-tile mapping
+  sb_start_tiles <- integer(n_sb)
+  sb_end_tiles <- integer(n_sb)
+  sb_gene_contents <- integer(n_sb)
+
+  for (si in seq_len(n_sb)) {
+    tiles_in_sb <- which(tile_sb_assignment == si)
+    if (length(tiles_in_sb) > 0) {
+      sb_start_tiles[si] <- min(tiles_in_sb)
+      sb_end_tiles[si] <- max(tiles_in_sb)
+      sb_gene_contents[si] <- tiles$end_nt[max(tiles_in_sb)] -
+        tiles$start_nt[min(tiles_in_sb)] + 1L
+    } else {
+      # Cassette-only SB — no tiles
+      sb_start_tiles[si] <- NA_integer_
+      sb_end_tiles[si] <- NA_integer_
+      sb_gene_contents[si] <- 0L
+    }
+  }
+
+  # Filter to SBs that have tiles (for partition structure)
+  has_tiles <- !is.na(sb_start_tiles)
+  n_sb_with_tiles <- sum(has_tiles)
+
+  partition_sbs <- data.frame(
+    sb_id = seq_len(n_sb_with_tiles),
+    start_tile = sb_start_tiles[has_tiles],
+    end_tile = sb_end_tiles[has_tiles],
+    gene_content = sb_gene_contents[has_tiles],
+    stringsAsFactors = FALSE
+  )
+
+  # Determine if cassette needs splitting
+  # Cassette length that attaches to the last gene SB
+  last_gene_sb <- max(which(has_tiles))
+  cassette_in_last_sb <- if (sb_df$end_nt[last_gene_sb] > gene_len) {
+    sb_df$end_nt[last_gene_sb] - gene_len
+  } else if (last_gene_sb == n_sb) {
+    polIII_len
+  } else {
+    0L
+  }
+
+  cassette_needs_splitting <- polIII_len > (max_block_length - block_overhead)
+
+  partition_result <- list(
+    n_superblocks = n_sb_with_tiles,
+    superblocks = partition_sbs,
+    n_collisions = 0L, # No collisions in v2 — SB OHs are blacklisted in tile DP
+    cassette_needs_splitting = cassette_needs_splitting
+  )
+
+  # Build legacy all_splits format using convert_partition_to_splits
+  # But our SB boundaries are at gene positions, not tile boundaries.
+  # We need to generate split entries for each SB boundary that falls
+  # within a tile's 5'WT or 3'WT region.
+  splits_list <- list()
+  empty_splits <- data.frame(
+    split_nt = integer(0), junction_oh = character(0),
+    junction_in_hf = logical(0), junction_fidelity = numeric(0),
+    block_type = character(0), tile_id = integer(0),
+    stringsAsFactors = FALSE
+  )
+
+  # Extract cassette-region SB boundaries (for pass-through to gene block design)
+  cassette_splits <- data.frame(
+    split_pos = integer(0), junction_oh = character(0),
+    stringsAsFactors = FALSE
+  )
+  for (bi in seq_len(n_sb - 1L)) {
+    split_nt_bi <- sb_df$end_nt[bi]
+    if (split_nt_bi > gene_len && !is.na(sb_df$boundary_oh[bi])) {
+      # Convert full_seq coordinate to cassette-relative coordinate
+      cassette_splits <- rbind(cassette_splits, data.frame(
+        split_pos = split_nt_bi - gene_len,
+        junction_oh = sb_df$boundary_oh[bi],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  if (nrow(cassette_splits) > 0) {
+    cli::cli_alert_info(paste0(
+      "SB DP found ", nrow(cassette_splits), " cassette boundary(ies) at positions ",
+      paste(cassette_splits$split_pos, collapse = ", "),
+      " (overhangs: ", paste(cassette_splits$junction_oh, collapse = ", "), ")"
+    ))
+
+    # Check cassette junction OHs against tile oh1/oh2 (cassette OHs are global
+    # — they participate in every tile's BsmBI reaction)
+    cassette_tile_collisions <- character(0)
+    for (cj_oh in cassette_splits$junction_oh) {
+      for (t in seq_len(n_tiles)) {
+        if (oh_collides(cj_oh, tiles$oh1_seq[t]) ||
+          oh_collides(cj_oh, tiles$oh2_seq[t])) {
+          cassette_tile_collisions <- c(cassette_tile_collisions, cj_oh)
+          break # one collision per OH is enough to flag it
+        }
+      }
+    }
+    if (length(cassette_tile_collisions) > 0) {
+      n_sb_collisions <- n_sb_collisions + length(unique(cassette_tile_collisions))
+      cli::cli_alert_warning(paste0(
+        "Cassette junction OH(s) collide with tile oh1/oh2: ",
+        paste(unique(cassette_tile_collisions), collapse = ", "),
+        ". v2 planner cannot pre-blacklist (SB DP runs before tiles). ",
+        "Consider using the hybrid planner (plan_assembly) instead."
+      ))
+    }
+  }
+
+  # Defense-in-depth: warn if gene residual + cassette exceeds limit but SB DP
+
+  # placed no cassette boundary. The gene block designer will compute local
+  # splits as fallback, but this situation may indicate a SB DP gap.
+  if (nchar(cassette_seq) > 0) {
+    block_overhead_check <- 22L
+    max_sub_content_check <- max_block_length - block_overhead_check
+    gene_sb_boundaries <- sb_df$end_nt[sb_df$end_nt <= gene_len & !is.na(sb_df$boundary_oh)]
+    last_gene_boundary <- if (length(gene_sb_boundaries) > 0) max(gene_sb_boundaries) else 0L
+    gene_residual_check <- gene_len - last_gene_boundary
+    cassette_content_check <- nchar(cassette_seq) - 5L # core cassette (minus oh3+spacer)
+    if (gene_residual_check + cassette_content_check > max_sub_content_check &&
+      nrow(cassette_splits) == 0) {
+      cli::cli_alert_warning(paste0(
+        "Defense check: gene residual (", gene_residual_check, " nt) + cassette (",
+        cassette_content_check, " nt) = ", gene_residual_check + cassette_content_check,
+        " nt exceeds limit (", max_sub_content_check,
+        " nt), but SB DP placed no cassette boundary. ",
+        "Gene block designer will compute local splits as fallback."
+      ))
+    }
+  }
+
+  for (bi in seq_len(n_sb - 1L)) {
+    split_nt <- sb_df$end_nt[bi]
+    # Skip SB boundaries in cassette region (no tiles reference them)
+    if (split_nt > gene_len) next
+
+    junction_oh <- sb_df$boundary_oh[bi]
+    junction_in_hf <- junction_oh %in% POTAPOV_TABLE1_SET3_25
+    junction_fidelity <- if (junction_oh %in% names(fid_lookup)) {
+      unname(fid_lookup[junction_oh])
+    } else {
+      NA_real_
+    }
+
+    # bsmbi_3wt: tiles whose 3'WT spans past this boundary
+    for (t in seq_len(n_tiles)) {
+      if (tiles$end_nt[t] < split_nt) {
+        splits_list[[length(splits_list) + 1L]] <- data.frame(
+          split_nt = split_nt, junction_oh = junction_oh,
+          junction_in_hf = junction_in_hf, junction_fidelity = junction_fidelity,
+          block_type = "bsmbi_3wt", tile_id = tiles$tile_id[t],
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+
+    # bsai_5wt: tiles whose 5'WT spans back past this boundary
+    for (t in seq_len(n_tiles)) {
+      if (tiles$start_nt[t] > 1L && split_nt < tiles$start_nt[t]) {
+        splits_list[[length(splits_list) + 1L]] <- data.frame(
+          split_nt = split_nt, junction_oh = junction_oh,
+          junction_in_hf = junction_in_hf, junction_fidelity = junction_fidelity,
+          block_type = "bsai_5wt", tile_id = tiles$tile_id[t],
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+
+  all_splits <- if (length(splits_list) > 0) {
+    result <- do.call(rbind, splits_list)
+    rownames(result) <- NULL
+    result
+  } else {
+    empty_splits
+  }
+
+  if (n_sb > 1L) {
+    cli::cli_alert_info(paste0(
+      "SB-first partition: ", n_sb_with_tiles, " superblocks, ",
+      length(sb_boundary_ohs), " boundary(ies). ",
+      nrow(all_splits), " per-tile split entries."
+    ))
+  } else {
+    cli::cli_alert_success("All gene blocks within synthesis limit. No superblock splits needed.")
+  }
+
+  # =========================================================================
+  # Phase 6: Per-reaction pairwise validation
+  # =========================================================================
+  cli::cli_h3("Phase 6: Validating per-reaction overhang fidelity")
+
+  reaction_fidelity <- list()
+  for (i in seq_len(n_tiles)) {
+    tile <- tiles[i, ]
+
+    # BsaI reaction overhangs: oh_L, [SB junction ohs in 5'WT], oh1_i, oh4
+    bsai_ohs <- unique(c(oh_L, tile$oh1_seq, oh4))
+    tile_5wt_splits <- all_splits[all_splits$tile_id == i & all_splits$block_type == "bsai_5wt", ]
+    if (nrow(tile_5wt_splits) > 0) {
+      bsai_ohs <- unique(c(bsai_ohs, tile_5wt_splits$junction_oh))
+    }
+
+    bsai_result <- compute_set_fidelity(bsai_ohs, bsai_matrix)
+
+    reaction_fidelity[[length(reaction_fidelity) + 1L]] <- data.frame(
+      tile_id = i, reaction_type = "BsaI",
+      overhangs = paste(bsai_ohs, collapse = ";"),
+      n_overhangs = length(bsai_ohs), n_in_hf = sum(bsai_ohs %in% hf_set),
+      set_fidelity = bsai_result$set_fidelity,
+      stringsAsFactors = FALSE
+    )
+
+    # BsmBI reaction overhangs: oh2_i, [SB junction ohs in 3'WT], oh3
+    bsmbi_ohs <- unique(c(tile$oh2_seq, oh3))
+    tile_3wt_splits <- all_splits[all_splits$tile_id == i & all_splits$block_type == "bsmbi_3wt", ]
+    if (nrow(tile_3wt_splits) > 0) {
+      bsmbi_ohs <- unique(c(bsmbi_ohs, tile_3wt_splits$junction_oh))
+    }
+
+    bsmbi_result <- compute_set_fidelity(bsmbi_ohs, bsmbi_matrix)
+
+    reaction_fidelity[[length(reaction_fidelity) + 1L]] <- data.frame(
+      tile_id = i, reaction_type = "BsmBI",
+      overhangs = paste(bsmbi_ohs, collapse = ";"),
+      n_overhangs = length(bsmbi_ohs), n_in_hf = sum(bsmbi_ohs %in% hf_set),
+      set_fidelity = bsmbi_result$set_fidelity,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  reaction_fidelity_df <- do.call(rbind, reaction_fidelity)
+  rownames(reaction_fidelity_df) <- NULL
+
+  # Warn about low-fidelity reactions
+  low_fid <- reaction_fidelity_df$set_fidelity < fidelity_threshold
+  if (any(low_fid)) {
+    n_low <- sum(low_fid)
+    min_fid <- min(reaction_fidelity_df$set_fidelity)
+    cli::cli_alert_warning(paste0(
+      n_low, " reaction(s) below fidelity threshold (",
+      fidelity_threshold, "). Min: ", round(min_fid, 4)
+    ))
+  } else {
+    cli::cli_alert_success(paste0(
+      "All ", nrow(reaction_fidelity_df), " reactions above fidelity threshold. ",
+      "Min: ", round(min(reaction_fidelity_df$set_fidelity), 4)
+    ))
+  }
+
+  # Summary stats
+  n_boundaries <- n_tiles - 1L
+  n_both_hf <- if (n_boundaries > 0) {
+    sum(tiles$oh2_in_hf[-n_tiles] & tiles$oh1_in_hf[-1L])
+  } else {
+    0L
+  }
+  n_one_hf <- if (n_boundaries > 0) {
+    sum(xor(tiles$oh2_in_hf[-n_tiles], tiles$oh1_in_hf[-1L]))
+  } else {
+    0L
+  }
+  n_neither_hf <- n_boundaries - n_both_hf - n_one_hf
+
+  # Compute core_downstream_cassette
+  core_downstream_cassette <- if (!is.null(downstream_cassette) && !is.null(core_polIII)) {
+    substring(downstream_cassette, 1, nchar(downstream_cassette) - 5L)
+  } else {
+    NULL
+  }
+
+  assembly_plan <- list(
+    tiles = tiles,
+    oh3 = oh3,
+    oh4 = oh4,
+    oh_L = oh_L,
+    oh3_in_hf = oh3_in_hf,
+    oh4_in_hf = oh4_in_hf,
+    core_polIII = core_polIII,
+    core_downstream_cassette = core_downstream_cassette,
+    oh3_spacer = oh3_spacer,
+    superblock_splits = all_splits,
+    tile_partition = partition_result,
+    reaction_fidelity = reaction_fidelity_df,
+    strategy_used = strategy_used,
+    hf_set_used = hf_set,
+    oh_fidelity_used = oh_fidelity,
+    cassette_needs_splitting = cassette_needs_splitting,
+    sb_result = sb_result, # v2-specific: SB DP result for inspection
+    cassette_splits = cassette_splits, # v2-specific: pre-computed cassette boundaries
+    summary = list(
+      n_tiles = n_tiles,
+      n_boundaries = n_boundaries,
+      n_boundaries_both_in_hf = n_both_hf,
+      n_boundaries_one_in_hf = n_one_hf,
+      n_boundaries_neither_in_hf = n_neither_hf,
+      n_superblocks = n_sb_with_tiles,
+      n_superblock_splits = nrow(all_splits),
+      n_sb_collisions = n_sb_collisions,
+      cassette_needs_splitting = cassette_needs_splitting,
       overall_min_fidelity = min(reaction_fidelity_df$set_fidelity)
     )
   )

@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-02 — BUG-008: remove hf_set from split/cassette functions, use overhang_score
+# Last updated: 2026-03-07 — Add oh_5/oh_3 columns to all block data frames for correct report display
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -175,6 +175,7 @@ build_cassette_subblocks <- function(cassette_seq, oh_5, oh_3_final,
       block_name = block_name, sequence = block_seq,
       length = nchar(block_seq), enzyme_type = "BsmBI",
       gene_region = paste0("cassette_tile", tile_id, "_frag", cs),
+      oh_5 = cs_oh5, oh_3 = cs_oh3,
       stringsAsFactors = FALSE
     )
     cass_names <- c(cass_names, block_name)
@@ -330,6 +331,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           block_name = block_name, sequence = block_seq,
           length = nchar(block_seq), enzyme_type = "BsaI",
           gene_region = paste0("5wt_tile", tile$tile_id),
+          oh_5 = oh_5, oh_3 = oh_3,
           stringsAsFactors = FALSE
         )
         bsai_parts <- block_name
@@ -415,6 +417,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             block_name = block_name, sequence = block_seq,
             length = nchar(block_seq), enzyme_type = "BsaI",
             gene_region = paste0("5wt_tile", tile$tile_id, "_sub", s),
+            oh_5 = oh_5, oh_3 = oh_3,
             stringsAsFactors = FALSE
           )
           bsai_parts <- c(bsai_parts, block_name)
@@ -478,8 +481,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         if (nrow(sb_3wt_region) == 0) {
           # Check if single block is still oversized due to cassette
           single_block_len <- nchar(wt_3prime_seq) + nchar(polIII_for_block) + block_overhead
+          max_sub_content <- max_block_length - block_overhead
           if (single_block_len > max_block_length &&
-            nchar(polIII_for_block) > max_sub_content &&
             use_precomputed_splits &&
             !is.null(assembly_plan$oh_fidelity_used)) {
             # Gene region small, cassette oversized — split cassette
@@ -487,19 +490,76 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
               "Tile ", tile$tile_id, ": single 3'WT block oversized (",
               single_block_len, " nt) due to large cassette. Splitting cassette."
             ))
-            # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
-            cass_exclude <- unique(c(
-              oh3, all_oh2,
-              vapply(c(oh3, all_oh2), reverse_complement, character(1))
-            ))
-            cass_splits <- find_cassette_split_points(
-              cassette_seq = polIII_for_block,
-              max_sub_length = max_sub_content,
-              existing_ohs = cass_exclude,
-              oh_fidelity = assembly_plan$oh_fidelity_used
-            )
-            if (nrow(cass_splits) > 0) {
-              # Gene sub-block (gene content only, junction to first cassette fragment)
+            # Use pre-computed SB DP cassette splits if available, else greedy
+            use_sb_dp_cass <- !is.null(assembly_plan$cassette_splits) &&
+              nrow(assembly_plan$cassette_splits) > 0
+            if (use_sb_dp_cass) {
+              cass_splits <- assembly_plan$cassette_splits
+              cli::cli_alert_info(paste0(
+                "Tile ", tile$tile_id, ": using ", nrow(cass_splits),
+                " pre-computed SB DP cassette split(s)."
+              ))
+            } else {
+              # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
+              cass_exclude <- unique(c(
+                oh3, all_oh2,
+                vapply(c(oh3, all_oh2), reverse_complement, character(1))
+              ))
+              cass_splits <- find_cassette_split_points(
+                cassette_seq = polIII_for_block,
+                max_sub_length = max_sub_content,
+                existing_ohs = cass_exclude,
+                oh_fidelity = assembly_plan$oh_fidelity_used
+              )
+            }
+            if (use_sb_dp_cass && nrow(cass_splits) > 0) {
+              # SB DP path: gene sub-block carries gene + cassette prefix up to
+              # split_pos, trimmed by 4 nt (junction OH convention for BsmBI blocks).
+              # The junction OH bridges gene sub-block and cassette sub-block(s).
+              first_split_pos <- as.integer(cass_splits$split_pos[1L])
+              oh_3_sub <- cass_splits$junction_oh[1L]
+              # Content: gene residual + cassette prefix, minus last 4 nt (junction OH)
+              content_len <- nchar(wt_3prime_seq) + first_split_pos - 4L
+              if (content_len > nchar(wt_3prime_seq)) {
+                sub_seq <- paste0(
+                  wt_3prime_seq,
+                  substring(polIII_for_block, 1L, content_len - nchar(wt_3prime_seq))
+                )
+              } else {
+                sub_seq <- substring(wt_3prime_seq, 1L, content_len)
+              }
+              block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
+              block_seq <- create_bsmbi_block(sub_seq, tile$oh2_seq, oh_3_sub)
+              blocks[[length(blocks) + 1]] <- data.frame(
+                block_name = block_name, sequence = block_seq,
+                length = nchar(block_seq), enzyme_type = "BsmBI",
+                gene_region = paste0("3wt_tile", tile$tile_id),
+                oh_5 = tile$oh2_seq, oh_3 = oh_3_sub,
+                stringsAsFactors = FALSE
+              )
+              bsmbi_parts <- block_name
+              # Remaining cassette for separate block(s)
+              remaining_cassette <- substring(polIII_for_block, first_split_pos + 1L)
+              remaining_splits <- cass_splits[-1L, , drop = FALSE]
+              if (nrow(remaining_splits) > 0L) {
+                remaining_splits$split_pos <- remaining_splits$split_pos - first_split_pos
+              }
+              cass_result <- build_cassette_subblocks(
+                cassette_seq = remaining_cassette,
+                oh_5 = oh_3_sub,
+                oh_3_final = oh3,
+                oh3_spacer = oh3_spacer,
+                tile_id = tile$tile_id,
+                sub_offset = 1L,
+                cassette_splits = remaining_splits,
+                max_block_length = max_block_length
+              )
+              for (cb in cass_result$blocks) {
+                blocks[[length(blocks) + 1]] <- cb
+              }
+              bsmbi_parts <- c(bsmbi_parts, cass_result$part_names)
+            } else if (nrow(cass_splits) > 0) {
+              # Greedy fallback: gene sub-block with gene content only
               gene_cass_oh <- substring(polIII_for_block, 1, 4)
               block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
               block_seq <- create_bsmbi_block(wt_3prime_seq, tile$oh2_seq, gene_cass_oh)
@@ -507,6 +567,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                 block_name = block_name, sequence = block_seq,
                 length = nchar(block_seq), enzyme_type = "BsmBI",
                 gene_region = paste0("3wt_tile", tile$tile_id),
+                oh_5 = tile$oh2_seq, oh_3 = gene_cass_oh,
                 stringsAsFactors = FALSE
               )
               bsmbi_parts <- block_name
@@ -536,6 +597,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                 block_name = block_name, sequence = block_seq,
                 length = nchar(block_seq), enzyme_type = "BsmBI",
                 gene_region = paste0("3wt_polIII_tile", tile$tile_id),
+                oh_5 = tile$oh2_seq, oh_3 = oh3,
                 stringsAsFactors = FALSE
               )
               bsmbi_parts <- block_name
@@ -551,6 +613,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
               block_name = block_name, sequence = block_seq,
               length = nchar(block_seq), enzyme_type = "BsmBI",
               gene_region = paste0("3wt_polIII_tile", tile$tile_id),
+              oh_5 = tile$oh2_seq, oh_3 = oh3,
               stringsAsFactors = FALSE
             )
             bsmbi_parts <- block_name
@@ -655,24 +718,35 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         last_gene_len <- split_points[n_sub + 1L] - split_points[n_sub]
         last_total <- last_gene_len + nchar(polIII_for_block) + block_overhead
         needs_cassette_split <- last_total > max_block_length &&
-          nchar(polIII_for_block) > max_sub_content &&
           use_precomputed_splits &&
           !is.null(assembly_plan$oh_fidelity_used)
 
         # Pre-compute cassette splits if needed (shared across sub-block loop)
         cassette_splits_df <- NULL
+        use_sb_dp_cass_p2 <- FALSE
         if (needs_cassette_split) {
-          # Exclude ALL tiles' oh2 + internal junctions — blocks shared via dedup
-          cass_exclude <- unique(c(
-            oh3, all_oh2, internal_oh,
-            vapply(c(oh3, all_oh2, internal_oh), reverse_complement, character(1))
-          ))
-          cassette_splits_df <- find_cassette_split_points(
-            cassette_seq = polIII_for_block,
-            max_sub_length = max_sub_content,
-            existing_ohs = cass_exclude,
-            oh_fidelity = assembly_plan$oh_fidelity_used
-          )
+          # Use pre-computed SB DP cassette splits if available, else greedy
+          if (!is.null(assembly_plan$cassette_splits) &&
+            nrow(assembly_plan$cassette_splits) > 0) {
+            cassette_splits_df <- assembly_plan$cassette_splits
+            use_sb_dp_cass_p2 <- TRUE
+            cli::cli_alert_info(paste0(
+              "Tile ", tile$tile_id, ": using ", nrow(cassette_splits_df),
+              " pre-computed SB DP cassette split(s)."
+            ))
+          } else {
+            # Exclude ALL tiles' oh2 + internal junctions — blocks shared via dedup
+            cass_exclude <- unique(c(
+              oh3, all_oh2, internal_oh,
+              vapply(c(oh3, all_oh2, internal_oh), reverse_complement, character(1))
+            ))
+            cassette_splits_df <- find_cassette_split_points(
+              cassette_seq = polIII_for_block,
+              max_sub_length = max_sub_content,
+              existing_ohs = cass_exclude,
+              oh_fidelity = assembly_plan$oh_fidelity_used
+            )
+          }
         }
 
         for (s in seq_len(n_sub)) {
@@ -681,9 +755,24 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           if (s < n_sub) {
             # Trim trailing 4 nt (junction OH) — provided by next sub-block's BsmBI_fwd
             sub_seq <- substring(cds, sub_start, sub_end - 4L)
+          } else if (needs_cassette_split && use_sb_dp_cass_p2 &&
+            nrow(cassette_splits_df) > 0) {
+            # SB DP path: last gene sub-block carries gene + cassette prefix,
+            # trimmed by 4 nt (junction OH convention for BsmBI blocks).
+            first_split_pos_p2 <- as.integer(cassette_splits_df$split_pos[1L])
+            gene_residual <- nchar(substring(cds, sub_start, sub_end))
+            content_len_p2 <- gene_residual + first_split_pos_p2 - 4L
+            if (content_len_p2 > gene_residual) {
+              sub_seq <- paste0(
+                substring(cds, sub_start, sub_end),
+                substring(polIII_for_block, 1L, content_len_p2 - gene_residual)
+              )
+            } else {
+              sub_seq <- substring(cds, sub_start, sub_start + content_len_p2 - 1L)
+            }
           } else if (needs_cassette_split && !is.null(cassette_splits_df) &&
             nrow(cassette_splits_df) > 0) {
-            # Last gene sub-block: gene content only (cassette goes in separate fragments)
+            # Greedy fallback: gene content only (cassette goes in separate fragments)
             sub_seq <- substring(cds, sub_start, sub_end)
           } else {
             # Last sub-block: no trimming, and append PolIII
@@ -695,17 +784,17 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             oh_5_sub <- if (s == 1L) tile$oh2_seq else internal_oh[s - 1L]
             oh_3_sub <- internal_oh[s]
             spacer_for_sub <- NULL
-          } else if (needs_cassette_split && !is.null(cassette_splits_df) &&
+          } else if (needs_cassette_split && use_sb_dp_cass_p2 &&
             nrow(cassette_splits_df) > 0) {
-            # Last gene sub-block connects to first cassette fragment
+            # SB DP path: junction OH comes from SB DP
             oh_5_sub <- if (s == 1L) tile$oh2_seq else internal_oh[s - 1L]
             oh_3_sub <- cassette_splits_df$junction_oh[1L]
-            # Use 4-nt overhang from cassette start as the junction
-            # Actually: the junction OH is the first cassette split point's OH,
-            # but we need an OH between gene and cassette. Use the first 4 nt of
-            # the cassette as the junction (gene sub-block carries them at the end).
+            spacer_for_sub <- NULL
+          } else if (needs_cassette_split && !is.null(cassette_splits_df) &&
+            nrow(cassette_splits_df) > 0) {
+            # Greedy fallback: derive junction from first 4 nt of cassette
+            oh_5_sub <- if (s == 1L) tile$oh2_seq else internal_oh[s - 1L]
             first_cass_oh <- substring(polIII_for_block, 1, 4)
-            # Check if this collides; if so, use the first cassette split OH
             cass_exclude_all <- unique(c(
               oh3, tile$oh2_seq, internal_oh,
               cassette_splits_df$junction_oh,
@@ -716,7 +805,6 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             ))
             if (first_cass_oh %in% cass_exclude_all ||
               first_cass_oh %in% HOMOPOLYMER_4NT) {
-              # Fallback: use the first 4 nt at position 4 of cassette
               first_cass_oh <- substring(polIII_for_block, 2, 5)
             }
             oh_3_sub <- first_cass_oh
@@ -741,6 +829,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             block_name = block_name, sequence = block_seq,
             length = nchar(block_seq), enzyme_type = "BsmBI",
             gene_region = paste0(gene_region_prefix, tile$tile_id, "_sub", s),
+            oh_5 = oh_5_sub, oh_3 = oh_3_sub,
             stringsAsFactors = FALSE
           )
           bsmbi_parts <- c(bsmbi_parts, block_name)
@@ -749,18 +838,37 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         # Build cassette fragment sub-blocks if cassette was split
         if (needs_cassette_split && !is.null(cassette_splits_df) &&
           nrow(cassette_splits_df) > 0) {
-          # The junction between last gene sub-block and first cassette fragment
-          # uses oh_3_sub from above as the 5' overhang of the first cassette piece
-          cass_result <- build_cassette_subblocks(
-            cassette_seq = polIII_for_block,
-            oh_5 = oh_3_sub, # continues from last gene sub-block's oh_3
-            oh_3_final = oh3,
-            oh3_spacer = oh3_spacer,
-            tile_id = tile$tile_id,
-            sub_offset = n_sub,
-            cassette_splits = cassette_splits_df,
-            max_block_length = max_block_length
-          )
+          if (use_sb_dp_cass_p2) {
+            # SB DP path: remaining cassette starts after first split point
+            first_sp <- as.integer(cassette_splits_df$split_pos[1L])
+            remaining_cassette_p2 <- substring(polIII_for_block, first_sp + 1L)
+            remaining_splits_p2 <- cassette_splits_df[-1L, , drop = FALSE]
+            if (nrow(remaining_splits_p2) > 0L) {
+              remaining_splits_p2$split_pos <- remaining_splits_p2$split_pos - first_sp
+            }
+            cass_result <- build_cassette_subblocks(
+              cassette_seq = remaining_cassette_p2,
+              oh_5 = oh_3_sub, # junction OH from SB DP
+              oh_3_final = oh3,
+              oh3_spacer = oh3_spacer,
+              tile_id = tile$tile_id,
+              sub_offset = n_sub,
+              cassette_splits = remaining_splits_p2,
+              max_block_length = max_block_length
+            )
+          } else {
+            # Greedy fallback: full cassette with greedy splits
+            cass_result <- build_cassette_subblocks(
+              cassette_seq = polIII_for_block,
+              oh_5 = oh_3_sub, # continues from last gene sub-block's oh_3
+              oh_3_final = oh3,
+              oh3_spacer = oh3_spacer,
+              tile_id = tile$tile_id,
+              sub_offset = n_sub,
+              cassette_splits = cassette_splits_df,
+              max_block_length = max_block_length
+            )
+          }
           for (cb in cass_result$blocks) {
             blocks[[length(blocks) + 1]] <- cb
           }
@@ -773,17 +881,27 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       if (polIII_block_len > max_block_length && use_precomputed_splits &&
         !is.null(assembly_plan$oh_fidelity_used)) {
         # Cassette alone is oversized — split it
-        # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
-        cass_exclude <- unique(c(
-          oh3, all_oh2,
-          vapply(c(oh3, all_oh2), reverse_complement, character(1))
-        ))
-        cass_splits <- find_cassette_split_points(
-          cassette_seq = polIII_for_block,
-          max_sub_length = max_sub_content,
-          existing_ohs = cass_exclude,
-          oh_fidelity = assembly_plan$oh_fidelity_used
-        )
+        # Use pre-computed SB DP cassette splits if available, else greedy
+        if (!is.null(assembly_plan$cassette_splits) &&
+          nrow(assembly_plan$cassette_splits) > 0) {
+          cass_splits <- assembly_plan$cassette_splits
+          cli::cli_alert_info(paste0(
+            "Tile ", tile$tile_id, ": using ", nrow(cass_splits),
+            " pre-computed SB DP cassette split(s)."
+          ))
+        } else {
+          # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
+          cass_exclude <- unique(c(
+            oh3, all_oh2,
+            vapply(c(oh3, all_oh2), reverse_complement, character(1))
+          ))
+          cass_splits <- find_cassette_split_points(
+            cassette_seq = polIII_for_block,
+            max_sub_length = max_sub_content,
+            existing_ohs = cass_exclude,
+            oh_fidelity = assembly_plan$oh_fidelity_used
+          )
+        }
         if (nrow(cass_splits) > 0) {
           cass_result <- build_cassette_subblocks(
             cassette_seq = polIII_for_block,
@@ -809,6 +927,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             block_name = block_name, sequence = block_seq,
             length = nchar(block_seq), enzyme_type = "BsmBI",
             gene_region = paste0("polIII_tile", tile$tile_id),
+            oh_5 = tile$oh2_seq, oh_3 = oh3,
             stringsAsFactors = FALSE
           )
           bsmbi_parts <- block_name
@@ -824,6 +943,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           block_name = block_name, sequence = block_seq,
           length = nchar(block_seq), enzyme_type = "BsmBI",
           gene_region = paste0("polIII_tile", tile$tile_id),
+          oh_5 = tile$oh2_seq, oh_3 = oh3,
           stringsAsFactors = FALSE
         )
         bsmbi_parts <- block_name
@@ -1032,6 +1152,87 @@ deduplicate_blocks <- function(blocks) {
   }
 
   list(blocks = result, name_map = name_map)
+}
+
+#' Recompute per-reaction set fidelity from actual block overhangs
+#'
+#' After block construction, some split points may have been filtered out
+#' (merged sub-blocks). The pre-computed reaction_fidelity in assembly_plan
+#' uses ALL junction OHs from all_splits, which may include phantom overhangs
+#' that no longer exist in the final blocks. This function recomputes fidelity
+#' using only the overhangs present in the actual blocks.
+#'
+#' @param geneblock_result List from design_wt_geneblocks()
+#' @param assembly_plan List from plan_assembly()
+#' @return Updated reaction_fidelity data frame with corrected set_fidelity,
+#'   overhangs, and n_overhangs columns
+recompute_reaction_fidelity <- function(geneblock_result, assembly_plan) {
+  blocks <- geneblock_result$blocks
+  manifests <- geneblock_result$tile_manifests
+  n_tiles <- nrow(manifests)
+
+  bsai_matrix <- load_pairwise_matrix("BsaI")
+  bsmbi_matrix <- load_pairwise_matrix("BsmBI")
+
+  oh_L <- assembly_plan$oh_L
+  oh3 <- assembly_plan$oh3
+  oh4 <- assembly_plan$oh4
+
+  reaction_fidelity <- list()
+
+  for (i in seq_len(n_tiles)) {
+    manifest <- manifests[i, ]
+
+    # --- BsaI reaction ---
+    # Collect OHs from BsaI blocks + fixed oligo-contributed OHs (oh_L, oh4)
+    bsai_ohs <- c(oh_L, oh4)
+    if (nzchar(manifest$bsai_parts)) {
+      bsai_part_names <- strsplit(manifest$bsai_parts, ";")[[1]]
+      for (bp in bsai_part_names) {
+        block_row <- blocks[blocks$block_name == bp, ]
+        if (nrow(block_row) > 0) {
+          bsai_ohs <- c(bsai_ohs, block_row$oh_5[1], block_row$oh_3[1])
+        }
+      }
+    }
+    bsai_ohs <- unique(bsai_ohs)
+    bsai_result <- compute_set_fidelity(bsai_ohs, bsai_matrix)
+
+    reaction_fidelity[[length(reaction_fidelity) + 1L]] <- data.frame(
+      tile_id = manifest$tile_id, reaction_type = "BsaI",
+      overhangs = paste(bsai_ohs, collapse = ";"),
+      n_overhangs = length(bsai_ohs),
+      set_fidelity = bsai_result$set_fidelity,
+      stringsAsFactors = FALSE
+    )
+
+    # --- BsmBI reaction ---
+    # Collect OHs from BsmBI blocks + fixed oh3
+    bsmbi_ohs <- c(oh3)
+    if (nzchar(manifest$bsmbi_parts)) {
+      bsmbi_part_names <- strsplit(manifest$bsmbi_parts, ";")[[1]]
+      for (bp in bsmbi_part_names) {
+        block_row <- blocks[blocks$block_name == bp, ]
+        if (nrow(block_row) > 0) {
+          bsmbi_ohs <- c(bsmbi_ohs, block_row$oh_5[1], block_row$oh_3[1])
+        }
+      }
+    }
+    bsmbi_ohs <- unique(bsmbi_ohs)
+    bsmbi_result <- compute_set_fidelity(bsmbi_ohs, bsmbi_matrix)
+
+    reaction_fidelity[[length(reaction_fidelity) + 1L]] <- data.frame(
+      tile_id = manifest$tile_id, reaction_type = "BsmBI",
+      overhangs = paste(bsmbi_ohs, collapse = ";"),
+      n_overhangs = length(bsmbi_ohs),
+      set_fidelity = bsmbi_result$set_fidelity,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  result <- do.call(rbind, reaction_fidelity)
+  rownames(result) <- NULL
+  result
 }
 
 #' Split oversized gene blocks into superblocks

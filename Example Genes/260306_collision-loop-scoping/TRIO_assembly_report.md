@@ -1,6 +1,6 @@
 # DMS-GG Assembly Report: TRIO
 
-Generated: 2026-03-07 15:14:02
+Generated: 2026-03-06 18:44:02
 Pipeline: dms-gg-oligo-pipeline (3-Enzyme Architecture: BsaI + BsmBI + PaqCI)
 
 ---
@@ -133,7 +133,7 @@ Every oligo in the pool has the same layout regardless of tile position:
 | tile_coverage             | Tiles cover entire gene without gaps                          | PASS   | 9294 / 9294 nt covered                                                                                                                              |
 | variant_count             | Expected number of variants generated                         | PASS   | 64974 unique variants (expected: 64974 across 3094/3096 mutable positions; 58786 missense + 3094 nonsense + 3094 wt_control; 2 position(s) skipped) |
 | single_codon_change       | Each non-control variant differs by exactly one codon from WT | PASS   | 618800 / 618800 variants confirmed (WT controls excluded)                                                                                           |
-| oligo_gc_content          | Oligo GC content within reasonable range (25-75%)             | FAIL   | GC range: 37.9-75.2% | 3 oligo(s) with extreme GC                                                                                                   |
+| oligo_gc_content          | Oligo GC content within reasonable range (25-75%)             | FAIL   | GC range: 37.9-75.2% | 6 oligo(s) with extreme GC                                                                                                   |
 | domestication_complete    | Gene domesticated for all 3 enzymes (BsaI, BsmBI, PaqCI)      | PASS   | No enzyme sites in gene                                                                                                                             |
 | overhang_fidelity         | Tile boundary overhangs have adequate fidelity                | FAIL   | 44 tile(s) with low-fidelity boundary overhangs (<0.80)                                                                                             |
 | tile_manifests            | Per-tile assembly manifests complete                          | PASS   | 47 tile manifest(s) generated                                                                                                                       |
@@ -144,64 +144,6 @@ Every oligo in the pool has the same layout regardless of tile position:
 | cassette_fragment_lengths | Cassette fragments within synthesis limits                    | PASS   | 1 cassette fragment(s). Range: 982-982 nt. 0 over max, 0 under min.                                                                                 |
 | sb_overhang_collisions    | Superblock boundary overhangs are unique (no collisions)      | PASS   | 7 SB boundary OH(s), all unique                                                                                                                     |
 
-## 5b. Reaction Fidelity Summary
-
-Set fidelity for each tile's BsaI and BsmBI reactions,
-computed from the actual block overhangs after construction:
-
-| Tile | BsaI OHs | BsaI Set Fidelity | BsmBI OHs | BsmBI Set Fidelity |
-| ---- | -------- | ----------------- | --------- | ------------------ |
-| 1    | 2        | 1.0000            | 9         | 0.9986             |
-| 2    | 3        | 1.0000            | 9         | 0.9986             |
-| 3    | 3        | 1.0000            | 9         | 0.9986             |
-| 4    | 3        | 1.0000            | 9         | 0.9986             |
-| 5    | 3        | 1.0000            | 9         | 0.9986             |
-| 6    | 3        | 0.9574            | 9         | 0.9986             |
-| 7    | 3        | 0.9950            | 8         | 0.9986             |
-| 8    | 3        | 1.0000            | 8         | 0.9986             |
-| 9    | 3        | 1.0000            | 8         | 0.9931             |
-| 10   | 3        | 0.9928            | 8         | 0.9895             |
-| 11   | 4        | 1.0000            | 8         | 0.9986             |
-| 12   | 4        | 0.9574            | 7         | 0.9986             |
-| 13   | 4        | 1.0000            | 7         | 0.9986             |
-| 14   | 4        | 1.0000            | 7         | 0.9817             |
-| 15   | 4        | 1.0000            | 7         | 0.9986             |
-| 16   | 5        | 1.0000            | 7         | 0.9986             |
-| 17   | 5        | 0.9574            | 7         | 0.9986             |
-| 18   | 5        | 0.9928            | 6         | 1.0000             |
-| 19   | 5        | 0.9950            | 6         | 0.9986             |
-| 20   | 5        | 1.0000            | 6         | 1.0000             |
-| 21   | 5        | 1.0000            | 6         | 1.0000             |
-| 22   | 6        | 1.0000            | 6         | 1.0000             |
-| 23   | 6        | 0.9790            | 6         | 0.9981             |
-| 24   | 6        | 1.0000            | 5         | 1.0000             |
-| 25   | 6        | 1.0000            | 5         | 1.0000             |
-| 26   | 6        | 0.9950            | 5         | 1.0000             |
-| 27   | 6        | 1.0000            | 5         | 0.9986             |
-| 28   | 7        | 1.0000            | 5         | 1.0000             |
-| 29   | 7        | 1.0000            | 5         | 1.0000             |
-| 30   | 7        | 1.0000            | 4         | 0.9900             |
-| 31   | 7        | 1.0000            | 4         | 1.0000             |
-| 32   | 7        | 1.0000            | 4         | 1.0000             |
-| 33   | 7        | 1.0000            | 4         | 0.8126             |
-| 34   | 8        | 0.9707            | 4         | 0.9961             |
-| 35   | 8        | 0.9574            | 4         | 1.0000             |
-| 36   | 8        | 0.9984            | 4         | 1.0000             |
-| 37   | 8        | 0.9908            | 4         | 1.0000             |
-| 38   | 8        | 1.0000            | 4         | 0.7946             |
-| 39   | 8        | 0.9707            | 3         | 1.0000             |
-| 40   | 8        | 0.9294            | 3         | 1.0000             |
-| 41   | 8        | 1.0000            | 3         | 1.0000             |
-| 42   | 9        | 0.9966            | 3         | 1.0000             |
-| 43   | 9        | 1.0000            | 3         | 1.0000             |
-| 44   | 9        | 1.0000            | 2         | 0.7829             |
-| 45   | 9        | 1.0000            | 2         | 1.0000             |
-| 46   | 9        | 1.0000            | 2         | 0.9984             |
-| 47   | 9        | 0.9985            | 2         | 1.0000             |
-
-**Min:** 0.7829 | **Max:** 1.0000 | **Mean:** 0.9888
-
-**Warning:** 3 reaction(s) below 0.90 fidelity — consider alternative split points or overhang reassignment.
 ## 6. Fixed Overhangs & Helper Plasmid
 
 These overhangs are the same across all tile reactions:
@@ -270,16 +212,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 6   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 7   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 10  | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [AAAC]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[TTCA]----3'WT+PolIII sub8----[CACC]
-   AAAC                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [AAAC]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[CACC]----3'WT+PolIII sub8----
+   AAAC                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (9 overhangs)
+**Set fidelity:** 0.9986 (8 overhangs)
 
 ---
 
@@ -325,16 +267,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 6   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 7   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 10  | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TCTA]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[TTCA]----3'WT+PolIII sub8----[CACC]
-   TCTA                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [TCTA]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[CACC]----3'WT+PolIII sub8----
+   TCTA                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (9 overhangs)
+**Set fidelity:** 0.9986 (8 overhangs)
 
 ---
 
@@ -380,16 +322,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 6   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 7   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 10  | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [ATTT]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[TTCA]----3'WT+PolIII sub8----[CACC]
-   ATTT                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [ATTT]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[CACC]----3'WT+PolIII sub8----
+   ATTT                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (9 overhangs)
+**Set fidelity:** 0.9986 (8 overhangs)
 
 ---
 
@@ -435,16 +377,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 6   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 7   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 10  | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [AGTT]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[TTCA]----3'WT+PolIII sub8----[CACC]
-   AGTT                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [AGTT]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[CACC]----3'WT+PolIII sub8----
+   AGTT                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (9 overhangs)
+**Set fidelity:** 0.9986 (8 overhangs)
 
 ---
 
@@ -490,16 +432,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 6   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 7   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 10  | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [GATT]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[TTCA]----3'WT+PolIII sub8----[CACC]
-   GATT                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [GATT]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[CACC]----3'WT+PolIII sub8----
+   GATT                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (9 overhangs)
+**Set fidelity:** 0.9986 (8 overhangs)
 
 ---
 
@@ -545,16 +487,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 6   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 7   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 8   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 9   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 10  | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [GAAG]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[TTCA]----3'WT+PolIII sub8----[CACC]
-   GAAG                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [GAAG]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT sub7----[CACC]----3'WT+PolIII sub8----
+   GAAG                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (9 overhangs)
+**Set fidelity:** 0.9986 (8 overhangs)
 
 ---
 
@@ -594,18 +536,18 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | #   | Component         | Part name                 | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile7_sub1      | 1242 nt | AAAC  | TGAT  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub3      | 1263 nt | TGAT  | TACT  |
-| 4   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
-| 5   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
-| 6   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 7   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 8   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile7_sub1      | 1242 nt | AAAC  | TATG  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub3      | 1263 nt | TATG  | TGAT  |
+| 4   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TGAT  | TACT  |
+| 5   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TACT  | TGGA  |
+| 6   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | TGGA  | CCTT  |
+| 7   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | CCTT  | GACA  |
+| 8   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | GACA  | CACC  |
 | 9   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [AAAC]----3'WT sub1----[TGAT]----3'WT sub2----[TACT]----3'WT sub3----[TGGA]----3'WT sub4----[CCTT]----3'WT sub5----[GACA]----3'WT sub6----[TTCA]----3'WT+PolIII sub7----[CACC]
-   AAAC                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [AAAC]----3'WT sub1----[TATG]----3'WT sub2----[TGAT]----3'WT sub3----[TACT]----3'WT sub4----[TGGA]----3'WT sub5----[CCTT]----3'WT sub6----[GACA]----3'WT+PolIII sub7----[CACC]
+   AAAC                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                          CACC 
 ```
 
 **Set fidelity:** 0.9986 (8 overhangs)
@@ -653,16 +595,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 6   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 7   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 8   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 7   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 8   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 9   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TATG]----3'WT sub1----[TGAT]----3'WT sub2----[TACT]----3'WT sub3----[TGGA]----3'WT sub4----[CCTT]----3'WT sub5----[GACA]----3'WT sub6----[TTCA]----3'WT+PolIII sub7----[CACC]
-   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [TATG]----3'WT sub1----[TGAT]----3'WT sub2----[TACT]----3'WT sub3----[TGGA]----3'WT sub4----[CCTT]----3'WT sub5----[GACA]----3'WT sub6----[CACC]----3'WT+PolIII sub7----
+   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (8 overhangs)
+**Set fidelity:** 0.9986 (7 overhangs)
 
 ---
 
@@ -707,16 +649,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 6   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 7   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 8   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 7   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 8   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 9   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CTCT]----3'WT sub1----[TGAT]----3'WT sub2----[TACT]----3'WT sub3----[TGGA]----3'WT sub4----[CCTT]----3'WT sub5----[GACA]----3'WT sub6----[TTCA]----3'WT+PolIII sub7----[CACC]
-   CTCT                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [CTCT]----3'WT sub1----[TGAT]----3'WT sub2----[TACT]----3'WT sub3----[TGGA]----3'WT sub4----[CCTT]----3'WT sub5----[GACA]----3'WT sub6----[CACC]----3'WT+PolIII sub7----
+   CTCT                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9931 (8 overhangs)
+**Set fidelity:** 0.9931 (7 overhangs)
 
 ---
 
@@ -743,11 +685,11 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 4   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [ATGA]----5'WT block----[CTGA]----oligo+BC----[AATA]
-   ATGA                    CTGA                  AATA 
+  [ATGA]----5'WT sub1----[TATG]----oligo+BC----[CTGA][AATA]
+   ATGA                   TATG                  CTGA  AATA 
 ```
 
-**Set fidelity:** 0.9928 (3 overhangs)
+**Set fidelity:** 0.9928 (4 overhangs)
 
 #### BsmBI Level 1b Reaction (42C)
 
@@ -761,16 +703,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 6   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 7   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 8   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 7   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 8   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 9   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TCAT]----3'WT sub1----[TGAT]----3'WT sub2----[TACT]----3'WT sub3----[TGGA]----3'WT sub4----[CCTT]----3'WT sub5----[GACA]----3'WT sub6----[TTCA]----3'WT+PolIII sub7----[CACC]
-   TCAT                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [TCAT]----3'WT sub1----[TGAT]----3'WT sub2----[TACT]----3'WT sub3----[TGGA]----3'WT sub4----[CCTT]----3'WT sub5----[GACA]----3'WT sub6----[CACC]----3'WT+PolIII sub7----
+   TCAT                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9895 (8 overhangs)
+**Set fidelity:** 0.9895 (7 overhangs)
 
 ---
 
@@ -816,16 +758,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 6   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 7   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 8   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 7   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 8   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 9   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [ACTG]----3'WT sub1----[TGAT]----3'WT sub2----[TACT]----3'WT sub3----[TGGA]----3'WT sub4----[CCTT]----3'WT sub5----[GACA]----3'WT sub6----[TTCA]----3'WT+PolIII sub7----[CACC]
-   ACTG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [ACTG]----3'WT sub1----[TGAT]----3'WT sub2----[TACT]----3'WT sub3----[TGGA]----3'WT sub4----[CCTT]----3'WT sub5----[GACA]----3'WT sub6----[CACC]----3'WT+PolIII sub7----
+   ACTG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (8 overhangs)
+**Set fidelity:** 0.9986 (7 overhangs)
 
 ---
 
@@ -866,17 +808,17 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | #   | Component         | Part name                 | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile12_sub1     | 1485 nt | GGAC  | TACT  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
-| 4   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
-| 5   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile12_sub1     | 1485 nt | GGAC  | TGAT  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TGAT  | TACT  |
+| 4   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TACT  | TGGA  |
+| 5   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | TGGA  | CCTT  |
+| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | CCTT  | GACA  |
+| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | GACA  | CACC  |
 | 8   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [GGAC]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[TTCA]----3'WT+PolIII sub6----[CACC]
-   GGAC                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [GGAC]----3'WT sub1----[TGAT]----3'WT sub2----[TACT]----3'WT sub3----[TGGA]----3'WT sub4----[CCTT]----3'WT sub5----[GACA]----3'WT+PolIII sub6----[CACC]
+   GGAC                   TGAT                   TACT                   TGGA                   CCTT                   GACA                          CACC 
 ```
 
 **Set fidelity:** 0.9986 (7 overhangs)
@@ -924,16 +866,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 8   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TGAT]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[TTCA]----3'WT+PolIII sub6----[CACC]
-   TGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [TGAT]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[CACC]----3'WT+PolIII sub6----
+   TGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (7 overhangs)
+**Set fidelity:** 0.9986 (6 overhangs)
 
 ---
 
@@ -978,16 +920,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 8   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TAGA]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[TTCA]----3'WT+PolIII sub6----[CACC]
-   TAGA                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [TAGA]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[CACC]----3'WT+PolIII sub6----
+   TAGA                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9817 (7 overhangs)
+**Set fidelity:** 0.9817 (6 overhangs)
 
 ---
 
@@ -1015,11 +957,11 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [ATGA]----5'WT sub1----[TATG]----5'WT sub2----[CTGT]----oligo+BC----[AATA]
-   ATGA                   TATG                   CTGT                  AATA 
+  [ATGA]----5'WT sub1----[TATG]----5'WT sub2----[TGAT]----oligo+BC----[CTGT][AATA]
+   ATGA                   TATG                   TGAT                  CTGT  AATA 
 ```
 
-**Set fidelity:** 1.0000 (4 overhangs)
+**Set fidelity:** 1.0000 (5 overhangs)
 
 #### BsmBI Level 1b Reaction (42C)
 
@@ -1032,16 +974,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 8   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [AAAT]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[TTCA]----3'WT+PolIII sub6----[CACC]
-   AAAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [AAAT]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[CACC]----3'WT+PolIII sub6----
+   AAAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (7 overhangs)
+**Set fidelity:** 0.9986 (6 overhangs)
 
 ---
 
@@ -1087,16 +1029,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 8   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [AGAT]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[TTCA]----3'WT+PolIII sub6----[CACC]
-   AGAT                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [AGAT]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[CACC]----3'WT+PolIII sub6----
+   AGAT                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (7 overhangs)
+**Set fidelity:** 0.9986 (6 overhangs)
 
 ---
 
@@ -1142,16 +1084,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 5   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 6   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 7   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 8   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TTGC]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[TTCA]----3'WT+PolIII sub6----[CACC]
-   TTGC                   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [TTGC]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT sub5----[CACC]----3'WT+PolIII sub6----
+   TTGC                   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (7 overhangs)
+**Set fidelity:** 0.9986 (6 overhangs)
 
 ---
 
@@ -1193,19 +1135,19 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | #   | Component         | Part name                 | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile18_sub1     | 1440 nt | CAAG  | TGGA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
-| 4   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile18_sub1     | 1440 nt | CAAG  | TACT  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TACT  | TGGA  |
+| 4   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | TGGA  | CCTT  |
+| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | CCTT  | GACA  |
+| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | GACA  | CACC  |
 | 7   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CAAG]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[TTCA]----3'WT+PolIII sub5----[CACC]
-   CAAG                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [CAAG]----3'WT sub1----[TACT]----3'WT sub2----[TGGA]----3'WT sub3----[CCTT]----3'WT sub4----[GACA]----3'WT+PolIII sub5----[CACC]
+   CAAG                   TACT                   TGGA                   CCTT                   GACA                          CACC 
 ```
 
-**Set fidelity:** 1.0000 (6 overhangs)
+**Set fidelity:** 0.9986 (6 overhangs)
 
 ---
 
@@ -1250,16 +1192,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 2   | 3'WT block        | bsmbi_3wt_tile1_sub4      | 1218 nt | TACT  | TGGA  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 7   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TACT]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[TTCA]----3'WT+PolIII sub5----[CACC]
-   TACT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [TACT]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[CACC]----3'WT+PolIII sub5----
+   TACT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (6 overhangs)
+**Set fidelity:** 0.9986 (5 overhangs)
 
 ---
 
@@ -1304,16 +1246,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 2   | 3'WT block        | bsmbi_3wt_tile20_sub1     | 996 nt  | CATA  | TGGA  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 7   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CATA]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[TTCA]----3'WT+PolIII sub5----[CACC]
-   CATA                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [CATA]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[CACC]----3'WT+PolIII sub5----
+   CATA                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (6 overhangs)
+**Set fidelity:** 1.0000 (5 overhangs)
 
 ---
 
@@ -1342,11 +1284,11 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 6   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [ATGA]----5'WT sub1----[TATG]----5'WT sub2----[TGAT]----5'WT sub3----[AAAG]----oligo+BC----[AATA]
-   ATGA                   TATG                   TGAT                   AAAG                  AATA 
+  [ATGA]----5'WT sub1----[TATG]----5'WT sub2----[TGAT]----5'WT sub3----[TACT]----oligo+BC----[AAAG][AATA]
+   ATGA                   TATG                   TGAT                   TACT                  AAAG  AATA 
 ```
 
-**Set fidelity:** 1.0000 (5 overhangs)
+**Set fidelity:** 1.0000 (6 overhangs)
 
 #### BsmBI Level 1b Reaction (42C)
 
@@ -1358,16 +1300,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 2   | 3'WT block        | bsmbi_3wt_tile21_sub1     | 837 nt  | CGAA  | TGGA  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 7   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CGAA]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[TTCA]----3'WT+PolIII sub5----[CACC]
-   CGAA                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [CGAA]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[CACC]----3'WT+PolIII sub5----
+   CGAA                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (6 overhangs)
+**Set fidelity:** 1.0000 (5 overhangs)
 
 ---
 
@@ -1413,16 +1355,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 2   | 3'WT block        | bsmbi_3wt_tile22_sub1     | 615 nt  | TATT  | TGGA  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 7   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TATT]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[TTCA]----3'WT+PolIII sub5----[CACC]
-   TATT                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [TATT]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[CACC]----3'WT+PolIII sub5----
+   TATT                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (6 overhangs)
+**Set fidelity:** 1.0000 (5 overhangs)
 
 ---
 
@@ -1468,16 +1410,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 2   | 3'WT block        | bsmbi_3wt_tile23_sub1     | 441 nt  | TGAG  | TGGA  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 4   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 5   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 7   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TGAG]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[TTCA]----3'WT+PolIII sub5----[CACC]
-   TGAG                   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [TGAG]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT sub4----[CACC]----3'WT+PolIII sub5----
+   TGAG                   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9981 (6 overhangs)
+**Set fidelity:** 1.0000 (5 overhangs)
 
 ---
 
@@ -1520,15 +1462,15 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | #   | Component         | Part name                 | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile24_sub1     | 1467 nt | ATTT  | CCTT  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile24_sub1     | 1467 nt | ATTT  | TGGA  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | TGGA  | CCTT  |
+| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | CCTT  | GACA  |
+| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | GACA  | CACC  |
 | 6   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [ATTT]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[TTCA]----3'WT+PolIII sub4----[CACC]
-   ATTT                   CCTT                   GACA                   TTCA                          CACC 
+  [ATTT]----3'WT sub1----[TGGA]----3'WT sub2----[CCTT]----3'WT sub3----[GACA]----3'WT+PolIII sub4----[CACC]
+   ATTT                   TGGA                   CCTT                   GACA                          CACC 
 ```
 
 **Set fidelity:** 1.0000 (5 overhangs)
@@ -1576,16 +1518,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile1_sub5      | 1266 nt | TGGA  | CCTT  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 6   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TGGA]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[TTCA]----3'WT+PolIII sub4----[CACC]
-   TGGA                   CCTT                   GACA                   TTCA                          CACC 
+  [TGGA]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[CACC]----3'WT+PolIII sub4----
+   TGGA                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (5 overhangs)
+**Set fidelity:** 1.0000 (4 overhangs)
 
 ---
 
@@ -1630,16 +1572,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile26_sub1     | 1071 nt | GGAG  | CCTT  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 6   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [GGAG]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[TTCA]----3'WT+PolIII sub4----[CACC]
-   GGAG                   CCTT                   GACA                   TTCA                          CACC 
+  [GGAG]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[CACC]----3'WT+PolIII sub4----
+   GGAG                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (5 overhangs)
+**Set fidelity:** 1.0000 (4 overhangs)
 
 ---
 
@@ -1669,11 +1611,11 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 7   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [ATGA]----5'WT sub1----[TATG]----5'WT sub2----[TGAT]----5'WT sub3----[TACT]----5'WT sub4----[GAAG]----oligo+BC----[AATA]
-   ATGA                   TATG                   TGAT                   TACT                   GAAG                  AATA 
+  [ATGA]----5'WT sub1----[TATG]----5'WT sub2----[TGAT]----5'WT sub3----[TACT]----5'WT sub4----[TGGA]----oligo+BC----[GAAG][AATA]
+   ATGA                   TATG                   TGAT                   TACT                   TGGA                  GAAG  AATA 
 ```
 
-**Set fidelity:** 1.0000 (6 overhangs)
+**Set fidelity:** 1.0000 (7 overhangs)
 
 #### BsmBI Level 1b Reaction (42C)
 
@@ -1684,16 +1626,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile27_sub1     | 849 nt  | CCAG  | CCTT  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 6   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CCAG]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[TTCA]----3'WT+PolIII sub4----[CACC]
-   CCAG                   CCTT                   GACA                   TTCA                          CACC 
+  [CCAG]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[CACC]----3'WT+PolIII sub4----
+   CCAG                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9986 (5 overhangs)
+**Set fidelity:** 0.9986 (4 overhangs)
 
 ---
 
@@ -1739,16 +1681,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile28_sub1     | 639 nt  | CGAG  | CCTT  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 6   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CGAG]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[TTCA]----3'WT+PolIII sub4----[CACC]
-   CGAG                   CCTT                   GACA                   TTCA                          CACC 
+  [CGAG]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[CACC]----3'WT+PolIII sub4----
+   CGAG                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (5 overhangs)
+**Set fidelity:** 1.0000 (4 overhangs)
 
 ---
 
@@ -1794,16 +1736,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile29_sub1     | 417 nt  | GAGT  | CCTT  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 4   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 6   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [GAGT]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[TTCA]----3'WT+PolIII sub4----[CACC]
-   GAGT                   CCTT                   GACA                   TTCA                          CACC 
+  [GAGT]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT sub3----[CACC]----3'WT+PolIII sub4----
+   GAGT                   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (5 overhangs)
+**Set fidelity:** 1.0000 (4 overhangs)
 
 ---
 
@@ -1847,14 +1789,14 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | #   | Component         | Part name                 | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile30_sub1     | 1788 nt | GAGA  | GACA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile30_sub1     | 1788 nt | GAGA  | CCTT  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | CCTT  | GACA  |
+| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | GACA  | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [GAGA]----3'WT sub1----[GACA]----3'WT sub2----[TTCA]----3'WT+PolIII sub3----[CACC]
-   GAGA                   GACA                   TTCA                          CACC 
+  [GAGA]----3'WT sub1----[CCTT]----3'WT sub2----[GACA]----3'WT+PolIII sub3----[CACC]
+   GAGA                   CCTT                   GACA                          CACC 
 ```
 
 **Set fidelity:** 0.9900 (4 overhangs)
@@ -1902,16 +1844,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile1_sub6      | 1581 nt | CCTT  | GACA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CCTT]----3'WT sub1----[GACA]----3'WT sub2----[TTCA]----3'WT+PolIII sub3----[CACC]
-   CCTT                   GACA                   TTCA                          CACC 
+  [CCTT]----3'WT sub1----[GACA]----3'WT sub2----[CACC]----3'WT+PolIII sub3----
+   CCTT                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (4 overhangs)
+**Set fidelity:** 1.0000 (3 overhangs)
 
 ---
 
@@ -1956,16 +1898,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile32_sub1     | 1377 nt | GAAG  | GACA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [GAAG]----3'WT sub1----[GACA]----3'WT sub2----[TTCA]----3'WT+PolIII sub3----[CACC]
-   GAAG                   GACA                   TTCA                          CACC 
+  [GAAG]----3'WT sub1----[GACA]----3'WT sub2----[CACC]----3'WT+PolIII sub3----
+   GAAG                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (4 overhangs)
+**Set fidelity:** 1.0000 (3 overhangs)
 
 ---
 
@@ -1996,11 +1938,11 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 8   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [ATGA]----5'WT sub1----[TATG]----5'WT sub2----[TGAT]----5'WT sub3----[TACT]----5'WT sub4----[TGGA]----5'WT sub5----[AGAA]----oligo+BC----[AATA]
-   ATGA                   TATG                   TGAT                   TACT                   TGGA                   AGAA                  AATA 
+  [ATGA]----5'WT sub1----[TATG]----5'WT sub2----[TGAT]----5'WT sub3----[TACT]----5'WT sub4----[TGGA]----5'WT sub5----[CCTT]----oligo+BC----[AGAA][AATA]
+   ATGA                   TATG                   TGAT                   TACT                   TGGA                   CCTT                  AGAA  AATA 
 ```
 
-**Set fidelity:** 1.0000 (7 overhangs)
+**Set fidelity:** 1.0000 (8 overhangs)
 
 #### BsmBI Level 1b Reaction (42C)
 
@@ -2010,16 +1952,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile33_sub1     | 1176 nt | CACA  | GACA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CACA]----3'WT sub1----[GACA]----3'WT sub2----[TTCA]----3'WT+PolIII sub3----[CACC]
-   CACA                   GACA                   TTCA                          CACC 
+  [CACA]----3'WT sub1----[GACA]----3'WT sub2----[CACC]----3'WT+PolIII sub3----
+   CACA                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.8126 (4 overhangs)
+**Set fidelity:** 0.8126 (3 overhangs)
 
 ---
 
@@ -2065,16 +2007,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile34_sub1     | 1041 nt | TATC  | GACA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TATC]----3'WT sub1----[GACA]----3'WT sub2----[TTCA]----3'WT+PolIII sub3----[CACC]
-   TATC                   GACA                   TTCA                          CACC 
+  [TATC]----3'WT sub1----[GACA]----3'WT sub2----[CACC]----3'WT+PolIII sub3----
+   TATC                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.9961 (4 overhangs)
+**Set fidelity:** 0.9961 (3 overhangs)
 
 ---
 
@@ -2120,16 +2062,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile35_sub1     | 843 nt  | AATC  | GACA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [AATC]----3'WT sub1----[GACA]----3'WT sub2----[TTCA]----3'WT+PolIII sub3----[CACC]
-   AATC                   GACA                   TTCA                          CACC 
+  [AATC]----3'WT sub1----[GACA]----3'WT sub2----[CACC]----3'WT+PolIII sub3----
+   AATC                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (4 overhangs)
+**Set fidelity:** 1.0000 (3 overhangs)
 
 ---
 
@@ -2175,16 +2117,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile36_sub1     | 621 nt  | CTCG  | GACA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CTCG]----3'WT sub1----[GACA]----3'WT sub2----[TTCA]----3'WT+PolIII sub3----[CACC]
-   CTCG                   GACA                   TTCA                          CACC 
+  [CTCG]----3'WT sub1----[GACA]----3'WT sub2----[CACC]----3'WT+PolIII sub3----
+   CTCG                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (4 overhangs)
+**Set fidelity:** 1.0000 (3 overhangs)
 
 ---
 
@@ -2230,16 +2172,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile37_sub1     | 438 nt  | CAGG  | GACA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CAGG]----3'WT sub1----[GACA]----3'WT sub2----[TTCA]----3'WT+PolIII sub3----[CACC]
-   CAGG                   GACA                   TTCA                          CACC 
+  [CAGG]----3'WT sub1----[GACA]----3'WT sub2----[CACC]----3'WT+PolIII sub3----
+   CAGG                   GACA                   CACC 
 ```
 
-**Set fidelity:** 1.0000 (4 overhangs)
+**Set fidelity:** 1.0000 (3 overhangs)
 
 ---
 
@@ -2285,16 +2227,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile38_sub1     | 231 nt  | CTCC  | GACA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | TTCA  |
-| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | TTCA  | CACC  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub7      | 1765 nt | GACA  | --    |
+| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub8 | 982 nt  | --    | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CTCC]----3'WT sub1----[GACA]----3'WT sub2----[TTCA]----3'WT+PolIII sub3----[CACC]
-   CTCC                   GACA                   TTCA                          CACC 
+  [CTCC]----3'WT sub1----[GACA]----3'WT sub2----[CACC]----3'WT+PolIII sub3----
+   CTCC                   GACA                   CACC 
 ```
 
-**Set fidelity:** 0.7946 (4 overhangs)
+**Set fidelity:** 0.7946 (3 overhangs)
 
 ---
 
@@ -2339,16 +2281,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | #   | Component         | Part name                | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------ | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)      | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile39_sub1    | 951 nt  | GACA  | AGAA  |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile39_sub2    | 1796 nt | AGAA  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile39_sub1    | 951 nt  | GACA  | --    |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile39_sub2    | 1796 nt | --    | CACC  |
 | 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      | --    | --    |
 
 ```
-  [GACA]----3'WT sub1----[AGAA]----3'WT+PolIII sub2----[CACC]
-   GACA                   AGAA                          CACC 
+  [GACA]----3'WT+PolIII----[CACC]
+   GACA                     CACC 
 ```
 
-**Set fidelity:** 1.0000 (3 overhangs)
+**Set fidelity:** 1.0000 (2 overhangs)
 
 ---
 
@@ -2393,16 +2335,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | #   | Component         | Part name                | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------ | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)      | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile40_sub1    | 735 nt  | ATCT  | AGAA  |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile39_sub2    | 1796 nt | AGAA  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile40_sub1    | 735 nt  | ATCT  | --    |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile39_sub2    | 1796 nt | --    | CACC  |
 | 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      | --    | --    |
 
 ```
-  [ATCT]----3'WT sub1----[AGAA]----3'WT+PolIII sub2----[CACC]
-   ATCT                   AGAA                          CACC 
+  [ATCT]----3'WT+PolIII----[CACC]
+   ATCT                     CACC 
 ```
 
-**Set fidelity:** 1.0000 (3 overhangs)
+**Set fidelity:** 1.0000 (2 overhangs)
 
 ---
 
@@ -2434,11 +2376,11 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | 9   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [ATGA]----5'WT sub1----[TATG]----5'WT sub2----[TGAT]----5'WT sub3----[TACT]----5'WT sub4----[TGGA]----5'WT sub5----[CCTT]----5'WT sub6----[AAGT]----oligo+BC----[AATA]
-   ATGA                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   AAGT                  AATA 
+  [ATGA]----5'WT sub1----[TATG]----5'WT sub2----[TGAT]----5'WT sub3----[TACT]----5'WT sub4----[TGGA]----5'WT sub5----[CCTT]----5'WT sub6----[GACA]----oligo+BC----[AAGT][AATA]
+   ATGA                   TATG                   TGAT                   TACT                   TGGA                   CCTT                   GACA                  AAGT  AATA 
 ```
 
-**Set fidelity:** 1.0000 (8 overhangs)
+**Set fidelity:** 1.0000 (9 overhangs)
 
 #### BsmBI Level 1b Reaction (42C)
 
@@ -2447,16 +2389,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | #   | Component         | Part name                | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------ | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)      | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile41_sub1    | 690 nt  | TGTT  | TTTA  |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile41_sub2    | 1625 nt | TTTA  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile41_sub1    | 690 nt  | TGTT  | --    |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile41_sub2    | 1625 nt | --    | CACC  |
 | 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      | --    | --    |
 
 ```
-  [TGTT]----3'WT sub1----[TTTA]----3'WT+PolIII sub2----[CACC]
-   TGTT                   TTTA                          CACC 
+  [TGTT]----3'WT+PolIII----[CACC]
+   TGTT                     CACC 
 ```
 
-**Set fidelity:** 1.0000 (3 overhangs)
+**Set fidelity:** 1.0000 (2 overhangs)
 
 ---
 
@@ -2502,16 +2444,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | #   | Component         | Part name                | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------ | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)      | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile42_sub1    | 489 nt  | ATCG  | TTTA  |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile41_sub2    | 1625 nt | TTTA  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile42_sub1    | 489 nt  | ATCG  | --    |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile41_sub2    | 1625 nt | --    | CACC  |
 | 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      | --    | --    |
 
 ```
-  [ATCG]----3'WT sub1----[TTTA]----3'WT+PolIII sub2----[CACC]
-   ATCG                   TTTA                          CACC 
+  [ATCG]----3'WT+PolIII----[CACC]
+   ATCG                     CACC 
 ```
 
-**Set fidelity:** 1.0000 (3 overhangs)
+**Set fidelity:** 1.0000 (2 overhangs)
 
 ---
 
@@ -2557,16 +2499,16 @@ oh_R = AATA (= oh4, barcode-helper junction)
 | #   | Component         | Part name                | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------ | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)      | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile43_sub1    | 354 nt  | TCAG  | TTTA  |
-| 3   | 3'WT+PolIII block | bsmbi_3wt_tile41_sub2    | 1625 nt | TTTA  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile43_sub1    | 354 nt  | TCAG  | --    |
+| 3   | 3'WT+PolIII block | bsmbi_3wt_tile41_sub2    | 1625 nt | --    | CACC  |
 | 4   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      | --    | --    |
 
 ```
-  [TCAG]----3'WT sub1----[TTTA]----3'WT+PolIII sub2----[CACC]
-   TCAG                   TTTA                          CACC 
+  [TCAG]----3'WT+PolIII----[CACC]
+   TCAG                     CACC 
 ```
 
-**Set fidelity:** 1.0000 (3 overhangs)
+**Set fidelity:** 1.0000 (2 overhangs)
 
 ---
 

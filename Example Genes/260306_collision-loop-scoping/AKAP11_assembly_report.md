@@ -1,6 +1,6 @@
 # DMS-GG Assembly Report: AKAP11
 
-Generated: 2026-03-07 15:09:21
+Generated: 2026-03-06 18:33:45
 Pipeline: dms-gg-oligo-pipeline (3-Enzyme Architecture: BsaI + BsmBI + PaqCI)
 
 ---
@@ -122,51 +122,10 @@ Every oligo in the pool has the same layout regardless of tile position:
 | overhang_fidelity      | Tile boundary overhangs have adequate fidelity                | FAIL   | 23 tile(s) with low-fidelity boundary overhangs (<0.80)                                                                                             |
 | tile_manifests         | Per-tile assembly manifests complete                          | PASS   | 31 tile manifest(s) generated                                                                                                                       |
 | helper_plasmid         | Helper plasmid free of unintended BsmBI sites                 | PASS   | OK                                                                                                                                                  |
-| reaction_fidelity      | Per-reaction set-level overhang fidelity                      | PASS   | Min set fidelity: 0.9018 across 62 reactions | 0 reaction(s) below 0.90                                                                             |
+| reaction_fidelity      | Per-reaction set-level overhang fidelity                      | PASS   | Min set fidelity: 0.8615 across 62 reactions | 1 reaction(s) below 0.90                                                                             |
 | barcode_poliii_term    | No barcodes contain PolIII terminator signal (TTTT)           | PASS   | 0 / 398580 barcode(s) contain TTTT                                                                                                                  |
 | block_min_length       | All gene blocks above synthesis minimum length                | FAIL   | 5 block(s) below 300 nt minimum. Range: 117-1788 nt                                                                                                 |
 | sb_overhang_collisions | Superblock boundary overhangs are unique (no collisions)      | PASS   | 5 SB boundary OH(s), all unique                                                                                                                     |
-
-## 5b. Reaction Fidelity Summary
-
-Set fidelity for each tile's BsaI and BsmBI reactions,
-computed from the actual block overhangs after construction:
-
-| Tile | BsaI OHs | BsaI Set Fidelity | BsmBI OHs | BsmBI Set Fidelity |
-| ---- | -------- | ----------------- | --------- | ------------------ |
-| 1    | 2        | 1.0000            | 6         | 0.9553             |
-| 2    | 3        | 1.0000            | 5         | 0.9018             |
-| 3    | 3        | 1.0000            | 5         | 0.9553             |
-| 4    | 3        | 0.9485            | 5         | 1.0000             |
-| 5    | 3        | 1.0000            | 5         | 1.0000             |
-| 6    | 4        | 1.0000            | 5         | 1.0000             |
-| 7    | 4        | 1.0000            | 5         | 1.0000             |
-| 8    | 4        | 1.0000            | 5         | 0.9018             |
-| 9    | 4        | 1.0000            | 5         | 0.9987             |
-| 10   | 4        | 1.0000            | 5         | 1.0000             |
-| 11   | 4        | 1.0000            | 4         | 1.0000             |
-| 12   | 4        | 1.0000            | 4         | 0.9307             |
-| 13   | 4        | 1.0000            | 4         | 0.9986             |
-| 14   | 5        | 1.0000            | 4         | 0.9018             |
-| 15   | 5        | 1.0000            | 4         | 0.9954             |
-| 16   | 5        | 1.0000            | 4         | 1.0000             |
-| 17   | 5        | 1.0000            | 4         | 0.9970             |
-| 18   | 5        | 1.0000            | 4         | 0.9953             |
-| 19   | 5        | 0.9448            | 4         | 0.9146             |
-| 20   | 5        | 0.9899            | 3         | 1.0000             |
-| 21   | 5        | 1.0000            | 3         | 1.0000             |
-| 22   | 6        | 0.9448            | 3         | 1.0000             |
-| 23   | 6        | 0.9448            | 3         | 1.0000             |
-| 24   | 6        | 0.9448            | 3         | 1.0000             |
-| 25   | 6        | 0.9448            | 3         | 1.0000             |
-| 26   | 6        | 0.9448            | 3         | 1.0000             |
-| 27   | 6        | 0.9448            | 3         | 1.0000             |
-| 28   | 6        | 0.9448            | 2         | 1.0000             |
-| 29   | 6        | 0.9140            | 2         | 1.0000             |
-| 30   | 6        | 0.9448            | 2         | 1.0000             |
-| 31   | 7        | 0.9306            | 2         | 1.0000             |
-
-**Min:** 0.9018 | **Max:** 1.0000 | **Mean:** 0.9796
 
 ## 6. Fixed Overhangs & Helper Plasmid
 
@@ -282,18 +241,18 @@ oh_R = TTCC (= oh4, barcode-helper junction)
 | #   | Component         | Part name                | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------ | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)      | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile2_sub1     | 1707 nt | AAAT  | TCCT  |
-| 3   | 3'WT block        | bsmbi_3wt_tile1_sub3     | 1686 nt | TCCT  | TCAA  |
-| 4   | 3'WT block        | bsmbi_3wt_tile1_sub4     | 1788 nt | TCAA  | GAAT  |
-| 5   | 3'WT+PolIII block | bsmbi_3wt_tile1_sub5     | 1376 nt | GAAT  | CACC  |
+| 2   | 3'WT block        | bsmbi_3wt_tile2_sub1     | 1707 nt | AAAT  | TCAG  |
+| 3   | 3'WT block        | bsmbi_3wt_tile1_sub3     | 1686 nt | TCAG  | TCCT  |
+| 4   | 3'WT block        | bsmbi_3wt_tile1_sub4     | 1788 nt | TCCT  | TCAA  |
+| 5   | 3'WT+PolIII block | bsmbi_3wt_tile1_sub5     | 1376 nt | TCAA  | CACC  |
 | 6   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      | --    | --    |
 
 ```
-  [AAAT]----3'WT sub1----[TCCT]----3'WT sub2----[TCAA]----3'WT sub3----[GAAT]----3'WT+PolIII sub4----[CACC]
-   AAAT                   TCCT                   TCAA                   GAAT                          CACC 
+  [AAAT]----3'WT sub1----[TCAG]----3'WT sub2----[TCCT]----3'WT sub3----[TCAA]----3'WT+PolIII sub4----[GAAT][CACC]
+   AAAT                   TCAG                   TCCT                   TCAA                          GAAT  CACC 
 ```
 
-**Set fidelity:** 0.9018 (5 overhangs)
+**Set fidelity:** 0.8615 (6 overhangs)
 
 ---
 
@@ -422,11 +381,11 @@ oh_R = TTCC (= oh4, barcode-helper junction)
 | 4   | Enzyme + buffer | BsaI-HFv2 + CutSmart  | --     | --    | --    |
 
 ```
-  [ATGG]----5'WT block----[GAAA]----oligo+BC----[TTCC]
-   ATGG                    GAAA                  TTCC 
+  [ATGG]----5'WT sub1----[TCAG]----oligo+BC----[GAAA][TTCC]
+   ATGG                   TCAG                  GAAA  TTCC 
 ```
 
-**Set fidelity:** 1.0000 (3 overhangs)
+**Set fidelity:** 1.0000 (4 overhangs)
 
 #### BsmBI Level 1b Reaction (42C)
 
@@ -836,11 +795,11 @@ oh_R = TTCC (= oh4, barcode-helper junction)
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [ATGG]----5'WT sub1----[TCAG]----5'WT sub2----[TCTA]----oligo+BC----[TTCC]
-   ATGG                   TCAG                   TCTA                  TTCC 
+  [ATGG]----5'WT sub1----[TCAG]----5'WT sub2----[TCCT]----oligo+BC----[TCTA][TTCC]
+   ATGG                   TCAG                   TCCT                  TCTA  TTCC 
 ```
 
-**Set fidelity:** 1.0000 (4 overhangs)
+**Set fidelity:** 1.0000 (5 overhangs)
 
 #### BsmBI Level 1b Reaction (42C)
 
@@ -1632,11 +1591,11 @@ oh_R = TTCC (= oh4, barcode-helper junction)
 | 3   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1 | --      | --    | --    |
 
 ```
-  [TCTA]----3'WT+PolIII----[CACC]
-   TCTA                     CACC 
+  [TCTA]----3'WT+PolIII sub1----[GAAT][CACC]
+   TCTA                          GAAT  CACC 
 ```
 
-**Set fidelity:** 1.0000 (2 overhangs)
+**Set fidelity:** 1.0000 (3 overhangs)
 
 ---
 

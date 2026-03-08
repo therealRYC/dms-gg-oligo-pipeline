@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-03-03 — Pass include_synonymous to design_mutations; update variant count for auto-sizing
+# Last updated: 2026-03-06 — Switch to hybrid plan_assembly() (tile-first DP + constrained SB DP)
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -180,8 +180,8 @@ if (identical(cfg$barcode_length, "auto")) {
   ))
 }
 
-# Step 6: Plan assembly (dynamic tile boundary search + overhangs + superblocks)
-cli::cli_h2("Step 6: Planning assembly (dynamic tile boundary search)")
+# Step 6: Plan assembly (hybrid: tile-first DP + constrained SB DP)
+cli::cli_h2("Step 6: Planning assembly (hybrid tile DP + constrained SB DP)")
 step_start <- proc.time()
 tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
 assembly_plan <- plan_assembly(
@@ -193,8 +193,6 @@ assembly_plan <- plan_assembly(
     fidelity_threshold = cfg$overhang_fidelity_threshold,
     manual_oh3 = cfg$oh3,
     manual_oh4 = cfg$oh4,
-    search_window_K = cfg$search_window_K,
-    boundary_method = cfg$boundary_method,
     multi_k = cfg$multi_k_search,
     overlap_codons = cfg$overlap_codons,
     min_geneblock_length = cfg$min_geneblock_length
@@ -317,6 +315,19 @@ step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["9_geneblocks"]] <- step_elapsed
 cli::cli_alert_success(paste0(
   nrow(geneblock_result$blocks), " gene blocks designed. [{round(step_elapsed, 1)}s]"
+))
+
+# Step 9b: Recompute reaction fidelity from actual block overhangs
+# The pre-computed fidelity uses all_splits junction OHs, which may include
+# phantom overhangs from split points that were filtered out during block
+# construction. Recompute using only OHs present in actual blocks.
+cli::cli_alert_info("Recomputing reaction fidelity from actual block overhangs...")
+assembly_plan$reaction_fidelity <- recompute_reaction_fidelity(
+  geneblock_result, assembly_plan
+)
+min_fid <- min(assembly_plan$reaction_fidelity$set_fidelity)
+cli::cli_alert_success(paste0(
+  "Reaction fidelity recomputed. Min: ", round(min_fid, 4)
 ))
 
 # Step 10: QC checks

@@ -1,5 +1,5 @@
 # Created: 2026-03-01
-# Last updated: 2026-03-03 — Use bGH polyA; clarify PaqCI overhangs are placeholders
+# Last updated: 2026-03-05 — Fix barcodes_per_variant to 10 (default)
 
 # TRIO — NM_007118, 3098 codons (9294 nt)
 # Minimal config; inherits defaults from config_template.yaml
@@ -31,5 +31,6 @@ intergene_elements:
 paqci_star2: "AATG"
 paqci_star1: "GCTA"
 
-# Fast validation run (1 barcode per variant)
-barcodes_per_variant: 1
+barcodes_per_variant: 10
+
+simulate_assembly: true

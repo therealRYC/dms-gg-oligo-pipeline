@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-04 — Remove HF set annotations from report
+# Last updated: 2026-03-07 — Fix report OH display: use block metadata instead of junction indices
 # 12_report.R — Wetlab-compatible Markdown assembly report
 # DMS Golden Gate Oligo Pipeline
 #
@@ -58,6 +58,9 @@ generate_report <- function(gene, cfg, assembly_plan, geneblock_result,
 
   # Section 5: QC Summary
   add(report_qc_summary(qc_result))
+
+  # Section 5b: Reaction Fidelity Summary
+  add(report_reaction_fidelity_summary(assembly_plan))
 
   # Section 6: Fixed Overhangs & Helper Plasmid
   add(report_fixed_overhangs(assembly_plan, helper, cfg))
@@ -279,6 +282,72 @@ report_qc_summary <- function(qc_result) {
   )
 }
 
+#' Section 5b: Reaction Fidelity Summary
+#'
+#' Shows all BsaI and BsmBI reactions at a glance with their set fidelity.
+#' Values are recomputed from actual block overhangs (post-construction).
+#'
+#' @param assembly_plan List from plan_assembly() (with updated reaction_fidelity)
+#' @return Character vector of Markdown lines
+report_reaction_fidelity_summary <- function(assembly_plan) {
+  rxn_fid <- assembly_plan$reaction_fidelity
+  if (is.null(rxn_fid) || nrow(rxn_fid) == 0) {
+    return(character(0))
+  }
+
+  tiles <- sort(unique(rxn_fid$tile_id))
+  rows <- list()
+  for (tid in tiles) {
+    bsai_row <- rxn_fid[rxn_fid$tile_id == tid & rxn_fid$reaction_type == "BsaI", ]
+    bsmbi_row <- rxn_fid[rxn_fid$tile_id == tid & rxn_fid$reaction_type == "BsmBI", ]
+
+    bsai_n <- if (nrow(bsai_row) > 0) bsai_row$n_overhangs[1] else 0L
+    bsai_fid <- if (nrow(bsai_row) > 0) format_fidelity(bsai_row$set_fidelity[1]) else "--"
+    bsmbi_n <- if (nrow(bsmbi_row) > 0) bsmbi_row$n_overhangs[1] else 0L
+    bsmbi_fid <- if (nrow(bsmbi_row) > 0) format_fidelity(bsmbi_row$set_fidelity[1]) else "--"
+
+    rows[[length(rows) + 1L]] <- data.frame(
+      Tile = tid,
+      `BsaI OHs` = bsai_n,
+      `BsaI Set Fidelity` = bsai_fid,
+      `BsmBI OHs` = bsmbi_n,
+      `BsmBI Set Fidelity` = bsmbi_fid,
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+  }
+
+  df <- do.call(rbind, rows)
+
+  # Summary row
+  all_fid <- rxn_fid$set_fidelity
+  summary_line <- paste0(
+    "**Min:** ", format_fidelity(min(all_fid)),
+    " | **Max:** ", format_fidelity(max(all_fid)),
+    " | **Mean:** ", format_fidelity(mean(all_fid))
+  )
+
+  # Highlight low-fidelity reactions
+  threshold <- assembly_plan$summary$overall_min_fidelity
+  low_fid <- rxn_fid[rxn_fid$set_fidelity < 0.90, ]
+  warn_lines <- character(0)
+  if (nrow(low_fid) > 0) {
+    warn_lines <- paste0(
+      "**Warning:** ", nrow(low_fid), " reaction(s) below 0.90 fidelity — ",
+      "consider alternative split points or overhang reassignment."
+    )
+  }
+
+  c(
+    "## 5b. Reaction Fidelity Summary", "",
+    "Set fidelity for each tile's BsaI and BsmBI reactions,",
+    "computed from the actual block overhangs after construction:", "",
+    md_table(df), "",
+    summary_line, "",
+    warn_lines
+  )
+}
+
 #' Section 6: Fixed Overhangs & Helper Plasmid
 report_fixed_overhangs <- function(assembly_plan, helper, cfg) {
   oh_L <- assembly_plan$oh_L
@@ -386,14 +455,6 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
   comp_rows <- list()
   comp_idx <- 1L
 
-  # Get superblock junction overhangs for this tile's 5'WT blocks
-  sb <- assembly_plan$superblock_splits
-  sb_bsai <- if (!is.null(sb) && nrow(sb) > 0) {
-    sb[sb$tile_id == tid & sb$block_type == "bsai_5wt", , drop = FALSE]
-  } else {
-    data.frame(junction_oh = character(0), stringsAsFactors = FALSE)
-  }
-
   # 5'WT gene blocks first (physical order)
   if (length(bsai_part_names) == 0) {
     comp_rows[[comp_idx]] <- c(
@@ -404,22 +465,13 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
     )
     comp_idx <- comp_idx + 1L
   } else {
-    n_bsai <- length(bsai_part_names)
     for (j in seq_along(bsai_part_names)) {
       bp <- bsai_part_names[j]
       block_row <- blocks[blocks$block_name == bp, ]
       blen <- if (nrow(block_row) > 0) paste0(block_row$length[1], " nt") else "?"
-      # Overhang chain: oh_L -- [sub1] -- jxn[1] -- [sub2] -- ... -- oh1
-      oh_5 <- if (j == 1L) {
-        assembly_plan$oh_L
-      } else {
-        sb_bsai$junction_oh[j - 1L]
-      }
-      oh_3 <- if (j == n_bsai) {
-        tile$oh1_seq
-      } else {
-        sb_bsai$junction_oh[j]
-      }
+      # Read overhangs directly from block metadata (correct after dedup/filtering)
+      oh_5 <- if (nrow(block_row) > 0) block_row$oh_5[1] else "?"
+      oh_3 <- if (nrow(block_row) > 0) block_row$oh_3[1] else "?"
       comp_rows[[comp_idx]] <- c(comp_idx, "5'WT gene block", bp, blen, oh_5, oh_3)
       comp_idx <- comp_idx + 1L
     }
@@ -468,14 +520,12 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
 
   # BsaI overhang map
   bsai_rxn_fid <- get_reaction_fidelity(assembly_plan, tid, "BsaI")
-  bsai_ohs <- get_reaction_overhangs(assembly_plan, tid, "BsaI")
   bsai_map <- format_bsai_overhang_map(
     oh_L = assembly_plan$oh_L,
     bsai_part_names = bsai_part_names,
     oh1 = tile$oh1_seq,
     oh4 = assembly_plan$oh4,
-    assembly_plan = assembly_plan,
-    tile_id = tid
+    blocks = blocks
   )
   add(bsai_map)
   add("")
@@ -501,13 +551,6 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
   comp_rows2 <- list()
   comp_idx2 <- 1L
 
-  # Get superblock junction overhangs for this tile's 3'WT blocks
-  sb_bsmbi <- if (!is.null(sb) && nrow(sb) > 0) {
-    sb[sb$tile_id == tid & sb$block_type == "bsmbi_3wt", , drop = FALSE]
-  } else {
-    data.frame(junction_oh = character(0), stringsAsFactors = FALSE)
-  }
-
   # BsaI product
   comp_rows2[[comp_idx2]] <- c(
     comp_idx2, "BsaI product", "(in helper plasmid)",
@@ -528,7 +571,6 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
       which(!grepl("^bsmbi_polIII_tile", bsmbi_part_names)),
       0L
     )
-    n_bsmbi <- length(bsmbi_part_names)
     for (bp_idx in seq_along(bsmbi_part_names)) {
       bp <- bsmbi_part_names[bp_idx]
       block_row <- blocks[blocks$block_name == bp, ]
@@ -543,17 +585,9 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
       } else {
         label <- "3'WT block"
       }
-      # Overhang chain: oh2 -- [sub1] -- jxn[1] -- [sub2] -- ... -- oh3
-      oh_5 <- if (bp_idx == 1L) {
-        tile$oh2_seq
-      } else {
-        sb_bsmbi$junction_oh[bp_idx - 1L]
-      }
-      oh_3 <- if (bp_idx == n_bsmbi) {
-        assembly_plan$oh3
-      } else {
-        sb_bsmbi$junction_oh[bp_idx]
-      }
+      # Read overhangs directly from block metadata (correct after dedup/filtering)
+      oh_5 <- if (nrow(block_row) > 0) block_row$oh_5[1] else "?"
+      oh_3 <- if (nrow(block_row) > 0) block_row$oh_3[1] else "?"
       comp_rows2[[comp_idx2]] <- c(comp_idx2, label, bp, blen, oh_5, oh_3)
       comp_idx2 <- comp_idx2 + 1L
     }
@@ -581,8 +615,7 @@ report_tile_guide <- function(tile_idx, tiles, assembly_plan, geneblock_result,
     oh2 = tile$oh2_seq,
     bsmbi_part_names = bsmbi_part_names,
     oh3 = assembly_plan$oh3,
-    assembly_plan = assembly_plan,
-    tile_id = tid
+    blocks = blocks
   )
   add(bsmbi_map)
   add("")
@@ -713,35 +746,37 @@ report_config <- function(cfg) {
 # =============================================================================
 
 #' Build ASCII overhang map for a BsaI reaction
+#'
+#' Builds the OH chain from block oh_5/oh_3 metadata. Each block's oh_3
+#' is the junction to the next block (or oh1 for the last block).
+#' Chain: oh_L -> [5'WT blocks] -> oh1 -> [oligo+BC] -> oh4
+#'
+#' @param oh_L Gene start overhang (first 4 nt of gene)
+#' @param bsai_part_names Character vector of BsaI block names for this tile
+#' @param oh1 Tile boundary overhang (oh1)
+#' @param oh4 Fixed barcode-helper junction overhang
+#' @param blocks Data frame of gene blocks (with oh_5, oh_3 columns)
 format_bsai_overhang_map <- function(oh_L, bsai_part_names, oh1, oh4,
-                                     assembly_plan, tile_id) {
+                                     blocks, ...) {
   # Collect overhangs and segment labels in order
   ohs <- c(oh_L)
   labels <- character(0)
 
-  # Get superblock junction overhangs for this tile's 5'WT blocks
-  sb <- assembly_plan$superblock_splits
-  if (!is.null(sb) && nrow(sb) > 0) {
-    sb_bsai <- sb[sb$tile_id == tile_id & sb$block_type == "bsai_5wt", , drop = FALSE]
-  } else {
-    sb_bsai <- data.frame(junction_oh = character(0), stringsAsFactors = FALSE)
-  }
-
   if (length(bsai_part_names) > 0) {
-    # Has 5'WT block(s): oh_L---[5'WT]---oh1---[oligo+BC]---oh4
-    if (nrow(sb_bsai) > 0) {
-      # Multiple sub-blocks with junction overhangs
-      for (j in seq_len(length(bsai_part_names))) {
+    if (length(bsai_part_names) > 1) {
+      # Multiple sub-blocks — build chain from block metadata
+      for (j in seq_along(bsai_part_names)) {
         labels <- c(labels, paste0("5'WT sub", j))
-        if (j <= nrow(sb_bsai)) {
-          ohs <- c(ohs, sb_bsai$junction_oh[j])
+        block_row <- blocks[blocks$block_name == bsai_part_names[j], ]
+        if (nrow(block_row) > 0) {
+          ohs <- c(ohs, block_row$oh_3[1])
         }
       }
     } else {
       labels <- c(labels, "5'WT block")
+      # Single block: oh_3 = oh1
+      ohs <- c(ohs, oh1)
     }
-    # oh1 between gene blocks and oligo
-    ohs <- c(ohs, oh1)
   }
   # else: no 5'WT block (tile 1). oh_L == oh1, so just use oh_L already added.
 
@@ -754,25 +789,25 @@ format_bsai_overhang_map <- function(oh_L, bsai_part_names, oh1, oh4,
 }
 
 #' Build ASCII overhang map for a BsmBI reaction
+#'
+#' Builds the OH chain from block oh_5/oh_3 metadata. Each block's oh_3
+#' is the junction to the next block (or oh3 for the last block).
+#' Chain: oh2 -> [3'WT/PolIII blocks] -> oh3
+#'
+#' @param oh2 Tile boundary overhang (oh2)
+#' @param bsmbi_part_names Character vector of BsmBI block names for this tile
+#' @param oh3 Fixed downstream cassette-barcode junction overhang
+#' @param blocks Data frame of gene blocks (with oh_5, oh_3 columns)
 format_bsmbi_overhang_map <- function(oh2, bsmbi_part_names, oh3,
-                                      assembly_plan, tile_id) {
+                                      blocks, ...) {
   ohs <- c(oh2)
   labels <- character(0)
 
-  # Get superblock junction overhangs for this tile's 3'WT blocks
-  sb <- assembly_plan$superblock_splits
-  if (!is.null(sb) && nrow(sb) > 0) {
-    sb_bsmbi <- sb[sb$tile_id == tile_id & sb$block_type == "bsmbi_3wt", , drop = FALSE]
-  } else {
-    sb_bsmbi <- data.frame(junction_oh = character(0), stringsAsFactors = FALSE)
-  }
-
   if (length(bsmbi_part_names) > 0) {
-    if (nrow(sb_bsmbi) > 0) {
-      n_parts <- length(bsmbi_part_names)
-      # Find the last 3'WT block (non-PolIII-only) — only it contains PolIII
+    if (length(bsmbi_part_names) > 1) {
+      # Multiple sub-blocks — build chain from block metadata
       last_3wt_idx <- max(which(!grepl("^bsmbi_polIII_tile", bsmbi_part_names)), 0L)
-      for (j in seq_len(n_parts)) {
+      for (j in seq_along(bsmbi_part_names)) {
         is_polIII_only <- grepl("^bsmbi_polIII_tile", bsmbi_part_names[j])
         if (is_polIII_only) {
           labels <- c(labels, "PolIII")
@@ -781,18 +816,21 @@ format_bsmbi_overhang_map <- function(oh2, bsmbi_part_names, oh3,
         } else {
           labels <- c(labels, paste0("3'WT sub", j))
         }
-        if (j <= nrow(sb_bsmbi)) {
-          ohs <- c(ohs, sb_bsmbi$junction_oh[j])
+        block_row <- blocks[blocks$block_name == bsmbi_part_names[j], ]
+        if (nrow(block_row) > 0) {
+          ohs <- c(ohs, block_row$oh_3[1])
         }
       }
     } else {
       is_polIII_only <- grepl("^bsmbi_polIII_tile", bsmbi_part_names[1])
       labels <- c(labels, if (is_polIII_only) "PolIII" else "3'WT+PolIII")
+      # Single block: oh_3 = oh3
+      ohs <- c(ohs, oh3)
     }
+  } else {
+    # No blocks (shouldn't happen normally)
+    ohs <- c(ohs, oh3)
   }
-
-  # oh3 at end
-  ohs <- c(ohs, oh3)
 
   format_overhang_map(ohs, labels)
 }
