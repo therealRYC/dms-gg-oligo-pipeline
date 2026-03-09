@@ -3537,46 +3537,46 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         ))
       }
     }
-
-    if (partition_result$n_superblocks > 1L) {
-      n_boundaries_sb <- partition_result$n_superblocks - 1L
-      n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
-        seq_len(n_boundaries_sb)
-      ]])
-      cass_msg <- if (partition_result$cassette_needs_splitting) {
-        " Cassette will be split into fragments."
-      } else {
-        ""
-      }
-      cli::cli_alert_info(paste0(
-        "Constrained SB DP: ", partition_result$n_superblocks,
-        " superblocks, ", n_boundaries_sb, " boundary(ies). ",
-        n_hf, " junction(s) in HF set. ",
-        nrow(all_splits), " per-tile split entries. ",
-        partition_result$n_collisions, " unresolved collision(s).",
-        cass_msg
-      ))
-    } else {
-      cass_msg <- if (partition_result$cassette_needs_splitting) {
-        " Cassette will be split into fragments."
-      } else {
-        ""
-      }
-      cli::cli_alert_success(paste0(
-        "All gene blocks within synthesis limit. No superblock splits needed.",
-        cass_msg
-      ))
-    }
   } # end legacy (non-OOGGA) path
 
   # Convert partition to legacy all_splits format for downstream consumers
-  # (OOGGA path also needs this — moved outside the if/else)
   all_splits <- convert_partition_to_splits(
     partition_result = partition_result,
     tiles = tiles,
     gene_len = gene_len,
     polIII_len = polIII_len
   )
+
+  # Summary logging (shared by all paths)
+  if (partition_result$n_superblocks > 1L) {
+    n_boundaries_sb <- partition_result$n_superblocks - 1L
+    n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
+      seq_len(n_boundaries_sb)
+    ]])
+    cass_msg <- if (partition_result$cassette_needs_splitting) {
+      " Cassette will be split into fragments."
+    } else {
+      ""
+    }
+    cli::cli_alert_info(paste0(
+      boundary_method, " SB: ", partition_result$n_superblocks,
+      " superblocks, ", n_boundaries_sb, " boundary(ies). ",
+      n_hf, " junction(s) in HF set. ",
+      nrow(all_splits), " per-tile split entries. ",
+      partition_result$n_collisions, " unresolved collision(s).",
+      cass_msg
+    ))
+  } else {
+    cass_msg <- if (partition_result$cassette_needs_splitting) {
+      " Cassette will be split into fragments."
+    } else {
+      ""
+    }
+    cli::cli_alert_success(paste0(
+      "All gene blocks within synthesis limit. No superblock splits needed.",
+      cass_msg
+    ))
+  }
 
   # Ensure n_tiles is defined after both paths
   n_tiles <- nrow(tiles)
