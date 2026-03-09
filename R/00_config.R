@@ -41,6 +41,7 @@ load_config <- function(config_path) {
     dp_k_range = 5L,
     boundary_method = "dp",
     oogga_max_identity = 2L,
+    oogga_beam_width = 10L,
     multi_k_search = TRUE,
     barcodes_per_variant = 10L,
     overlap_codons = 4L,
@@ -76,6 +77,7 @@ load_config <- function(config_path) {
   cfg$dp_k_range <- as.integer(cfg$dp_k_range %||% 5L)
   cfg$boundary_method <- as.character(cfg$boundary_method)
   cfg$oogga_max_identity <- as.integer(cfg$oogga_max_identity %||% 2L)
+  cfg$oogga_beam_width <- as.integer(cfg$oogga_beam_width %||% 10L)
   cfg$multi_k_search <- as.logical(cfg$multi_k_search)
   cfg$barcodes_per_variant <- as.integer(cfg$barcodes_per_variant)
   cfg$overlap_codons <- as.integer(cfg$overlap_codons)

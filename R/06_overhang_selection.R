@@ -2860,6 +2860,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   dp_k_range <- config$dp_k_range %||% 5L
   boundary_method <- config$boundary_method %||% "dp"
   oogga_max_identity <- config$oogga_max_identity %||% 2L
+  oogga_beam_width <- config$oogga_beam_width %||% 10L
   multi_k <- config$multi_k %||% TRUE
   overlap_codons <- config$overlap_codons %||% 4L
   min_geneblock_length <- config$min_geneblock_length %||% MIN_GENEBLOCK_LENGTH
@@ -3002,9 +3003,12 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     # =======================================================================
     # OOGGA collision-aware path (Phases 2+3 combined)
     # =======================================================================
+    # Architecture: SB-FIRST → tiles within, with SB junction OHs as alien.
+    # This ensures SB junction overhangs are known BEFORE tile selection,
+    # and all tile reactions include SB OHs in their collision domain.
+    #
     # Collision prevention is built into the DP transition — no iterative
-    # blacklisting needed. The DP rejects candidates with >max_identity/4
-    # positional matches against all prior overhangs on the path.
+    # blacklisting needed.
     cli::cli_h3(paste0(
       "Phase 2+3: OOGGA collision-aware boundary selection (",
       boundary_method, ")"
@@ -3012,6 +3016,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
 
     if (boundary_method == "oogga_single") {
       # A3: Single-pass OOGGA on entire gene+cassette
+      # (intentionally single collision domain — over-constrains, but simplest)
       cli::cli_alert_info("Using OOGGA single-pass DP")
       single_result <- search_boundaries_oogga_single(
         cds = cds,
@@ -3024,6 +3029,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         eff_lookup = eff_lookup,
         alien_ohs = alien_ohs,
         max_identity = oogga_max_identity,
+        beam_width = oogga_beam_width,
         dp_k_range = dp_k_range,
         overlap_codons = overlap_codons
       )
@@ -3031,42 +3037,17 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       sb_result <- single_result$sb_result
     } else {
       # A1/A2: SB-first OOGGA DP → tile boundary search
-      # Step 1: Tile boundaries (collision-aware)
-      if (boundary_method == "oogga_two_pass") {
-        cli::cli_alert_info("Using OOGGA two-pass DP (tile DP)")
-        tiles <- search_tile_boundaries_oogga(
-          cds = cds,
-          max_mutable_nt = max_mutable_nt,
-          min_mutable_nt = min_mutable_nt,
-          oh_fidelity = oh_fidelity,
-          multi_k = multi_k,
-          dp_k_range = dp_k_range,
-          overlap_codons = overlap_codons,
-          eff_lookup = eff_lookup,
-          alien_ohs = alien_ohs,
-          max_identity = oogga_max_identity
-        )
-      } else {
-        # oogga_greedy
-        cli::cli_alert_info("Using OOGGA greedy sequential tile search")
-        tiles <- search_tile_boundaries_greedy_seq(
-          cds = cds,
-          max_mutable_nt = max_mutable_nt,
-          min_mutable_nt = min_mutable_nt,
-          oh_fidelity = oh_fidelity,
-          overlap_codons = overlap_codons,
-          eff_lookup = eff_lookup,
-          alien_ohs = alien_ohs,
-          max_identity = oogga_max_identity
-        )
-      }
-
-      # Step 2: SB partitioning (collision-aware OOGGA SB DP)
-      n_tiles <- nrow(tiles)
+      # ---------------------------------------------------------------
+      # Pass 1: SB boundaries on full gene+cassette
+      # ---------------------------------------------------------------
+      # SBs at ANY codon position — no tile constraint. SB junction OHs
+      # must avoid fixed overhangs (oh3, oh4, oh_L) but know nothing
+      # about tile boundaries yet.
       full_seq_for_sb <- paste0(cds, cassette_seq)
       total_content_len <- nchar(full_seq_for_sb)
 
       if (total_content_len <= (max_block_length - block_overhead)) {
+        # Gene+cassette fits in one block — no SB splits needed
         sb_result <- list(
           n_superblocks = 1L,
           boundaries = data.frame(
@@ -3076,31 +3057,68 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
           ),
           total_score = 0
         )
+        sb_junction_ohs <- character(0)
+        cli::cli_alert_info("Gene+cassette fits in 1 block — no SB splits needed.")
       } else {
-        tile_end_positions <- tiles$end_nt[-n_tiles]
-        # SB alien OHs: all tile oh1/oh2 + fixed overhangs
-        sb_alien <- unique(c(
-          alien_ohs, tiles$oh1_seq, tiles$oh2_seq,
-          vapply(tiles$oh1_seq, reverse_complement, character(1)),
-          vapply(tiles$oh2_seq, reverse_complement, character(1))
-        ))
-        cassette_oh_blacklist <- unique(c(
-          tiles$oh1_seq, tiles$oh2_seq,
-          vapply(tiles$oh1_seq, reverse_complement, character(1)),
-          vapply(tiles$oh2_seq, reverse_complement, character(1))
-        ))
-
+        cli::cli_alert_info("Pass 1: SB boundary search (OOGGA DP)")
         sb_result <- search_sb_boundaries_oogga(
           full_seq = full_seq_for_sb,
           gene_len = gene_len,
           max_block_length = max_block_length - block_overhead,
           min_block_length = min_geneblock_length,
-          alien_ohs = alien_ohs,
+          alien_ohs = alien_ohs, # oh3, oh4, oh_L + RCs
           oh_fidelity = oh_fidelity,
           eff_lookup = eff_lookup,
           max_identity = oogga_max_identity,
-          allowed_gene_positions = tile_end_positions,
-          cassette_blacklist_ohs = cassette_oh_blacklist
+          beam_width = oogga_beam_width
+          # NO allowed_gene_positions — SBs at any codon position
+        )
+        # Extract the actual junction overhangs from the SB result
+        sb_junction_ohs <- sb_result$boundaries$boundary_oh[
+          !is.na(sb_result$boundaries$boundary_oh)
+        ]
+      }
+
+      # ---------------------------------------------------------------
+      # Pass 2: Tile boundaries on full CDS
+      # ---------------------------------------------------------------
+      # Alien OHs for tiles include SB junction OHs (because every tile's
+      # Level 1 BsmBI reaction reconstructs the full gene, so ALL SB
+      # junction OHs are present in every tile's reaction pot).
+      tile_alien_ohs <- unique(c(
+        alien_ohs, # oh3, oh4, oh_L + RCs
+        sb_junction_ohs,
+        vapply(sb_junction_ohs, reverse_complement, character(1))
+      ))
+
+      if (boundary_method == "oogga_two_pass") {
+        cli::cli_alert_info("Pass 2: Tile boundary search (OOGGA DP)")
+        tiles <- search_tile_boundaries_oogga(
+          cds = cds,
+          max_mutable_nt = max_mutable_nt,
+          min_mutable_nt = min_mutable_nt,
+          oh_fidelity = oh_fidelity,
+          multi_k = multi_k,
+          dp_k_range = dp_k_range,
+          overlap_codons = overlap_codons,
+          eff_lookup = eff_lookup,
+          alien_ohs = tile_alien_ohs,
+          max_identity = oogga_max_identity,
+          beam_width = oogga_beam_width
+        )
+      } else {
+        # oogga_greedy
+        cli::cli_alert_info("Pass 2: Tile boundary search (OOGGA greedy)")
+        tiles <- search_tile_boundaries_greedy_seq(
+          cds = cds,
+          max_mutable_nt = max_mutable_nt,
+          min_mutable_nt = min_mutable_nt,
+          oh_fidelity = oh_fidelity,
+          overlap_codons = overlap_codons,
+          eff_lookup = eff_lookup,
+          alien_ohs = tile_alien_ohs,
+          max_identity = oogga_max_identity,
+          beam_width = oogga_beam_width
         )
       }
     }

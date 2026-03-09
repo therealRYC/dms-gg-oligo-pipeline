@@ -29,10 +29,12 @@
 #' compat[A, B] = TRUE iff A passes the identity check against B:
 #'   - positional matches of A vs B <= max_identity
 #'   - positional matches of A vs RC(B) <= max_identity
-#'   - positional matches of RC(A) vs B <= max_identity
 #'
-#' This is equivalent to OOGGA's __find_identities() but O(1) per lookup
-#' instead of O(4) per comparison.
+#' Matches OOGGA's __find_identities() exactly: for each "other" overhang O,
+#' the candidate C is checked against both O and RC(O). Only 2 conditions,
+#' not 3. (The extra identity(RC(A), B) check from a prior version was not
+#' in OOGGA — removed for faithfulness. Could be re-added as a future
+#' strict_compat=TRUE option if needed.)
 #'
 #' @param max_identity Integer, maximum allowed positional matches (default 2).
 #'   OOGGA default is 2: reject if >2/4 positions match.
@@ -47,7 +49,7 @@ build_oh_compatibility <- function(max_identity = 2L) {
   ))
   n <- length(all_ohs) # 256
 
-  # Pre-split all overhangs and their RCs into character vectors for fast
+  # Pre-split all overhangs and their RCs into integer vectors for fast
   # positional comparison
   oh_chars <- lapply(all_ohs, function(x) utf8ToInt(x))
   rc_chars <- lapply(all_ohs, function(x) utf8ToInt(reverse_complement(x)))
@@ -60,20 +62,16 @@ build_oh_compatibility <- function(max_identity = 2L) {
 
   for (i in seq_len(n)) {
     a_int <- oh_chars[[i]]
-    rc_a_int <- rc_chars[[i]]
     for (j in seq_len(n)) {
       b_int <- oh_chars[[j]]
       rc_b_int <- rc_chars[[j]]
 
-      # Count positional matches for each comparison
-      # OOGGA checks: A vs B, A vs RC(B), RC(A) vs B
+      # OOGGA checks 2 conditions per pair: A vs B, A vs RC(B)
       id_ab <- sum(a_int == b_int)
       id_a_rcb <- sum(a_int == rc_b_int)
-      id_rca_b <- sum(rc_a_int == b_int)
 
-      # Reject if ANY comparison exceeds max_identity
-      if (id_ab > max_identity || id_a_rcb > max_identity ||
-        id_rca_b > max_identity) {
+      # Reject if EITHER comparison exceeds max_identity
+      if (id_ab > max_identity || id_a_rcb > max_identity) {
         compat[i, j] <- FALSE
       }
     }
@@ -87,7 +85,9 @@ build_oh_compatibility <- function(max_identity = 2L) {
 #'
 #' Equivalent to OOGGA's __overlap_pass(): checks the candidate against
 #' every prior overhang on the DP path AND against alien overhangs.
-#' Returns TRUE only if ALL checks pass (candidate is compatible with all).
+#' Also checks the self-palindrome constraint: identity(candidate,
+#' RC(candidate)) must not exceed max_identity. This matches OOGGA's
+#' inclusion of RC(current_overhang) in the identity check list.
 #'
 #' @param candidate_oh Character, 4-nt candidate overhang
 #' @param prior_ohs Character vector of overhangs already committed on this
@@ -95,9 +95,23 @@ build_oh_compatibility <- function(max_identity = 2L) {
 #' @param alien_ohs Character vector of fixed overhangs that must not collide
 #'   with the candidate (e.g., oh3, oh4, oh_L). Can be empty.
 #' @param compat_matrix Named 256x256 logical matrix from build_oh_compatibility().
-#' @return Logical TRUE if candidate is compatible with all prior + alien OHs.
+#' @param max_identity Integer, max allowed positional identity (must match
+#'   the max_identity used to build compat_matrix). Needed for the
+#'   self-palindrome check, which can't use the compat matrix directly.
+#' @return Logical TRUE if candidate is compatible with all prior + alien OHs
+#'   and passes the self-palindrome check.
 oogga_overlap_pass <- function(candidate_oh, prior_ohs, alien_ohs,
-                               compat_matrix) {
+                               compat_matrix, max_identity = 2L) {
+  # Self-palindrome check: OOGGA includes RC(candidate) in the identity list.
+  # identity(candidate, RC(candidate)) > max_identity means the candidate's
+  # own reverse complement is too similar to itself — reject.
+  # Note: can't use compat_matrix for this because compat[A, RC(A)] also
+  # checks identity(A, A)=4 which always fails.
+  rc_cand <- reverse_complement(candidate_oh)
+  if (count_positional_identity(candidate_oh, rc_cand) > max_identity) {
+    return(FALSE)
+  }
+
   # Check against all prior overhangs on the path
   for (oh in prior_ohs) {
     if (!compat_matrix[candidate_oh, oh]) {
@@ -332,18 +346,27 @@ oogga_sb_dp_solve_k <- function(K, total_len, min_len, max_len,
 #' Solve SB boundary placement with OOGGA collision-aware DP (v2)
 #'
 #' Stores full (score, positions, ohs) tuples for path reconstruction.
-#' Uses pruning to keep only the top-N paths per position to bound memory.
+#' Uses beam search: retains top beam_width paths per position to explore
+#' multiple collision-compatible paths (Bellman optimality doesn't hold
+#' because the collision constraint is path-dependent).
+#'
+#' Scoring is multiplicative (OOGGA-faithful): each boundary's
+#' overhang_score(oh) is multiplied into a running product. This matches
+#' OOGGA's ∏(eff_i × fid_i) formulation exactly.
 #'
 #' @inheritParams oogga_sb_dp_solve_k
-#' @param max_paths_per_pos Maximum paths to retain per position (default 3).
-#'   Higher = more exploration but slower. For SB boundaries (K=1-5), even
-#'   max_paths=1 works well since there are few boundaries.
+#' @param beam_width Integer, max paths to retain per position (default 10).
+#'   Higher = more exploration but slower. beam_width=1 matches OOGGA's
+#'   single-path behavior.
+#' @param max_identity Integer, max positional identity for self-palindrome
+#'   check in oogga_overlap_pass (must match compat_matrix's max_identity).
 #' @return List with boundaries (integer vector), total_score, boundary_ohs,
 #'   or NULL if no feasible solution
 oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
                                    boundary_scores, boundary_valid,
                                    oh_seq, alien_ohs, compat_matrix,
-                                   max_paths_per_pos = 3L) {
+                                   beam_width = 10L,
+                                   max_identity = 2L) {
   if (K == 0L) {
     return(NULL)
   }
@@ -353,6 +376,7 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
 
   # Each path entry: list(score, positions = int vector, ohs = char vector)
   # dp_paths[[p]] = list of path entries ending at position p
+  # Score is a multiplicative product of overhang_score values.
 
   # Layer k=1
   dp_paths <- vector("list", total_len)
@@ -363,9 +387,14 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
     for (p in lo_p:hi_p) {
       if (!boundary_valid[p]) next
       oh <- oh_seq[p]
-      if (!oogga_overlap_pass(oh, character(0), alien_ohs, compat_matrix)) next
+      if (!oogga_overlap_pass(
+        oh, character(0), alien_ohs, compat_matrix,
+        max_identity
+      )) {
+        next
+      }
       dp_paths[[p]] <- list(list(
-        score = boundary_scores[p],
+        score = boundary_scores[p], # first boundary: product starts here
         positions = p,
         ohs = oh
       ))
@@ -397,20 +426,26 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
         for (pp in lo:hi) {
           if (is.null(dp_paths[[pp]])) next
           for (path in dp_paths[[pp]]) {
-            if (!oogga_overlap_pass(oh, path$ohs, alien_ohs, compat_matrix)) next
+            if (!oogga_overlap_pass(
+              oh, path$ohs, alien_ohs, compat_matrix,
+              max_identity
+            )) {
+              next
+            }
+            # Multiplicative scoring: product of overhang scores
             candidates[[length(candidates) + 1L]] <- list(
-              score = path$score + boundary_scores[p],
+              score = path$score * boundary_scores[p],
               positions = c(path$positions, p),
               ohs = c(path$ohs, oh)
             )
           }
         }
 
-        # Prune: keep top max_paths_per_pos by score
+        # Beam pruning: keep top beam_width paths by score
         if (length(candidates) > 0L) {
-          if (length(candidates) > max_paths_per_pos) {
+          if (length(candidates) > beam_width) {
             scores <- vapply(candidates, function(c) c$score, numeric(1))
-            keep_idx <- order(scores, decreasing = TRUE)[seq_len(max_paths_per_pos)]
+            keep_idx <- order(scores, decreasing = TRUE)[seq_len(beam_width)]
             candidates <- candidates[keep_idx]
           }
           dp_paths_new[[p]] <- candidates
@@ -474,6 +509,7 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
                                        oh_fidelity = NULL,
                                        eff_lookup = NULL,
                                        max_identity = 2L,
+                                       beam_width = 10L,
                                        allowed_gene_positions = NULL,
                                        cassette_blacklist_ohs = character(0)) {
   total_len <- nchar(full_seq)
@@ -551,8 +587,10 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
   cli::cli_alert_info("OOGGA SB DP: K range [{K_min}, {K_max}]")
 
   # Run DP for each K
+  # Multiplicative scoring: compare via geometric mean (score^(1/K))
+  # to normalize across different K values
   best_result <- NULL
-  best_avg_score <- -Inf
+  best_geo_mean <- -Inf
 
   dp_start <- proc.time()
   for (K in k_range) {
@@ -560,12 +598,13 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
       K, total_len, min_block_length, max_block_length,
       candidates$score, candidates$valid, candidates$oh_seq,
       alien_ohs, compat,
-      max_paths_per_pos = 3L
+      beam_width = beam_width,
+      max_identity = max_identity
     )
-    if (!is.null(result)) {
-      avg <- result$total_score / K
-      if (avg > best_avg_score) {
-        best_avg_score <- avg
+    if (!is.null(result) && result$total_score > 0) {
+      geo_mean <- result$total_score^(1 / K)
+      if (geo_mean > best_geo_mean) {
+        best_geo_mean <- geo_mean
         best_result <- result
         best_result$K <- K
       }
@@ -585,12 +624,13 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
         K, total_len, min_block_length, max_block_length,
         candidates$score, candidates$valid, candidates$oh_seq,
         alien_ohs, compat3,
-        max_paths_per_pos = 5L
+        beam_width = beam_width,
+        max_identity = 3L
       )
-      if (!is.null(result)) {
-        avg <- result$total_score / K
-        if (avg > best_avg_score) {
-          best_avg_score <- avg
+      if (!is.null(result) && result$total_score > 0) {
+        geo_mean <- result$total_score^(1 / K)
+        if (geo_mean > best_geo_mean) {
+          best_geo_mean <- geo_mean
           best_result <- result
           best_result$K <- K
         }
@@ -660,10 +700,8 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
 #' both oh1 and oh2 at the candidate boundary against all prior OHs on the
 #' path, plus alien OHs (SB junction OHs, oh3, oh_L, oh4).
 #'
-#' Collision domain: within a single tile reaction, the overhangs that must
-#' be mutually compatible are {oh1, oh2, oh3, SB_junction_OHs}. Since oh1
-#' and oh2 are gene-derived at each boundary, the DP must ensure no
-#' collisions across the full set.
+#' Scoring is multiplicative (OOGGA-faithful): each boundary contributes
+#' overhang_score(oh1) * overhang_score(oh2) to a running product.
 #'
 #' @param K Number of internal tile boundaries
 #' @param n_codons Total codons in gene (or gene segment for per-SB)
@@ -671,17 +709,21 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
 #' @param max_codons Maximum tile size in codons
 #' @param oh1_seq Character vector: oh1 at each codon boundary position
 #' @param oh2_seq Character vector: oh2 at each codon boundary position
-#' @param boundary_scores Numeric vector of scores per codon position
+#' @param oh1_scores Numeric vector: overhang_score(oh1) per boundary position
+#' @param oh2_scores Numeric vector: overhang_score(oh2) per boundary position
 #' @param boundary_valid Logical vector of valid positions
 #' @param alien_ohs Character vector of fixed overhangs to avoid
 #' @param compat_matrix Named 256x256 logical compatibility matrix
-#' @param max_paths_per_pos Integer, max paths to retain per position
+#' @param beam_width Integer, max paths to retain per position (default 10)
+#' @param max_identity Integer, for self-palindrome check in overlap_pass
 #' @return List with boundaries, total_score, path_ohs, or NULL
 oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
                                   oh1_seq, oh2_seq,
-                                  boundary_scores, boundary_valid,
+                                  oh1_scores, oh2_scores,
+                                  boundary_valid,
                                   alien_ohs, compat_matrix,
-                                  max_paths_per_pos = 5L) {
+                                  beam_width = 10L,
+                                  max_identity = 2L) {
   if (K == 0L) {
     return(NULL)
   }
@@ -692,6 +734,7 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
   # Each path entry: list(score, positions, ohs)
   # ohs includes BOTH oh1 and oh2 at each boundary (both participate in
   # BsmBI reactions and must be collision-free)
+  # Score is multiplicative: product of (oh1_score * oh2_score) per boundary
 
   # Layer k=1
   dp_paths <- vector("list", n_codons)
@@ -704,14 +747,25 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
       oh1 <- oh1_seq[b]
       oh2 <- oh2_seq[b]
 
-      # Both oh1 and oh2 must pass against alien OHs
-      if (!oogga_overlap_pass(oh1, character(0), alien_ohs, compat_matrix)) next
-      if (!oogga_overlap_pass(oh2, character(0), alien_ohs, compat_matrix)) next
+      # Both oh1 and oh2 must pass overlap check (incl. self-palindrome)
+      if (!oogga_overlap_pass(
+        oh1, character(0), alien_ohs, compat_matrix,
+        max_identity
+      )) {
+        next
+      }
+      if (!oogga_overlap_pass(
+        oh2, character(0), alien_ohs, compat_matrix,
+        max_identity
+      )) {
+        next
+      }
       # oh1 and oh2 at this boundary must be compatible with each other
       if (!compat_matrix[oh1, oh2]) next
 
+      # Multiplicative: first boundary's score = oh1_score * oh2_score
       dp_paths[[b]] <- list(list(
-        score = boundary_scores[b],
+        score = oh1_scores[b] * oh2_scores[b],
         positions = b,
         ohs = c(oh1, oh2)
       ))
@@ -745,23 +799,35 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
           if (is.null(dp_paths[[bp]])) next
           for (path in dp_paths[[bp]]) {
             # Check oh1 and oh2 against all prior OHs + alien
-            if (!oogga_overlap_pass(oh1, path$ohs, alien_ohs, compat_matrix)) next
-            if (!oogga_overlap_pass(oh2, path$ohs, alien_ohs, compat_matrix)) next
+            if (!oogga_overlap_pass(
+              oh1, path$ohs, alien_ohs, compat_matrix,
+              max_identity
+            )) {
+              next
+            }
+            if (!oogga_overlap_pass(
+              oh2, path$ohs, alien_ohs, compat_matrix,
+              max_identity
+            )) {
+              next
+            }
             # oh1 and oh2 must be compatible with each other
             if (!compat_matrix[oh1, oh2]) next
 
+            # Multiplicative scoring
             candidates[[length(candidates) + 1L]] <- list(
-              score = path$score + boundary_scores[b],
+              score = path$score * oh1_scores[b] * oh2_scores[b],
               positions = c(path$positions, b),
               ohs = c(path$ohs, oh1, oh2)
             )
           }
         }
 
+        # Beam pruning: keep top beam_width paths by score
         if (length(candidates) > 0L) {
-          if (length(candidates) > max_paths_per_pos) {
+          if (length(candidates) > beam_width) {
             scores <- vapply(candidates, function(c) c$score, numeric(1))
-            keep_idx <- order(scores, decreasing = TRUE)[seq_len(max_paths_per_pos)]
+            keep_idx <- order(scores, decreasing = TRUE)[seq_len(beam_width)]
             candidates <- candidates[keep_idx]
           }
           dp_paths_new[[b]] <- candidates
@@ -826,7 +892,8 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
                                          overlap_codons = 4L,
                                          eff_lookup = NULL,
                                          alien_ohs = character(0),
-                                         max_identity = 2L) {
+                                         max_identity = 2L,
+                                         beam_width = 10L) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
 
@@ -843,12 +910,32 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
     eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
   }
 
-  # Precompute boundary scores (reuse existing function for oh1/oh2 extraction)
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+
+  # Precompute boundary data (reuse existing function for oh1/oh2 extraction)
   precomp <- precompute_boundary_scores(
     cds, oh_fidelity,
     eff_lookup = eff_lookup,
     overlap_codons = overlap_codons
   )
+
+  # Compute per-OH scores for multiplicative DP (OOGGA-faithful)
+  # precomp$score is additive (oh1 + oh2) — we need individual products
+  oh1_scores <- vapply(precomp$oh1_seq, function(oh) {
+    if (nchar(oh) == 4L && oh %in% names(fid_lookup)) {
+      overhang_score(oh, fid_lookup, eff_lookup)
+    } else {
+      0
+    }
+  }, numeric(1), USE.NAMES = FALSE)
+  oh2_scores <- vapply(precomp$oh2_seq, function(oh) {
+    if (nchar(oh) == 4L && oh %in% names(fid_lookup)) {
+      overhang_score(oh, fid_lookup, eff_lookup)
+    } else {
+      0
+    }
+  }, numeric(1), USE.NAMES = FALSE)
 
   # Build compatibility matrix
   compat <- build_oh_compatibility(max_identity)
@@ -869,22 +956,25 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   )
 
   # Run collision-aware DP for each K
+  # Multiplicative scoring: compare via geometric mean (score^(1/K))
   best_result <- NULL
-  best_avg_score <- -Inf
+  best_geo_mean <- -Inf
 
   dp_start <- proc.time()
   for (K in K_lo:K_hi) {
     result <- oogga_tile_dp_solve_k(
       K, n_codons, min_codons, max_codons,
       precomp$oh1_seq, precomp$oh2_seq,
-      precomp$score, precomp$valid,
+      oh1_scores, oh2_scores,
+      precomp$valid,
       alien_ohs, compat,
-      max_paths_per_pos = 5L
+      beam_width = beam_width,
+      max_identity = max_identity
     )
-    if (!is.null(result)) {
-      avg <- result$total_score / K
-      if (avg > best_avg_score) {
-        best_avg_score <- avg
+    if (!is.null(result) && result$total_score > 0) {
+      geo_mean <- result$total_score^(1 / K)
+      if (geo_mean > best_geo_mean) {
+        best_geo_mean <- geo_mean
         best_result <- result
         best_result$K <- K
       }
@@ -906,14 +996,16 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
       result <- oogga_tile_dp_solve_k(
         K, n_codons, min_codons, max_codons,
         precomp$oh1_seq, precomp$oh2_seq,
-        precomp$score, precomp$valid,
+        oh1_scores, oh2_scores,
+        precomp$valid,
         alien_ohs, compat3,
-        max_paths_per_pos = 5L
+        beam_width = beam_width,
+        max_identity = 3L
       )
-      if (!is.null(result)) {
-        avg <- result$total_score / K
-        if (avg > best_avg_score) {
-          best_avg_score <- avg
+      if (!is.null(result) && result$total_score > 0) {
+        geo_mean <- result$total_score^(1 / K)
+        if (geo_mean > best_geo_mean) {
+          best_geo_mean <- geo_mean
           best_result <- result
           best_result$K <- K
         }
@@ -1029,7 +1121,8 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
                                               overlap_codons = 4L,
                                               eff_lookup = NULL,
                                               alien_ohs = character(0),
-                                              max_identity = 2L) {
+                                              max_identity = 2L,
+                                              beam_width = 10L) { # unused, API consistency
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
 
@@ -1089,12 +1182,23 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
       if (oh1 %in% HOMOPOLYMER_4NT || oh2 %in% HOMOPOLYMER_4NT) next
       if (oh1 == oh_L || oh1 == reverse_complement(oh_L)) next
 
-      # Collision checks
-      if (!oogga_overlap_pass(oh1, committed_ohs, alien_ohs, compat)) next
-      if (!oogga_overlap_pass(oh2, committed_ohs, alien_ohs, compat)) next
+      # Collision checks (incl. self-palindrome via max_identity param)
+      if (!oogga_overlap_pass(
+        oh1, committed_ohs, alien_ohs, compat,
+        max_identity
+      )) {
+        next
+      }
+      if (!oogga_overlap_pass(
+        oh2, committed_ohs, alien_ohs, compat,
+        max_identity
+      )) {
+        next
+      }
       if (!compat[oh1, oh2]) next
 
-      score <- overhang_score(oh1, fid_lookup, eff_lookup) +
+      # Multiplicative score for ranking (OOGGA-faithful)
+      score <- overhang_score(oh1, fid_lookup, eff_lookup) *
         overhang_score(oh2, fid_lookup, eff_lookup)
 
       candidates[[length(candidates) + 1L]] <- list(
@@ -1222,7 +1326,8 @@ oogga_single_pass_dp <- function(full_seq, gene_len,
                                  oh_fidelity, eff_lookup,
                                  alien_ohs = character(0),
                                  max_identity = 2L,
-                                 dp_k_range = 5L) {
+                                 dp_k_range = 5L,
+                                 beam_width = 10L) {
   total_len <- nchar(full_seq)
   n_codons_gene <- gene_len %/% 3L
 
@@ -1275,7 +1380,7 @@ oogga_single_pass_dp <- function(full_seq, gene_len,
   # However, the last segment can be larger (gene tail + cassette).
 
   best_result <- NULL
-  best_avg_score <- -Inf
+  best_geo_mean <- -Inf
 
   dp_start <- proc.time()
   for (K in K_lo:K_hi) {
@@ -1289,12 +1394,13 @@ oogga_single_pass_dp <- function(full_seq, gene_len,
       boundary_valid[seq_len(gene_len)],
       oh_seq[seq_len(gene_len)],
       alien_ohs, compat,
-      max_paths_per_pos = 5L
+      beam_width = beam_width,
+      max_identity = max_identity
     )
-    if (!is.null(result)) {
-      avg <- result$total_score / K
-      if (avg > best_avg_score) {
-        best_avg_score <- avg
+    if (!is.null(result) && result$total_score > 0) {
+      geo_mean <- result$total_score^(1 / K)
+      if (geo_mean > best_geo_mean) {
+        best_geo_mean <- geo_mean
         best_result <- result
         best_result$K <- K
       }
@@ -1316,12 +1422,13 @@ oogga_single_pass_dp <- function(full_seq, gene_len,
         boundary_valid[seq_len(gene_len)],
         oh_seq[seq_len(gene_len)],
         alien_ohs, compat3,
-        max_paths_per_pos = 5L
+        beam_width = beam_width,
+        max_identity = 3L
       )
-      if (!is.null(result)) {
-        avg <- result$total_score / K
-        if (avg > best_avg_score) {
-          best_avg_score <- avg
+      if (!is.null(result) && result$total_score > 0) {
+        geo_mean <- result$total_score^(1 / K)
+        if (geo_mean > best_geo_mean) {
+          best_geo_mean <- geo_mean
           best_result <- result
           best_result$K <- K
         }
@@ -1364,6 +1471,7 @@ search_boundaries_oogga_single <- function(cds, cassette_seq,
                                            eff_lookup = NULL,
                                            alien_ohs = character(0),
                                            max_identity = 2L,
+                                           beam_width = 10L,
                                            dp_k_range = 5L,
                                            overlap_codons = 4L) {
   gene_len <- nchar(cds)
@@ -1390,7 +1498,8 @@ search_boundaries_oogga_single <- function(cds, cassette_seq,
   # Run single-pass OOGGA on gene+cassette
   sp_result <- oogga_single_pass_dp(
     full_seq, gene_len, min_codons, max_codons,
-    oh_fidelity, eff_lookup, alien_ohs, max_identity, dp_k_range
+    oh_fidelity, eff_lookup, alien_ohs, max_identity, dp_k_range,
+    beam_width = beam_width
   )
 
   # Convert nt-position boundaries to codon boundaries
@@ -1473,6 +1582,7 @@ search_boundaries_oogga_single <- function(cds, cassette_seq,
       oh_fidelity = oh_fidelity,
       eff_lookup = eff_lookup,
       max_identity = max_identity,
+      beam_width = beam_width,
       allowed_gene_positions = tile_end_positions,
       cassette_blacklist_ohs = cassette_oh_blacklist
     )
