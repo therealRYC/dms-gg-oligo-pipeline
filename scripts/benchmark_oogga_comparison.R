@@ -121,7 +121,8 @@ benchmark_one <- function(gene_name, cds, method, polIII = TEST_POLIII) {
       gene = gene_name, method = method,
       n_tiles = NA_integer_, n_superblocks = NA_integer_,
       min_set_fidelity = NA_real_, mean_set_fidelity = NA_real_,
-      n_collision_violations = NA_integer_, n_exact_violations = NA_integer_,
+      violations_mi2 = NA_integer_, violations_mi3 = NA_integer_,
+      n_exact_violations = NA_integer_,
       runtime_sec = elapsed, status = "ERROR",
       stringsAsFactors = FALSE
     ))
@@ -130,9 +131,15 @@ benchmark_one <- function(gene_name, cds, method, polIII = TEST_POLIII) {
   # Extract metrics
   rf <- result$reaction_fidelity
 
-  # Count OOGGA identity violations within each reaction
+  # Count OOGGA identity violations within each reaction at both thresholds:
+  # - max_identity=2 (strict): >2/4 positional matches rejected
+  # - max_identity=3 (relaxed): >3/4 positional matches rejected (only exact/RC)
+  # Violations at mi=3 are genuine (exact match or near-RC).
+  # Violations at mi=2 but not mi=3 come from the max_identity=3 fallback.
   compat2 <- build_oh_compatibility(2L)
-  n_violations <- 0L
+  compat3 <- build_oh_compatibility(3L)
+  n_violations_mi2 <- 0L
+  n_violations_mi3 <- 0L
   n_exact <- 0L
 
   for (i in seq_len(nrow(rf))) {
@@ -141,11 +148,8 @@ benchmark_one <- function(gene_name, cds, method, polIII = TEST_POLIII) {
     for (a in seq_len(length(ohs) - 1L)) {
       for (b in (a + 1L):length(ohs)) {
         if (nchar(ohs[a]) != 4L || nchar(ohs[b]) != 4L) next
-        # Check identity violation (>2/4)
-        if (!compat2[ohs[a], ohs[b]]) {
-          n_violations <- n_violations + 1L
-        }
-        # Check exact match or RC match
+        if (!compat2[ohs[a], ohs[b]]) n_violations_mi2 <- n_violations_mi2 + 1L
+        if (!compat3[ohs[a], ohs[b]]) n_violations_mi3 <- n_violations_mi3 + 1L
         if (ohs[a] == ohs[b] || ohs[a] == reverse_complement(ohs[b])) {
           n_exact <- n_exact + 1L
         }
@@ -159,7 +163,8 @@ benchmark_one <- function(gene_name, cds, method, polIII = TEST_POLIII) {
     n_superblocks = result$summary$n_superblocks,
     min_set_fidelity = result$summary$overall_min_fidelity,
     mean_set_fidelity = mean(rf$set_fidelity),
-    n_collision_violations = n_violations,
+    violations_mi2 = n_violations_mi2,
+    violations_mi3 = n_violations_mi3,
     n_exact_violations = n_exact,
     runtime_sec = round(elapsed, 2),
     status = "OK",
@@ -224,13 +229,14 @@ for (gene_name in unique(results_df$gene)) {
   for (i in seq_len(nrow(gene_df))) {
     row <- gene_df[i, ]
     cat(sprintf(
-      "  %-20s  tiles=%s  SBs=%s  min_fid=%.4f  mean_fid=%.4f  collisions=%s  exact=%s  time=%.1fs  %s\n",
+      "  %-20s  tiles=%s  SBs=%s  min_fid=%.4f  mean_fid=%.4f  viol_mi2=%s  viol_mi3=%s  exact=%s  time=%.1fs  %s\n",
       row$method,
       ifelse(is.na(row$n_tiles), "?", as.character(row$n_tiles)),
       ifelse(is.na(row$n_superblocks), "?", as.character(row$n_superblocks)),
       ifelse(is.na(row$min_set_fidelity), 0, row$min_set_fidelity),
       ifelse(is.na(row$mean_set_fidelity), 0, row$mean_set_fidelity),
-      ifelse(is.na(row$n_collision_violations), "?", as.character(row$n_collision_violations)),
+      ifelse(is.na(row$violations_mi2), "?", as.character(row$violations_mi2)),
+      ifelse(is.na(row$violations_mi3), "?", as.character(row$violations_mi3)),
       ifelse(is.na(row$n_exact_violations), "?", as.character(row$n_exact_violations)),
       row$runtime_sec,
       row$status
@@ -246,23 +252,45 @@ cat(separator, "\n\n")
 baseline <- results_df[results_df$method == "dp", ]
 oogga_methods <- results_df[results_df$method != "dp", ]
 
-baseline_violations <- sum(baseline$n_collision_violations, na.rm = TRUE)
-if (baseline_violations > 0) {
+# --- Violations at max_identity=2 (strict OOGGA threshold) ---
+cat("=== Violations at max_identity=2 (strict: >2/4 positional matches) ===\n\n")
+
+baseline_v2 <- sum(baseline$violations_mi2, na.rm = TRUE)
+if (baseline_v2 > 0) {
   cat(sprintf(
-    "BUG-009 CONFIRMED: baseline DP has %d collision violations.\n",
-    baseline_violations
+    "BUG-009 CONFIRMED: baseline DP has %d collision violations (mi2).\n",
+    baseline_v2
   ))
 } else {
-  cat("Note: baseline DP has 0 collision violations on these test genes.\n")
+  cat("Note: baseline DP has 0 collision violations (mi2) on these test genes.\n")
   cat("(BUG-009 may still exist -- longer/more constrained genes may trigger it.)\n")
 }
 
-oogga_violations <- sum(oogga_methods$n_collision_violations, na.rm = TRUE)
-if (oogga_violations == 0) {
-  cat("SUCCESS: All OOGGA methods produce 0 collision violations.\n")
+oogga_v2 <- sum(oogga_methods$violations_mi2, na.rm = TRUE)
+if (oogga_v2 == 0) {
+  cat("SUCCESS: All OOGGA methods produce 0 violations at mi2.\n")
 } else {
-  cat(sprintf("WARNING: OOGGA methods have %d collision violations:\n", oogga_violations))
-  print(oogga_methods[oogga_methods$n_collision_violations > 0, ], row.names = FALSE)
+  cat(sprintf("OOGGA methods have %d violations at mi2.\n", oogga_v2))
+  # How many are from max_identity=3 fallback vs genuine cross-domain?
+  oogga_v3 <- sum(oogga_methods$violations_mi3, na.rm = TRUE)
+  fallback_only <- oogga_v2 - oogga_v3
+  cat(sprintf(
+    "  Of these: %d from mi3 fallback (would pass at mi=3), %d genuine (mi3 violations).\n",
+    fallback_only, oogga_v3
+  ))
+}
+
+cat("\n=== Violations at max_identity=3 (relaxed: only exact match/RC) ===\n\n")
+
+baseline_v3 <- sum(baseline$violations_mi3, na.rm = TRUE)
+cat(sprintf("Baseline DP: %d exact-match/RC violations.\n", baseline_v3))
+
+oogga_v3_total <- sum(oogga_methods$violations_mi3, na.rm = TRUE)
+if (oogga_v3_total == 0) {
+  cat("SUCCESS: All OOGGA methods produce 0 violations at mi3.\n")
+} else {
+  cat(sprintf("WARNING: OOGGA methods have %d violations at mi3:\n", oogga_v3_total))
+  print(oogga_methods[oogga_methods$violations_mi3 > 0, ], row.names = FALSE)
 }
 
 cat("\nDone.\n")
