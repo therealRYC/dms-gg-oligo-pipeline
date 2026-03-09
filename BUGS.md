@@ -1,5 +1,5 @@
 # Created: 2026-02-20
-# Last updated: 2026-03-05 — F13 updated: fix oversized gene block when gene_residual + cassette > 1800
+# Last updated: 2026-03-09 — BUG-009: DP boundary search missing OOGGA collision prevention
 
 # Bug Inventory — DMS GG Oligo Pipeline
 
