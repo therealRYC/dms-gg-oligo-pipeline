@@ -893,6 +893,9 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   dp_elapsed <- (proc.time() - dp_start)[["elapsed"]]
   cli::cli_alert_info("OOGGA tile DP completed in {round(dp_elapsed, 1)}s.")
 
+  # Track effective max_identity (may fall back from 2 to 3)
+  effective_max_identity <- max_identity
+
   # If infeasible at max_identity=2, try max_identity=3
   if (is.null(best_result) && max_identity == 2L) {
     cli::cli_alert_warning(
@@ -917,6 +920,7 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
       }
     }
     if (!is.null(best_result)) {
+      effective_max_identity <- 3L
       cli::cli_alert_info("OOGGA tile DP succeeded at max_identity=3.")
     }
   }
@@ -961,6 +965,10 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   tiles$oh2_score <- NA_real_
   tiles$oh1_in_hf <- NA
   tiles$oh2_in_hf <- NA
+  tiles$oh1_fidelity <- NA_real_
+  tiles$oh2_fidelity <- NA_real_
+  tiles$tile_seq <- NA_character_
+  tiles$boundary_shift <- 0L
   tiles$boundary_score <- NA_real_
 
   for (i in seq_len(n_tiles)) {
@@ -975,6 +983,11 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
     tiles$oh2_score[i] <- overhang_score(tiles$oh2_seq[i], fid_lookup, eff_lookup)
     tiles$oh1_in_hf[i] <- tiles$oh1_seq[i] %in% hf_set
     tiles$oh2_in_hf[i] <- tiles$oh2_seq[i] %in% hf_set
+    oh1_fid <- if (tiles$oh1_seq[i] %in% names(fid_lookup)) unname(fid_lookup[tiles$oh1_seq[i]]) else NA_real_
+    oh2_fid <- if (tiles$oh2_seq[i] %in% names(fid_lookup)) unname(fid_lookup[tiles$oh2_seq[i]]) else NA_real_
+    tiles$oh1_fidelity[i] <- oh1_fid
+    tiles$oh2_fidelity[i] <- oh2_fid
+    tiles$tile_seq[i] <- substring(cds, tiles$start_nt[i], tiles$end_nt[i])
     tiles$boundary_score[i] <- tiles$oh1_score[i] + tiles$oh2_score[i]
   }
 
@@ -983,6 +996,7 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
     "Total score: ", round(best_result$total_score, 3)
   ))
 
+  attr(tiles, "max_identity_used") <- effective_max_identity
   tiles
 }
 
@@ -1067,6 +1081,9 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
       oh2_pos <- oh2_codon * 3L
       oh2 <- substring(cds, oh2_pos - 3L, oh2_pos)
 
+      # Guard: OH must be exactly 4 nt (boundary near gene end may truncate)
+      if (nchar(oh1) != 4L || nchar(oh2) != 4L) next
+
       # Hard filters
       if (oh1 %in% PALINDROMIC_4NT || oh2 %in% PALINDROMIC_4NT) next
       if (oh1 %in% HOMOPOLYMER_4NT || oh2 %in% HOMOPOLYMER_4NT) next
@@ -1144,6 +1161,10 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
   tiles$oh2_score <- NA_real_
   tiles$oh1_in_hf <- NA
   tiles$oh2_in_hf <- NA
+  tiles$oh1_fidelity <- NA_real_
+  tiles$oh2_fidelity <- NA_real_
+  tiles$tile_seq <- NA_character_
+  tiles$boundary_shift <- 0L
   tiles$boundary_score <- NA_real_
 
   for (i in seq_len(n_tiles)) {
@@ -1156,6 +1177,11 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
     tiles$oh2_score[i] <- overhang_score(tiles$oh2_seq[i], fid_lookup, eff_lookup)
     tiles$oh1_in_hf[i] <- tiles$oh1_seq[i] %in% hf_set
     tiles$oh2_in_hf[i] <- tiles$oh2_seq[i] %in% hf_set
+    oh1_fid <- if (tiles$oh1_seq[i] %in% names(fid_lookup)) unname(fid_lookup[tiles$oh1_seq[i]]) else NA_real_
+    oh2_fid <- if (tiles$oh2_seq[i] %in% names(fid_lookup)) unname(fid_lookup[tiles$oh2_seq[i]]) else NA_real_
+    tiles$oh1_fidelity[i] <- oh1_fid
+    tiles$oh2_fidelity[i] <- oh2_fid
+    tiles$tile_seq[i] <- substring(cds, tiles$start_nt[i], tiles$end_nt[i])
     tiles$boundary_score[i] <- tiles$oh1_score[i] + tiles$oh2_score[i]
   }
 
@@ -1164,6 +1190,7 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
     "in {round(greedy_elapsed, 1)}s."
   ))
 
+  attr(tiles, "max_identity_used") <- max_identity
   tiles
 }
 
@@ -1394,6 +1421,10 @@ search_boundaries_oogga_single <- function(cds, cassette_seq,
   tiles$oh2_score <- NA_real_
   tiles$oh1_in_hf <- NA
   tiles$oh2_in_hf <- NA
+  tiles$oh1_fidelity <- NA_real_
+  tiles$oh2_fidelity <- NA_real_
+  tiles$tile_seq <- NA_character_
+  tiles$boundary_shift <- 0L
   tiles$boundary_score <- NA_real_
 
   for (i in seq_len(n_tiles)) {
@@ -1406,6 +1437,11 @@ search_boundaries_oogga_single <- function(cds, cassette_seq,
     tiles$oh2_score[i] <- overhang_score(tiles$oh2_seq[i], fid_lookup, eff_lookup)
     tiles$oh1_in_hf[i] <- tiles$oh1_seq[i] %in% hf_set
     tiles$oh2_in_hf[i] <- tiles$oh2_seq[i] %in% hf_set
+    oh1_fid <- if (tiles$oh1_seq[i] %in% names(fid_lookup)) unname(fid_lookup[tiles$oh1_seq[i]]) else NA_real_
+    oh2_fid <- if (tiles$oh2_seq[i] %in% names(fid_lookup)) unname(fid_lookup[tiles$oh2_seq[i]]) else NA_real_
+    tiles$oh1_fidelity[i] <- oh1_fid
+    tiles$oh2_fidelity[i] <- oh2_fid
+    tiles$tile_seq[i] <- substring(cds, tiles$start_nt[i], tiles$end_nt[i])
     tiles$boundary_score[i] <- tiles$oh1_score[i] + tiles$oh2_score[i]
   }
 
@@ -1418,19 +1454,22 @@ search_boundaries_oogga_single <- function(cds, cassette_seq,
     # Need SB splitting — use OOGGA SB DP for consistency
     tile_end_positions <- tiles$end_nt[-n_tiles]
 
-    sb_blacklist <- unique(c(alien_ohs, HOMOPOLYMER_4NT))
     cassette_oh_blacklist <- unique(c(
       tiles$oh1_seq, tiles$oh2_seq,
       vapply(tiles$oh1_seq, reverse_complement, character(1)),
       vapply(tiles$oh2_seq, reverse_complement, character(1))
     ))
 
+    # Only pass fixed assembly OHs as alien_ohs (not tile boundary OHs).
+    # Tile boundary OHs are the oh2 at allowed_gene_positions — if we included
+    # them as aliens, the DP would reject every allowed position since the OH
+    # there IS a tile boundary OH.
     sb_result <- search_sb_boundaries_oogga(
       full_seq = full_seq,
       gene_len = gene_len,
       max_block_length = max_block_length - block_overhead,
       min_block_length = min_block_length,
-      alien_ohs = unique(c(alien_ohs, sp_result$boundary_ohs)),
+      alien_ohs = alien_ohs,
       oh_fidelity = oh_fidelity,
       eff_lookup = eff_lookup,
       max_identity = max_identity,
