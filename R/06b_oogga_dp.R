@@ -32,9 +32,11 @@
 #'
 #' Matches OOGGA's __find_identities() exactly: for each "other" overhang O,
 #' the candidate C is checked against both O and RC(O). Only 2 conditions,
-#' not 3. (The extra identity(RC(A), B) check from a prior version was not
-#' in OOGGA — removed for faithfulness. Could be re-added as a future
-#' strict_compat=TRUE option if needed.)
+#' not 3. The prior version also checked identity(RC(A), B), but this is
+#' mathematically redundant: identity(A, RC(B)) == identity(RC(A), B) always
+#' holds (proof: both count positions i where A[i] == complement(B[3-i]),
+#' related by the substitution j = 3-i). So the 2-condition and 3-condition
+#' matrices are identical.
 #'
 #' @param max_identity Integer, maximum allowed positional matches (default 2).
 #'   OOGGA default is 2: reject if >2/4 positions match.
