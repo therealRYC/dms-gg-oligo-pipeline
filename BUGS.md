@@ -113,6 +113,30 @@
 
 ## Open Bugs
 
+### BUG-009: DP boundary searches missing OOGGA collision prevention — overhangs can repeat
+- **File:** `R/06_overhang_selection.R` (`precompute_boundary_scores`, `dp_solve_k`, `search_tile_boundaries_dp`, `search_tile_boundaries_dp_v2`)
+- **Status:** OPEN — root cause of repeated-overhang failures in tile boundary selection
+- **What:** All DP-based boundary searches (tile-first `search_tile_boundaries_dp`, per-segment `search_tile_boundaries_dp_v2`) pre-compute scores for each boundary position independently, then the DP maximizes the sum of those scores. The DP recurrence has **no awareness of which overhangs were chosen at previous boundaries**. This means two boundaries can produce the same 4-mer overhang (or near-identical overhangs), causing misligation in the GG reaction.
+- **Root cause — missing OOGGA `__overlap_pass()`:** The real OOGGA algorithm (Mukundan & Madhusudhan 2025, bioRxiv) performs collision checking **inside the DP transition**. When evaluating boundary k at position j coming from boundary k-1 at position j', OOGGA traces back through ALL previously chosen boundaries and rejects the candidate if the new overhang shares >2/4 positional bases with any prior overhang or its reverse complement. Our DP has no equivalent — `dp_solve_k()` just does `dp_curr[b] <- best_score + boundary_scores[b]` with no history check.
+- **Structural comparison (our DP vs OOGGA):**
+
+  | Aspect | OOGGA | Our DP |
+  |--------|-------|--------|
+  | DP structure | `mat[K][j]` = best score for K cuts at position j | `dp_prev[b]` = best score for k boundaries at codon b |
+  | Scoring | Product of (individual fidelity × efficiency) | Sum of (individual fidelity × efficiency) |
+  | Collision prevention | `__overlap_pass()` — rejects if any OH shares >2/4 bases with any previous OH or its RC | **NONE** |
+  | Blacklisting | `exclusion_list` (positional), `alien_overhangs` (external OHs) | Palindrome, homopolymer, oh_L collision, SB blacklist — but no inter-boundary collision |
+
+- **Consequence:** The DP can select boundaries where oh1 or oh2 matches a previously chosen boundary's overhang. This causes:
+  1. Ambiguous ligation (two fragments compete for the same junction)
+  2. Misordered assembly (fragments ligate in wrong order)
+  3. The "same overhang reused" failure mode observed in practice
+- **Why additive vs multiplicative scoring is NOT the issue:** `max(product) = max(sum of logs)` — the objectives are equivalent. The scoring formula is fine. The missing collision check is the real bug.
+- **Fix:** Implement OOGGA's `__overlap_pass()` inside the DP transition. When evaluating boundary b, trace back through parent chain to collect all previously chosen boundary overhangs, then reject b if the new overhang shares >2/4 bases with any of them (or their RCs). This makes the DP path-dependent (not a pure Bellman DP), matching OOGGA's actual algorithm.
+- **Scope:** Affects BOTH the tile-first DP path (`boundary_method = "dp"`) and the per-segment dp_v2 path (`boundary_method = "mc_fidelity"`). Both need the collision check added.
+- **Plan:** Implement a two-pass OOGGA approach: (1) OOGGA DP to find superblock junctions, (2) OOGGA DP to find tile boundaries within each superblock. This replaces the current SB MC + dp_v2 architecture entirely.
+- **References:** Mukundan & Madhusudhan (2025). OOGGA. bioRxiv 10.1101/2025.06.16.659877. GitHub: bigbigdumdum/OOGGA. Potapov et al. (2018). ACS Synth Bio 7(11):2665-2674.
+
 ### BUG-003: Boundary codon mutations blanket-skipped (partial fix possible)
 - **File:** `run_pipeline.R:177-188`, `R/04_mutation_design.R`, `R/05_tiling.R:176-180`
 - **Status:** DEFERRED — workaround in place (F9 blanket skip), partial fix planned
