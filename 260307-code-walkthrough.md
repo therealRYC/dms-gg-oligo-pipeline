@@ -1,7 +1,7 @@
 # DMS GG Oligo Pipeline — Code Walkthrough
 
 *Code review and implementation guide for the `dms-gg-oligo-pipeline`*
-*Generated: 2026-03-07, updated 2026-03-08*
+*Generated: 2026-03-07, updated 2026-03-09*
 
 ---
 
@@ -249,7 +249,7 @@ defaults <- list(
   barcode_prefix_length   = 12L,
   barcodes_per_variant    = 10L,
   overlap_codons          = 4L,
-  boundary_method         = "mc_fidelity",  # or "dp" (legacy)
+  boundary_method         = "dp",            # tile-first DP (or "greedy")
   auto_domesticate        = TRUE,
   simulate_assembly       = TRUE,
   include_synonymous      = FALSE,
@@ -548,9 +548,9 @@ Variants at gene edges that can only achieve quality 1 are flagged with `overhan
 
 ### `06_overhang_selection.R` — The largest and most complex module
 
-**File**: `R/06_overhang_selection.R` (~5100 lines)
+**File**: `R/06_overhang_selection.R` (~3700 lines)
 
-This module integrates tiling and overhang selection into a single planning system. It supports two boundary optimization strategies: the default **`mc_fidelity`** method (reaction-aware set fidelity optimization via simulated annealing + enhanced DP) and the legacy **`dp`** method (individual overhang scoring via tile-first DP).
+This module integrates tiling and overhang selection into a single planning system. It uses the **`dp`** boundary method: tile-first dynamic programming with individual overhang scoring (P_fid × P_eff from BsmBI cycling data), followed by SB assignment at tile junctions with iterative collision blacklisting.
 
 #### Overhang Scoring Formula (BUG-008 Fix)
 
@@ -671,122 +671,40 @@ Positions in the downstream cassette (past `gene_len`) remain **unrestricted** �
 
 SB junction overhangs are derived from the gene sequence at the split position. The SB DP uses the same scoring formula (P_fid × P_eff) and applies collision checks to ensure SB junction overhangs don't collide with tile boundary overhangs, oh3, oh4, or each other.
 
-#### Reaction-Aware Set Fidelity Optimization (`mc_fidelity` method)
-
-The default `mc_fidelity` boundary method was introduced to solve a fundamental limitation of the legacy DP: **individual overhang scores don't capture cross-reactivity between overhangs that co-ligate in the same reaction pot**.
-
-A Golden Gate reaction's fidelity depends on ALL overhangs present in the pot — not just each overhang in isolation. SB junction overhangs appear in every tile's reactions (upstream SBs in BsaI, downstream SBs in BsmBI), so adding a high-scoring SB overhang that cross-reacts with oh3 or oh_L can tank the reaction fidelity.
-
-The `mc_fidelity` method reverses the optimization order: **SB boundaries first** (via simulated annealing), then **tile boundaries within SB segments** (via reaction-aware DP), then **joint refinement**.
-
-##### `evaluate_sb_config()` — Score an SB configuration
-
-Evaluates a set of SB boundary positions based on set fidelity of the "extreme" tile reactions:
-
-```r
-evaluate_sb_config <- function(sb_positions, full_seq, gene_len,
-                                oh_L, oh3, oh4, bsai_matrix, bsmbi_matrix)
-```
-
-Algorithm:
-1. Extract 4-nt junction overhangs at each SB position from `full_seq`
-2. **Hard constraints** (return `-Inf` if violated): no palindromic/homopolymer overhangs, no collision with fixed OHs (oh_L, oh3, oh4) via identity or RC, no duplicate SB overhangs
-3. **Soft scoring**: compute set fidelity for two "extreme" tile reactions:
-   - **First tile's BsmBI reaction**: `{oh3} ∪ {all SB OHs}` — worst case because all SBs are downstream
-   - **Last tile's BsaI reaction**: `{oh_L, oh4} ∪ {all SB OHs}` — worst case because all SBs are upstream
-   - Return `min(BsmBI_fid, BsaI_fid)` — the bottleneck
-
-##### `search_sb_boundaries_mc()` — Simulated annealing SB search
-
-```r
-search_sb_boundaries_mc <- function(full_seq, gene_len, max_block_length, min_block_length,
-                                     oh_L, oh3, oh4, bsai_matrix, bsmbi_matrix,
-                                     n_iterations = 10000, n_restarts = 5, seed = NULL)
-```
-
-Uses simulated annealing with multiple random restarts to find optimal SB boundary positions:
-
-1. **Candidate filtering**: gene region → codon boundaries only; cassette region → every position. Pre-filter out palindromic/homopolymer/collision-prone positions
-2. **Initialization**: evenly space K_sb boundaries, snap to valid positions
-3. **SA loop** (per restart):
-   - Linear cooling: T₀ = 0.05 → T_min = 0.0005
-   - Each iteration: pick random boundary, sample new position respecting min/max block size
-   - **Metropolis acceptance**: accept if δ > 0, or with probability exp(δ/T) if δ ≤ 0
-   - Guard: skip if `new_score` is not finite (prevents NaN crash from `-Inf` arithmetic)
-4. **Multiple restarts**: perturb best-known positions by ±jitter (up to 30% of max_block_length)
-5. Return best positions, score, and SB junction overhangs
-
-##### `search_tile_boundaries_dp_v2()` — Reaction-aware tile DP
-
-```r
-search_tile_boundaries_dp_v2 <- function(cds, sb_positions, oh_L, oh3, oh4,
-                                          bsai_matrix, bsmbi_matrix,
-                                          max_mutable_nt, overlap_codons = 4L, ...)
-```
-
-Enhanced DP that scores boundaries by **per-tile set fidelity** rather than individual overhang quality:
-
-1. Partition gene into **segments** at forced SB boundaries (every SB must be a tile boundary)
-2. Within each segment, run sub-DP to place additional tile boundaries
-3. For each candidate boundary, compute per-tile set fidelity:
-   - **BsaI reaction**: `{oh_L, oh4, oh1_tile}` + SB OHs upstream of tile
-   - **BsmBI reaction**: `{oh3, oh2_tile}` + SB OHs downstream of tile
-   - Score = `min(BsaI_fid, BsmBI_fid)` for each tile
-4. DP objective: **maximize minimum score** across all tiles (max-min formulation)
-
-##### `refine_boundaries_mc()` — Joint refinement
-
-After DP v2, applies MC perturbation to tile boundaries (non-SB boundaries only) to further improve the minimum set fidelity. Each iteration tries a small shift (±3 codons) on a random internal tile boundary and accepts if the min set fidelity improves.
-
-**Note**: `search_tile_boundaries_mc()` (full MC tile search) was benchmarked but found to actively degrade TRIO results (0.904 → 0.840) while costing 500-900s. It is retained for research but not used in the default pipeline.
-
-##### Performance comparison: `mc_fidelity` vs legacy `dp`
-
-| Gene | Codons | Legacy min fidelity | MC min fidelity |
-|------|--------|--------------------:|----------------:|
-| GRIN2A | 1465 | 0.894 (1 reaction <0.90) | 1.0000 (all ≥0.99) |
-| AKAP11 | 1902 | 0.866 | 1.0000 |
-| TRIO | 3098 | 0.783 (3 <0.90, 1 <0.80) | 0.9965 (all ≥0.99) |
-
 #### `plan_assembly()` — Master Orchestrator
 
-This is the main entry point called from `run_pipeline.R`. It follows a **constrained-first ordering**: fixed overhangs are committed before any boundary search runs. The function supports two code paths based on `boundary_method`:
+This is the main entry point called from `run_pipeline.R`. It follows a **constrained-first ordering**: fixed overhangs are committed before any boundary search runs.
 
-**Phase 1 (shared)** — Select fixed overhangs (oh_L, oh3, oh4):
+**Phase 1** — Select fixed overhangs (oh_L, oh3, oh4):
 - `oh_L` = first 4 nt of gene (physical constraint)
 - `oh3` (BsmBI, same for all tiles): prefer promoter-derived oh3 from the PolIII promoter's terminal 5 nt. If the promoter-derived 4-mer is a homopolymer or palindrome, fall back to highest-scoring overhang by P_fid × P_eff
 - `oh4` (BsaI, same for all tiles): highest-scoring overhang that doesn't collide with oh_L
 - oh3 and oh4 do NOT check against oh1/oh2 (which don't exist yet) — downstream phases will blacklist them
 
-##### `mc_fidelity` path (default)
+**Phase 2** — Tile boundary DP (with iterative SB-aware refinement, up to 5 iterations):
+- Pass oh3 + oh4 (+ RCs) as `sb_blacklist` to the tile DP so no tile boundary lands on these overhangs
+- Run DP to find optimal boundaries using individual overhang scoring (P_fid × P_eff)
+- Trial SB partitioning to check for collisions between SB junction overhangs and tile oh2 values
+- If collision: blacklist the colliding oh2 and re-run DP
 
-2. **Phase 2a — SB boundaries via MC**: `search_sb_boundaries_mc()` finds optimal SB positions considering all overhangs that co-ligate in each reaction
-3. **Phase 3a — Tile boundaries via DP v2**: `search_tile_boundaries_dp_v2()` places tile boundaries within SB segments using reaction-aware set fidelity scoring. SB positions are forced tile boundaries
-4. **Phase 3b — Joint refinement**: `refine_boundaries_mc()` perturbs non-SB tile boundaries to improve min set fidelity
-5. **Partition conversion**: Convert SB + tile positions to the superblock partition format expected downstream
-6. **Phase 4 — Per-reaction pairwise validation**: Compute set fidelity for each BsaI and BsmBI reaction; warn if any reaction falls below `SET_FIDELITY_WARNING_THRESHOLD` (0.80)
+**Phase 3** — Constrained SB DP on gene+cassette:
+- Gene-region SB boundaries constrained to tile `end_nt` positions
+- Cassette-region boundaries unrestricted
+- Collision checks against tile overhangs, oh3, oh4, and other SB junctions
 
-##### `dp` path (legacy)
+**Phase 4** — Per-reaction pairwise validation:
+- Compute set fidelity for each BsaI and BsmBI reaction
+- Warn if any reaction falls below `SET_FIDELITY_WARNING_THRESHOLD` (0.80)
 
-2. **Phase 2 — Tile boundary DP** (with iterative SB-aware refinement, up to 5 iterations):
-   - Pass oh3 + oh4 (+ RCs) as `sb_blacklist` to the tile DP so no tile boundary lands on these overhangs
-   - Run DP to find optimal boundaries using individual overhang scoring (P_fid × P_eff)
-   - Trial SB partitioning to check for collisions between SB junction overhangs and tile oh2 values
-   - If collision: blacklist the colliding oh2 and re-run DP
-3. **Phase 3 — Constrained SB DP** on gene+cassette:
-   - Gene-region SB boundaries constrained to tile `end_nt` positions
-   - Cassette-region boundaries unrestricted
-   - Collision checks against tile overhangs, oh3, oh4, and other SB junctions
-4. **Phase 4 — Per-reaction pairwise validation**: same as mc_fidelity path
+Returns `assembly_plan` with tiles, oh3, oh4, superblocks, reaction fidelity.
 
-Both paths return `assembly_plan` with tiles, oh3, oh4, superblocks, reaction fidelity.
+**Known limitation (BUG-009):** The tile boundary DP pre-computes scores independently per boundary position — it lacks collision prevention between boundary overhangs. Two boundaries can produce the same 4-mer overhang, causing misligation. A two-pass OOGGA implementation with `__overlap_pass()`-style collision checking is planned as a replacement. See `BUGS.md` for details.
 
 **Things to verify:**
-- In the legacy path, the iterative SB collision resolution correctly blacklists oh2 values that cause problems, not oh1 values. This is because oh2 is at tile ends (where SB boundaries tend to land), while oh1 is at tile starts.
+- The iterative SB collision resolution correctly blacklists oh2 values that cause problems, not oh1 values. This is because oh2 is at tile ends (where SB boundaries tend to land), while oh1 is at tile starts.
 - The `oh_collides()` helper checks both identity and RC collision: `oh1 == oh2 || oh1 == RC(oh2)`.
 - `compute_set_fidelity()` computes the Potapov 2018 metric: `set_fidelity = product of per-overhang fidelities`, where each `f(X) = M[X,X] / sum(M[X,Y] for Y in set)`.
 - The constrained-first ordering means oh3 never needs to check against oh2, and oh4 never needs to check against oh1 — downstream phases avoid them.
-- In `evaluate_sb_config()`, the "extreme reaction" approximation (scoring only first-tile BsmBI and last-tile BsaI) is correct because these reactions contain the MOST overhangs (all SB junctions are upstream/downstream respectively), making them the bottleneck.
 
 ---
 
@@ -1187,7 +1105,7 @@ The pipeline runs 12 steps with timing instrumentation:
 | 4 | `scan_enzyme_sites()` + `apply_domestication()` | <1s |
 | 5 | `design_mutations()` + `check_and_fix_new_sites()` | ~100s |
 | 5.5 | `auto_size_barcode_length()` (if "auto") | <0.1s |
-| 6 | `plan_assembly()` + `assign_variants_to_tiles()` | ~5-30s (mc_fidelity) |
+| 6 | `plan_assembly()` + `assign_variants_to_tiles()` | ~5-20s |
 | 7 | `design_barcodes()` | ~138s |
 | 8 | `assemble_oligos()` | ~0.8s |
 | 9 | `design_wt_geneblocks()` | <1s |
@@ -1276,7 +1194,7 @@ The pipeline uses a fail-fast approach:
 Tests are in `tests/testthat/` with:
 - **Unit tests**: Per-function tests with known inputs/outputs
 - **Integration tests**: Full pipeline on test genes (300 nt, 2100 nt)
-- **Set fidelity optimization tests**: `test-set-fidelity-optimization.R` — covers `evaluate_sb_config()`, `search_sb_boundaries_mc()`, `search_tile_boundaries_dp_v2()`, `refine_boundaries_mc()`, and full mc_fidelity integration
+- **Tile boundary superblock tests**: `test-tile-boundary-superblocks.R` — covers SB partitioning, collision detection, and iterative DP refinement
 - **TRIO test**: Full pipeline on TRIO (9294 nt, 3098 codons) — skip-gated with `RUN_SLOW_TESTS=true`
 
 ### Known Open Issues
