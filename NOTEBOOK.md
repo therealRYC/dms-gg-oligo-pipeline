@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-08 — Entry 25: Convergent U6T7 tornado barcode design feasibility research -->
+<!-- Last updated: 2026-03-09 — Entry 27: BUG-009 discovery, switching to two-pass OOGGA -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -45,6 +45,10 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-08 | SB-first MC + within-SB DP as default boundary method | Reaction-aware scoring achieves min set fidelity ≥0.99 vs 0.78-0.89 legacy | Entry 24 |
 | 2026-03-08 | Drop tile MC from production pipeline | Benchmarking: tile MC = DP v2 on 2/3 genes, degraded TRIO; 500-900s wasted | Entry 24 |
 | 2026-03-08 | Document & shelve convergent U6T7 tornado design | Promising but needs wet-lab validation; current pipeline working; can add as config toggle later | Entry 25 |
+| 2026-03-08 | Re-evaluate DP vs MC tile boundaries with corrected metrics | Previous comparison invalidated by missing cassette OHs + blacklist filters | Entry 26 |
+| 2026-03-08 | Keep DP (dp_v2) for tile boundaries, discard tile MC | MC never improved beyond dp_v2 initial solution, 1.8-2.8x slower, failed on TRIO | Entry 26 |
+| 2026-03-09 | BUG-009: All DPs missing OOGGA collision prevention | Our DPs pre-compute scores independently per position — no inter-boundary collision check. OOGGA's `__overlap_pass()` rejects OHs sharing >2/4 bases with any prior OH. Root cause of repeated-overhang failures. | Entry 27 |
+| 2026-03-09 | Switch to two-pass OOGGA (SB junctions + tile boundaries) | Replace SB MC + dp_v2 architecture entirely. Both passes use proper OOGGA DP with collision checking and BsmBI cycling data. | Entry 27 |
 
 ## Entries
 
@@ -667,4 +671,129 @@ Co-directional PolII upstream of PolIII (Architecture A) causes significant tran
 - `3838172` — brainstorm: Convergent U6T7 tornado barcode design
 
 **Decision**: Document and shelve — promising but needs wet-lab validation first.
+
+---
+
+### 2026-03-08 19:46 — Plan: Fix SB-First MC Bugs + Re-evaluate Tile Boundary Algorithms
+
+**Type**: session
+**Status**: superseded (see 2026-03-09 Entry 27 — switching to two-pass OOGGA)
+**Tags**: [blacklist, cassette-split, set-fidelity, monte-carlo, dp, tile-boundaries, bug-fix, benchmark]
+
+**Scientific question**: Was the previous decision to drop tile MC (Entry 24) based on correct metrics? Multiple bugs in the fidelity computation (missing cassette split OHs, missing homopolymer/palindrome filters) may have corrupted the comparison.
+
+**Background/motivation**: Entry 24 concluded that tile MC was inferior to DP v2, but that benchmark was run with broken fidelity accounting. Three categories of bugs invalidated the comparison:
+1. **Missing homopolymer filter in SB DP** — ROOT CAUSE of GGGG appearing in TRIO output (palindrome filter existed, homopolymer filter missing)
+2. **Missing blacklist filters** in `optimize_split_points()` and `find_cassette_split_points()` (palindromes + homopolymers)
+3. **Cassette split OHs invisible to set fidelity** — MC path always produced empty `cassette_splits` even when SB boundaries were placed in the cassette region; these OHs were never included in BsmBI set fidelity computation for any tile
+
+**Approach**:
+Three-worktree structure: parent (bug fixes) → two children (DP vs MC comparison).
+
+*Parent worktree* (`260308-fixing-sb-first-mc-method`):
+- Task 1: Default `boundary_method` → `"mc_fidelity"` in config
+- Task 2: Universal homopolymer/palindrome filtering in SB DP, `optimize_split_points`, `find_cassette_split_points`, `refine_boundaries_mc`
+- Task 3: Fix cassette split OH handling — extract from MC result, pass through `get_tile_reaction_overhangs`, `search_tile_boundaries_dp_v2`, `refine_boundaries_mc`, Phase 4 validation
+- Task 4: 27 regression tests covering all fixes
+
+*Child A* (`260308-tile-dp-comparison`): Existing dp_v2 + refinement with corrected metrics
+*Child B* (`260308-tile-mc-comparison`): Fresh SA tile MC (`search_tile_boundaries_mc`) replacing dp_v2 + refinement
+
+**Additional bugs found during benchmarking**:
+- **dp_v2 segment-end oh2 missing filters**: In dp_v2's "Find best last boundary" loop, the last tile's oh2 in non-final SB segments wasn't filtered for palindromes/homopolymers. This oh2 extends past the SB boundary — it's an internal overhang, not gene-end constrained. Fixed with `is_final_segment` check in all three worktrees (`8928663`, `3e066a7`, `14a0626`).
+- **MC tile boundary snapping**: `search_tile_boundaries_mc()` snapped dp_v2 boundaries to a separate `valid_boundaries` set, changing tile geometry and introducing palindromic overhangs. SA then couldn't find any valid configuration (all returned `-Inf`), and the function fell through to build tiles from invalid snapped boundaries. Fixed by using dp_v2 boundaries directly + adding `-Inf` fallback to return dp_v2 tiles when SA fails (`ea26f05`).
+- **Non-reproducible SB MC**: Benchmarks varied between runs because `mc_seed` wasn't set in config files. Added `mc_seed: 42` to all configs (`8ffc3b1`, `78806ee`).
+
+**Benchmark results** (mc_seed: 42, all metrics corrected):
+
+| Gene | Method | Tiles | SBs | Min Fid | Mean Fid | <0.95 | <0.90 | Palindromes | Homopolymers | Time (s) |
+|------|--------|-------|-----|---------|----------|-------|-------|-------------|--------------|----------|
+| GRIN2A | DP | 19 | 2 | 0.9092 | 0.9841 | 1 | 1 | 0 | 0 | 2.6 |
+| GRIN2A | MC | 19 | 2 | 0.9092 | 0.9841 | 1 | 1 | 0 | 0 | 7.4 |
+| AKAP11 | DP | 24 | 3 | 0.9092 | 0.9808 | 2 | 2 | 0 | 0 | 3.5 |
+| AKAP11 | MC | 24 | 3 | 0.9092 | 0.9808 | 2 | 2 | 0 | 0 | 7.0 |
+| TRIO | DP | 39 | 6 | 0.8887 | 0.9711 | 5 | 1 | 0 | 1 | 7.3 |
+| TRIO | MC | 39 | 6 | 0.8887 | 0.9711 | 5 | 1 | 0 | 1 | 13.2 |
+| GRIN2A_long | DP | 19 | 2 | 0.8760 | 0.9793 | 1 | 1 | 0 | 0 | 3.6 |
+| GRIN2A_long | MC | 19 | 2 | 0.8760 | 0.9793 | 1 | 1 | 0 | 0 | 8.1 |
+
+**Key findings**:
+- MC produced **identical fidelity** to DP on all four genes — it never improved beyond dp_v2's initial solution
+- MC was **1.8-2.8x slower** (SA overhead with no benefit)
+- TRIO MC triggered the `-Inf` fallback ("no valid SA solution found in 35.1s") — SA couldn't find any configuration passing all hard filters, so it returned dp_v2 tiles
+- The theoretical explanation: tile reactions are independent (tile oh2s never share a pot), so the optimization decomposes per-tile. DP solves this exactly; MC adds randomized search with no advantage
+
+**Decisions made**:
+- **Keep DP (dp_v2) for tile boundaries**: MC never outperforms DP, adds latency, and fails on complex genes (over tile MC, which was theoretically motivated but empirically inferior)
+- **Confirms Entry 24's original conclusion**: Even with corrected metrics, DP wins decisively — the previous result wasn't an artifact of corrupted data
+
+**Remaining issues**:
+- TRIO has 1 homopolymer violation in both DP and MC — likely from refinement step or an edge case not covered by the dp_v2 segment-end fix. Needs investigation.
+- 4 pre-existing test failures (FAIL 4 | WARN 43 | SKIP 4 | PASS 6435) — in test-geneblock-design.R (TRIO sizing), test-overhang-selection.R (global boundaries), test-plan-assembly-hybrid.R (SB boundary invariant). Appear to pre-date our changes.
+
+**Artifacts**:
+- `scripts/benchmark_tile_methods.R` — benchmark script (both children)
+- Plan file in Claude plan mode context
+
+**Related commits**:
+- `7065d72` — Fix blacklist filters and cassette split OH handling
+- `d9c3d2a` — Add regression tests for blacklist and cassette OH fixes
+- `8928663` — Fix dp_v2 missing palindrome/homopolymer filter on segment-end oh2
+- `a33cfb8` — Add tile boundary benchmark script for DP comparison
+- `ff60ea1` — Use SA tile MC instead of DP+refinement for tile boundaries
+- `54250b3` — Add tile boundary benchmark script for MC comparison
+- `ea26f05` — Fix MC tile boundary init: remove snapping, add -Inf fallback
+- `3e066a7` — Fix dp_v2 segment-end filter (DP child)
+- `14a0626` — Fix dp_v2 segment-end filter (MC child)
+- `8ffc3b1` — Add mc_seed: 42 to configs (DP child)
+- `78806ee` — Add mc_seed: 42 to configs (MC child)
+
+**Next steps**:
+- ~~Merge parent worktree bug fixes to main~~ (superseded by Entry 27 — switching to two-pass OOGGA)
+- ~~Discard MC child worktree~~ (superseded)
+- Investigate TRIO's remaining 1 homopolymer violation
+- Investigate 4 pre-existing test failures
+
+---
+
+### 2026-03-09 07:27 — BUG-009: DP Missing OOGGA Collision Prevention + Architecture Switch
+
+**Type**: session
+**Status**: completed
+**Tags**: [bug, oogga, dp, collision, architecture, overhang-selection]
+
+**Goal**: Understand why our DP boundary searches produce repeated overhangs, and determine how far our implementation diverges from the actual OOGGA algorithm.
+
+**Approach**: Read the full OOGGA source code (bigbigdumdum/OOGGA on GitHub), compared it side-by-side with our `search_tile_boundaries_dp()`, `dp_solve_k()`, and `precompute_boundary_scores()`. Also reviewed the tabled refactor document (`archive/260216/260216 Tabled Refactor for Alignment with OOGGA.md`) and compared our SA-based SB search to NEB's SplitSet (Pryor et al. 2020).
+
+**Key findings**:
+- **BUG-009 identified**: ALL our DP-based boundary searches (tile-first `search_tile_boundaries_dp`, per-segment `search_tile_boundaries_dp_v2`) are missing OOGGA's `__overlap_pass()` — the collision prevention mechanism that rejects overhangs sharing >2/4 positional bases with any previously chosen overhang or its reverse complement
+- **Our DP is ~80% OOGGA**: DP structure (mat[K][j]), multi-K search, and scoring logic are structurally equivalent. The additive scoring (sum) vs OOGGA's multiplicative (product) is mathematically equivalent via log transform. The ONE critical gap is collision prevention.
+- **How OOGGA prevents repeats**: Inside the DP transition (`__get_score_list()`), OOGGA calls `__overlap_pass()` which traces back through the full parent chain to collect all previously chosen overhangs, then `__find_identities()` counts positional matches. Any candidate sharing >2/4 bases (default `max_overhang_identity=2`) with any prior OH or RC is rejected. This makes it a path-dependent DP, not a pure Bellman DP.
+- **Our SA for SB boundaries ≈ NEB SplitSet**: Both are MCMC/SA with Metropolis acceptance on set fidelity. Neither is optimal. OOGGA's DP approach is strictly better for position-constrained problems.
+- **Previous comparison invalidated**: The DP vs MC tile boundary comparison (Entry 26) tested two algorithms that BOTH lack collision prevention. The "DP wins" conclusion is correct (DP ≥ MC) but both produce suboptimal results.
+
+**Decisions made**:
+- **Switch to two-pass OOGGA**: Replace the entire SB MC + dp_v2 architecture with proper OOGGA DP for both passes. Pass 1: OOGGA DP to find superblock junctions. Pass 2: OOGGA DP to find tile boundaries within each superblock. Both use BsmBI cycling data and collision checking. (over: continuing to patch the existing broken DPs)
+- **Do NOT merge parent worktree to main**: Previous plan to merge bug fixes is superseded — the fix is to replace the DPs entirely, not patch them
+- **BUG-009 filed in BUGS.md**: Documents the root cause with full structural comparison table
+
+**Artifacts**:
+- `BUGS.md` — BUG-009 added (DP missing OOGGA collision prevention)
+- `Brainstorm/260309_sb-boundary-optimization-algorithms.md` — SplitSet vs OOGGA vs our SA comparison
+
+**Related commits**:
+- `409ae14` — brainstorm: SB boundary optimization algorithms
+
+**Open questions**:
+- OOGGA's path-dependent collision check makes the DP O(n² × K) per transition — is this fast enough for TRIO (3098 codons)?
+- Should we use OOGGA's `max_overhang_identity=2` threshold (reject if >2/4 match) or exact-match-only?
+- How to handle `alien_overhangs` (oh3, oh4, oh_L) in the OOGGA framework — these are fixed overhangs that all boundary OHs must avoid
+
+**Next steps**:
+- Implement two-pass OOGGA in a new session (context exhausted)
+- Pass 1: OOGGA DP for SB junction placement (replaces `search_sb_boundaries_mc`)
+- Pass 2: OOGGA DP for tile boundaries within each SB (replaces `search_tile_boundaries_dp_v2`)
+- Use BsmBI cycling pairwise matrix for scoring
+- Add `alien_overhangs` parameter for oh3, oh4, oh_L, cassette split OHs
 

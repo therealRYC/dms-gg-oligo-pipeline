@@ -79,7 +79,7 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 | `barcodes_per_variant` | 10 | Number of unique barcodes per variant |
 | `barcode_gc_range` | [0.25, 0.75] | Acceptable GC content range for barcodes |
 | `barcode_max_homopolymer` | 4 | Maximum homopolymer run length in barcodes |
-| `boundary_method` | `"mc_fidelity"` | `"mc_fidelity"` (SB-first MC + within-SB DP, best fidelity), `"dp"` (legacy tile-first DP), or `"greedy"` (local search) |
+| `boundary_method` | `"dp"` | `"dp"` (tile-first DP boundary optimizer) or `"greedy"` (local search) |
 | `multi_k_search` | `true` | Try multiple tile counts to find best overhang quality |
 | `dp_k_range` | 5 | Search K_ideal +/- this many tile counts; stops early when gain < 0.5% |
 | `paqci_star2` | *(required)* | 4-nt PaqCI overhang at the 5' end of the insert (PaqCI\*\*). **Must match your destination vector.** |
@@ -128,11 +128,11 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 
 **Mutation strategy**: Fully specified codons (no degenerate NNK/NNS). Each oligo encodes exactly one mutation using the most-preferred human codon.
 
-**Boundary optimization**: The default `mc_fidelity` mode uses a three-phase approach: (1) **SB-first MC** — simulated annealing places superblock boundaries at codon positions that maximize min set fidelity across all ligation reactions, accounting for pairwise overhang cross-reactivity from the 256×256 BsaI/BsmBI matrices (Pryor et al. 2020); (2) **Within-SB DP** — max-min dynamic programming places tile boundaries within each superblock segment, scoring by `min(BsaI_set_fid, BsmBI_set_fid)` per tile; (3) **Joint refinement** — MC perturbation of individual tile boundaries (±3 codons) to further improve worst-case fidelity. This achieves min set fidelity ≥0.99 on all tested genes (vs. 0.78–0.89 with legacy tile-first DP). Legacy `"dp"` mode remains available for faster runs.
+**Boundary optimization**: The `dp` mode uses dynamic programming to place tile boundaries across the gene, maximizing overhang quality (fidelity × efficiency from BsmBI cycling data, Pryor et al. 2020). Multi-K search explores different tile counts and stops early when gains diminish. Superblock boundaries are then assigned at tile junctions with iterative collision blacklisting.
 
 **Barcode design**: Unified hierarchical prefix-suffix mode -- each variant gets a unique high-Hamming-distance prefix (12 nt), extended with filtered random suffixes to the full barcode length (20 nt). Cross-variant Hamming distance is guaranteed by the prefix; within-variant replicates differ only in their suffix. Configurable `barcodes_per_variant` (default 10) for experimental replication. Prefixes that create enzyme sites at junction boundaries are automatically filtered. For `min_hamming <= 3`, prefixes are generated using GF(4) linear codes (algebraically guaranteed distance, deterministic). For `min_hamming >= 4`, prefixes are generated using DNABarcodes lexicodes (Conway/Ashlock heuristics).
 
-**Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split into superblocks. In the default `mc_fidelity` mode, SB boundaries are placed first (at any codon boundary, not restricted to tile ends) via simulated annealing MC that directly optimizes min set fidelity across all reactions. SB junction overhangs are chosen to minimize pairwise cross-reactivity with each other and with the fixed overhangs (oh_L, oh3, oh4). In legacy `dp` mode, SBs are placed at tile boundaries with iterative collision blacklisting. For very long downstream cassettes (>~1700 nt), the cassette itself is split across multiple BsmBI-connected fragments — no user action required.
+**Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split into superblocks at tile boundaries with iterative collision blacklisting. SB junction overhangs are gene-derived 4-mers at the split positions. For very long downstream cassettes (>~1700 nt), the cassette itself is split across multiple BsmBI-connected fragments — no user action required.
 
 ## Repository Structure
 
