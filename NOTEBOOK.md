@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-08 — Entry 25: Convergent U6T7 tornado barcode design feasibility research -->
+<!-- Last updated: 2026-03-08 — Entry 26: Plan: Fix SB-first MC bugs + re-evaluate tile boundary algorithms -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -45,6 +45,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-08 | SB-first MC + within-SB DP as default boundary method | Reaction-aware scoring achieves min set fidelity ≥0.99 vs 0.78-0.89 legacy | Entry 24 |
 | 2026-03-08 | Drop tile MC from production pipeline | Benchmarking: tile MC = DP v2 on 2/3 genes, degraded TRIO; 500-900s wasted | Entry 24 |
 | 2026-03-08 | Document & shelve convergent U6T7 tornado design | Promising but needs wet-lab validation; current pipeline working; can add as config toggle later | Entry 25 |
+| 2026-03-08 | Re-evaluate DP vs MC tile boundaries with corrected metrics | Previous comparison invalidated by missing cassette OHs + blacklist filters | Entry 26 |
 
 ## Entries
 
@@ -667,4 +668,65 @@ Co-directional PolII upstream of PolIII (Architecture A) causes significant tran
 - `3838172` — brainstorm: Convergent U6T7 tornado barcode design
 
 **Decision**: Document and shelve — promising but needs wet-lab validation first.
+
+---
+
+### 2026-03-08 19:46 — Plan: Fix SB-First MC Bugs + Re-evaluate Tile Boundary Algorithms
+
+**Type**: plan
+**Status**: active
+**Tags**: [blacklist, cassette-split, set-fidelity, monte-carlo, dp, tile-boundaries, bug-fix]
+
+**Scientific question**: Was the previous decision to drop tile MC (Entry 24) based on correct metrics? Multiple bugs in the fidelity computation (missing cassette split OHs, missing homopolymer/palindrome filters) may have corrupted the comparison.
+
+**Background/motivation**: Entry 24 concluded that tile MC was inferior to DP v2, but that benchmark was run with broken fidelity accounting. Three categories of bugs invalidated the comparison:
+1. **Missing homopolymer filter in SB DP** — ROOT CAUSE of GGGG appearing in TRIO output (palindrome filter existed, homopolymer filter missing)
+2. **Missing blacklist filters** in `optimize_split_points()` and `find_cassette_split_points()` (palindromes + homopolymers)
+3. **Cassette split OHs invisible to set fidelity** — MC path always produced empty `cassette_splits` even when SB boundaries were placed in the cassette region; these OHs were never included in BsmBI set fidelity computation for any tile
+
+**Approach**:
+Three-worktree structure: parent (bug fixes) → two children (DP vs MC comparison).
+
+*Parent worktree* (`260308-fixing-sb-first-mc-method`):
+- Task 1: Default `boundary_method` → `"mc_fidelity"` in config
+- Task 2: Universal homopolymer/palindrome filtering in SB DP, `optimize_split_points`, `find_cassette_split_points`, `refine_boundaries_mc`
+- Task 3: Fix cassette split OH handling — extract from MC result, pass through `get_tile_reaction_overhangs`, `search_tile_boundaries_dp_v2`, `refine_boundaries_mc`, Phase 4 validation
+- Task 4: 27 regression tests covering all fixes
+
+*Child A* (`260308-tile-dp-comparison`): Existing dp_v2 + refinement with corrected metrics
+*Child B* (`260308-tile-mc-comparison`): Fresh SA tile MC (`search_tile_boundaries_mc`) replacing dp_v2 + refinement
+
+Both children run benchmarks on GRIN2A/AKAP11/TRIO with corrected fidelity accounting.
+
+**Key decisions**:
+- Gene-endpoint exemption: oh_L (first tile oh1) and last tile oh2 are gene-constrained — skip hard filters (over hard-rejecting, which prevented MC convergence)
+- Worktree isolation for A/B comparison (over branch switching): clean parallel evaluation
+
+**Research context**:
+- Entry 24's benchmark data was corrupted by missing cassette OHs in fidelity computation
+- GGGG in TRIO output traced to missing homopolymer filter in `search_superblock_boundaries_dp()`
+
+**Success criteria**: All 6388+ tests pass with fixes; DP vs MC comparison with correct metrics determines which tile boundary algorithm to keep
+
+**Plan file**: See plan in Claude's plan mode context (not saved as separate file — plan was developed interactively)
+
+**Implementation progress**:
+- All parent worktree bugs fixed and committed (`7065d72`, `d9c3d2a`)
+- Child A benchmark script committed (`a33cfb8`)
+- Child B MC tile path + benchmark script committed (`ff60ea1`, `54250b3`)
+- Full test suite running — awaiting results
+- Benchmarks not yet run
+
+**Related commits**:
+- `7065d72` — Fix blacklist filters and cassette split OH handling
+- `d9c3d2a` — Add regression tests for blacklist and cassette OH fixes
+- `a33cfb8` — Add tile boundary benchmark script for DP comparison
+- `ff60ea1` — Use SA tile MC instead of DP+refinement for tile boundaries
+- `54250b3` — Add tile boundary benchmark script for MC comparison
+
+**Next steps**:
+- Verify full test suite passes (running now)
+- Run benchmarks in both child worktrees
+- Compare metrics and choose winner
+- Merge winner → parent → main
 
