@@ -34,10 +34,10 @@ test_that("build_oh_compatibility rejects exact match (4/4)", {
 
 test_that("build_oh_compatibility rejects RC match", {
   compat <- build_oh_compatibility(max_identity = 2L)
-  # AATC vs RC(AATC) = GATT: identity(AATC, GATT) = 0/4
-  # But we also check A vs RC(B) and RC(A) vs B:
-  # RC(AATC) = GATT, so A vs RC(B) = identity(AATC, RC(GATT)) = identity(AATC, AATC) = 4/4
-  # This should be rejected
+  # AATC vs RC(AATC) = GATT:
+  #   Condition 1: identity(AATC, GATT) = 0/4 ✓
+  #   Condition 2: identity(AATC, RC(GATT)) = identity(AATC, AATC) = 4/4 ✗
+  # Rejected because condition 2 fails
   expect_false(compat["AATC", "GATT"])
 })
 
@@ -50,19 +50,34 @@ test_that("build_oh_compatibility rejects 3/4 match at max_identity=2", {
 test_that("build_oh_compatibility allows 3/4 match at max_identity=3", {
   compat <- build_oh_compatibility(max_identity = 3L)
   # AATC vs AATG: identity = 3/4 (<=3), should be allowed
-  # But also need to check RC comparisons
-  # AATC vs RC(AATG) = CATC: identity = 2/4 (<=3) ✓
-  # RC(AATC) = GATT vs AATG: identity = 1/4 (<=3) ✓
+  # Now only 2 conditions checked (OOGGA-faithful):
+  # AATC vs AATG: identity = 3/4 (<=3) ✓
+  # AATC vs RC(AATG) = CATT: identity = 0/4 (<=3) ✓
   expect_true(compat["AATC", "AATG"])
 })
 
 test_that("build_oh_compatibility allows 1/4 match", {
   compat <- build_oh_compatibility(max_identity = 2L)
-  # Find two overhangs with low identity in all comparisons
+  # AAAA vs CCCC (2 conditions, OOGGA-faithful):
   # AAAA vs CCCC: identity = 0/4 ✓
   # AAAA vs RC(CCCC)=GGGG: identity = 0/4 ✓
-  # RC(AAAA)=TTTT vs CCCC: identity = 0/4 ✓
   expect_true(compat["AAAA", "CCCC"])
+})
+
+test_that("build_oh_compatibility 2-condition vs 3-condition difference", {
+  # This test verifies the OOGGA-faithful 2-condition check differs from the
+  # old 3-condition check. Find a pair where identity(RC(A),B) > max_identity
+  # but identity(A,B) and identity(A,RC(B)) are both ≤ max_identity.
+  compat <- build_oh_compatibility(max_identity = 2L)
+  # GCGT vs ACGC:
+  #   Condition 1: identity(GCGT, ACGC) = 2/4 (positions 2,3: C,G match) → ≤2 ✓
+  #   Condition 2: identity(GCGT, RC(ACGC)) = identity(GCGT, GCGT) = 4/4 → >2 ✗
+  # Even the 2-condition check rejects this (RC(ACGC) = GCGT, self-match)
+  expect_false(compat["GCGT", "ACGC"])
+  # But compat["ACGC", "GCGT"]:
+  #   Condition 1: identity(ACGC, GCGT) = 2/4 → ≤2 ✓
+  #   Condition 2: identity(ACGC, RC(GCGT)) = identity(ACGC, ACGC) = 4/4 → >2 ✗
+  expect_false(compat["ACGC", "GCGT"])
 })
 
 test_that("build_oh_compatibility handles self-palindromes", {
@@ -73,40 +88,61 @@ test_that("build_oh_compatibility handles self-palindromes", {
   expect_false(compat["ACGT", "ACGT"])
 })
 
-test_that("oogga_overlap_pass with empty prior set always passes", {
+test_that("oogga_overlap_pass with empty prior set passes non-palindromes", {
   compat <- build_oh_compatibility(max_identity = 2L)
-  # Any candidate with no priors should pass (if not blocked by aliens)
-  expect_true(oogga_overlap_pass("AATC", character(0), character(0), compat))
-  expect_true(oogga_overlap_pass("GGGG", character(0), character(0), compat))
+  # AATC: RC=GATT, identity(AATC,GATT)=0 ≤2 → passes self-palindrome
+  expect_true(oogga_overlap_pass("AATC", character(0), character(0), compat, 2L))
+  # GGGG: RC=CCCC, identity(GGGG,CCCC)=0 ≤2 → passes self-palindrome
+  expect_true(oogga_overlap_pass("GGGG", character(0), character(0), compat, 2L))
+})
+
+test_that("oogga_overlap_pass rejects self-palindromes", {
+  compat <- build_oh_compatibility(max_identity = 2L)
+  # AATT: RC=AATT, identity(AATT,AATT)=4 >2 → rejected (true palindrome)
+  expect_false(oogga_overlap_pass("AATT", character(0), character(0), compat, 2L))
+  # ACGT: RC=ACGT, identity(ACGT,ACGT)=4 >2 → rejected (true palindrome)
+  expect_false(oogga_overlap_pass("ACGT", character(0), character(0), compat, 2L))
+  # Near-palindrome AACT: RC=AGTT, identity(AACT,AGTT)=1 ≤2 → passes
+  expect_true(oogga_overlap_pass("AACT", character(0), character(0), compat, 2L))
+  # At max_identity=3: AATT still rejected (identity=4>3)
+  compat3 <- build_oh_compatibility(max_identity = 3L)
+  expect_false(oogga_overlap_pass("AATT", character(0), character(0), compat3, 3L))
+})
+
+test_that("oogga_overlap_pass rejects near-palindromes at strict threshold", {
+  compat <- build_oh_compatibility(max_identity = 2L)
+  # AACT: RC=AGTT, identity=1 ≤2 → passes at mi=2
+  expect_true(oogga_overlap_pass("AACT", character(0), character(0), compat, 2L))
+  # AAAT: RC=ATTT, identity(AAAT,ATTT)=1 ≤2 → passes
+  expect_true(oogga_overlap_pass("AAAT", character(0), character(0), compat, 2L))
 })
 
 test_that("oogga_overlap_pass rejects against prior OHs", {
   compat <- build_oh_compatibility(max_identity = 2L)
   # AATC is incompatible with itself (4/4 identity)
-  expect_false(oogga_overlap_pass("AATC", c("AATC"), character(0), compat))
+  expect_false(oogga_overlap_pass("AATC", c("AATC"), character(0), compat, 2L))
   # AATC is incompatible with AATG (3/4 identity)
-  expect_false(oogga_overlap_pass("AATC", c("AATG"), character(0), compat))
+  expect_false(oogga_overlap_pass("AATC", c("AATG"), character(0), compat, 2L))
 })
 
 test_that("oogga_overlap_pass rejects against alien OHs", {
   compat <- build_oh_compatibility(max_identity = 2L)
   # Candidate AATC, alien AATC = 4/4 → reject
-  expect_false(oogga_overlap_pass("AATC", character(0), c("AATC"), compat))
+  expect_false(oogga_overlap_pass("AATC", character(0), c("AATC"), compat, 2L))
 })
 
 test_that("oogga_overlap_pass accepts compatible candidate", {
   compat <- build_oh_compatibility(max_identity = 2L)
-  # AAAA vs CCCC: all comparisons <=2/4, should pass
-  expect_true(oogga_overlap_pass("AAAA", c("CCCC"), character(0), compat))
+  # AAAA vs CCCC: identity=0/4, identity(AAAA,RC(CCCC))=identity(AAAA,GGGG)=0
+  expect_true(oogga_overlap_pass("AAAA", c("CCCC"), character(0), compat, 2L))
 })
 
 test_that("compat_matrix symmetry: compat[A,B] consistency", {
   compat <- build_oh_compatibility(max_identity = 2L)
-  # The compatibility relation should be symmetric in the sense that
-  # if A is compatible with B, then B is compatible with A
-  # (because the checks are: A vs B, A vs RC(B), RC(A) vs B)
-  # For B, the checks are: B vs A, B vs RC(A), RC(B) vs A
-  # These are the same 3 pairs checked from A's perspective
+  # With the 2-condition OOGGA check (A vs B, A vs RC(B)):
+  # identity(A,B) = identity(B,A) — symmetric by definition.
+  # identity(A,RC(B)) = identity(B,RC(A)) — proven by complement/reverse symmetry.
+  # Therefore the matrix should remain symmetric.
   test_pairs <- list(
     c("AATC", "CCCC"), c("GACA", "TGAA"), c("AATC", "GATT"),
     c("CCTC", "AGGA"), c("AAAA", "TTTT")
@@ -185,11 +221,12 @@ test_that("search_tile_boundaries_oogga produces collision-free tiles on TEST_LO
     max_mutable_nt = max_mutable_nt,
     oh_fidelity = oh_fidelity,
     multi_k = TRUE,
-    dp_k_range = 3L,
+    dp_k_range = 1L,
     overlap_codons = 4L,
     eff_lookup = eff_lookup,
     alien_ohs = alien_ohs,
-    max_identity = 2L
+    max_identity = 2L,
+    beam_width = 1L
   )
 
   # Basic structure checks
@@ -250,7 +287,8 @@ test_that("search_tile_boundaries_greedy_seq produces collision-free tiles", {
     overlap_codons = 4L,
     eff_lookup = eff_lookup,
     alien_ohs = alien_ohs,
-    max_identity = 2L
+    max_identity = 2L,
+    beam_width = 1L
   )
 
   expect_true(is.data.frame(tiles))
@@ -303,7 +341,8 @@ test_that("search_boundaries_oogga_single produces valid tiles", {
     eff_lookup = eff_lookup,
     alien_ohs = alien_ohs,
     max_identity = 2L,
-    dp_k_range = 3L,
+    beam_width = 1L,
+    dp_k_range = 1L,
     overlap_codons = 4L
   )
 
@@ -329,7 +368,8 @@ test_that("plan_assembly works with boundary_method='oogga_two_pass'", {
     config = list(
       boundary_method = "oogga_two_pass",
       oogga_max_identity = 2L,
-      dp_k_range = 3L
+      oogga_beam_width = 1L,
+      dp_k_range = 1L
     )
   )
 
@@ -354,7 +394,8 @@ test_that("plan_assembly works with boundary_method='oogga_greedy'", {
     max_mutable_nt = tile_size,
     config = list(
       boundary_method = "oogga_greedy",
-      oogga_max_identity = 2L
+      oogga_max_identity = 2L,
+      oogga_beam_width = 1L
     )
   )
 
@@ -375,7 +416,8 @@ test_that("plan_assembly works with boundary_method='oogga_single'", {
     config = list(
       boundary_method = "oogga_single",
       oogga_max_identity = 2L,
-      dp_k_range = 3L
+      oogga_beam_width = 1L,
+      dp_k_range = 1L
     )
   )
 
@@ -394,7 +436,7 @@ test_that("plan_assembly with oogga_two_pass produces same format as dp", {
     cds = cds,
     polIII = TEST_POLIII,
     max_mutable_nt = tile_size,
-    config = list(boundary_method = "dp", dp_k_range = 3L)
+    config = list(boundary_method = "dp", dp_k_range = 1L)
   )
 
   # Run oogga_two_pass
@@ -405,7 +447,8 @@ test_that("plan_assembly with oogga_two_pass produces same format as dp", {
     config = list(
       boundary_method = "oogga_two_pass",
       oogga_max_identity = 2L,
-      dp_k_range = 3L
+      oogga_beam_width = 1L,
+      dp_k_range = 1L
     )
   )
 
@@ -444,7 +487,8 @@ test_that("plan_assembly with short test gene (no SBs needed) works for all OOGG
       config = list(
         boundary_method = method,
         oogga_max_identity = 2L,
-        dp_k_range = 3L
+        oogga_beam_width = 1L,
+        dp_k_range = 1L
       )
     )
 

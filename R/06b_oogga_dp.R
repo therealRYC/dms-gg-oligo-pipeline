@@ -112,17 +112,14 @@ oogga_overlap_pass <- function(candidate_oh, prior_ohs, alien_ohs,
     return(FALSE)
   }
 
-  # Check against all prior overhangs on the path
-  for (oh in prior_ohs) {
-    if (!compat_matrix[candidate_oh, oh]) {
-      return(FALSE)
-    }
-  }
-
-  # Check against alien overhangs (fixed constraints)
-  for (oh in alien_ohs) {
-    if (!compat_matrix[candidate_oh, oh]) {
-      return(FALSE)
+  # Vectorized check against all prior + alien overhangs in one operation
+  # Filter to valid compat_matrix entries to avoid subscript-out-of-bounds
+  all_ohs <- c(prior_ohs, alien_ohs)
+  if (length(all_ohs) > 0L) {
+    valid <- all_ohs %in% rownames(compat_matrix)
+    if (!all(valid)) all_ohs <- all_ohs[valid]
+    if (length(all_ohs) > 0L) {
+      return(all(compat_matrix[candidate_oh, all_ohs]))
     }
   }
 
@@ -378,6 +375,29 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
   # dp_paths[[p]] = list of path entries ending at position p
   # Score is a multiplicative product of overhang_score values.
 
+  # ---- Precompute static (path-independent) checks per position ----
+  # Self-palindrome + alien compat are position-dependent but NOT path-
+  # dependent. Computing them once avoids millions of redundant R function
+  # calls inside the DP inner loop.
+
+  # Filter alien_ohs to only include valid compat_matrix entries
+  valid_ohs <- rownames(compat_matrix)
+  alien_ohs <- alien_ohs[alien_ohs %in% valid_ohs]
+
+  static_ok <- logical(total_len)
+  has_aliens <- length(alien_ohs) > 0L
+  for (p in seq_len(total_len)) {
+    if (!boundary_valid[p]) next
+    oh <- oh_seq[p]
+    if (!oh %in% valid_ohs) next
+    # Self-palindrome check
+    rc_oh <- reverse_complement(oh)
+    if (count_positional_identity(oh, rc_oh) > max_identity) next
+    # Alien compat
+    if (has_aliens && !all(compat_matrix[oh, alien_ohs])) next
+    static_ok[p] <- TRUE
+  }
+
   # Layer k=1
   dp_paths <- vector("list", total_len)
 
@@ -385,18 +405,11 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
   hi_p <- min(max_len, total_len - 1L)
   if (lo_p <= hi_p) {
     for (p in lo_p:hi_p) {
-      if (!boundary_valid[p]) next
-      oh <- oh_seq[p]
-      if (!oogga_overlap_pass(
-        oh, character(0), alien_ohs, compat_matrix,
-        max_identity
-      )) {
-        next
-      }
+      if (!static_ok[p]) next
       dp_paths[[p]] <- list(list(
         score = boundary_scores[p], # first boundary: product starts here
         positions = p,
-        ohs = oh
+        ohs = oh_seq[p]
       ))
     }
   }
@@ -414,7 +427,7 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
       }
 
       for (p in lo_p:hi_p) {
-        if (!boundary_valid[p]) next
+        if (!static_ok[p]) next
         oh <- oh_seq[p]
 
         lo <- max(1L, p - max_len)
@@ -426,12 +439,9 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
         for (pp in lo:hi) {
           if (is.null(dp_paths[[pp]])) next
           for (path in dp_paths[[pp]]) {
-            if (!oogga_overlap_pass(
-              oh, path$ohs, alien_ohs, compat_matrix,
-              max_identity
-            )) {
-              next
-            }
+            # Vectorized check: oh vs all prior OHs on the path
+            if (!all(compat_matrix[oh, path$ohs])) next
+
             # Multiplicative scoring: product of overhang scores
             candidates[[length(candidates) + 1L]] <- list(
               score = path$score * boundary_scores[p],
@@ -736,6 +746,41 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
   # BsmBI reactions and must be collision-free)
   # Score is multiplicative: product of (oh1_score * oh2_score) per boundary
 
+  # ---- Precompute static (path-independent) checks per position ----
+  # Self-palindrome, alien compat, and oh1/oh2 mutual compat are position-
+  # dependent but NOT path-dependent. Computing them once eliminates ~80% of
+  # redundant work inside the DP inner loop.
+
+  # Filter alien_ohs to only include valid 4-nt ACGT sequences present in
+  # the compat_matrix. Invalid entries (empty strings, NAs) would cause
+  # subscript-out-of-bounds errors.
+  valid_ohs <- rownames(compat_matrix)
+  alien_ohs <- alien_ohs[alien_ohs %in% valid_ohs]
+
+  static_ok <- logical(n_codons)
+  has_aliens <- length(alien_ohs) > 0L
+  for (b in seq_len(n_codons)) {
+    if (!boundary_valid[b]) next
+    oh1 <- oh1_seq[b]
+    oh2 <- oh2_seq[b]
+    # Skip if oh1 or oh2 are not valid compat_matrix entries
+    if (!oh1 %in% valid_ohs || !oh2 %in% valid_ohs) next
+    # Self-palindrome for oh1
+    rc1 <- reverse_complement(oh1)
+    if (count_positional_identity(oh1, rc1) > max_identity) next
+    # Self-palindrome for oh2
+    rc2 <- reverse_complement(oh2)
+    if (count_positional_identity(oh2, rc2) > max_identity) next
+    # Alien compat for both oh1 and oh2
+    if (has_aliens) {
+      if (!all(compat_matrix[oh1, alien_ohs])) next
+      if (!all(compat_matrix[oh2, alien_ohs])) next
+    }
+    # oh1/oh2 mutual compat
+    if (!compat_matrix[oh1, oh2]) next
+    static_ok[b] <- TRUE
+  }
+
   # Layer k=1
   dp_paths <- vector("list", n_codons)
 
@@ -743,31 +788,13 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
   hi_b <- min(max_codons, n_codons - 1L)
   if (lo_b <= hi_b) {
     for (b in lo_b:hi_b) {
-      if (!boundary_valid[b]) next
-      oh1 <- oh1_seq[b]
-      oh2 <- oh2_seq[b]
-
-      # Both oh1 and oh2 must pass overlap check (incl. self-palindrome)
-      if (!oogga_overlap_pass(
-        oh1, character(0), alien_ohs, compat_matrix,
-        max_identity
-      )) {
-        next
-      }
-      if (!oogga_overlap_pass(
-        oh2, character(0), alien_ohs, compat_matrix,
-        max_identity
-      )) {
-        next
-      }
-      # oh1 and oh2 at this boundary must be compatible with each other
-      if (!compat_matrix[oh1, oh2]) next
+      if (!static_ok[b]) next
 
       # Multiplicative: first boundary's score = oh1_score * oh2_score
       dp_paths[[b]] <- list(list(
         score = oh1_scores[b] * oh2_scores[b],
         positions = b,
-        ohs = c(oh1, oh2)
+        ohs = c(oh1_seq[b], oh2_seq[b])
       ))
     }
   }
@@ -785,7 +812,7 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
       }
 
       for (b in lo_b:hi_b) {
-        if (!boundary_valid[b]) next
+        if (!static_ok[b]) next
         oh1 <- oh1_seq[b]
         oh2 <- oh2_seq[b]
 
@@ -798,27 +825,16 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
         for (bp in lo:hi) {
           if (is.null(dp_paths[[bp]])) next
           for (path in dp_paths[[bp]]) {
-            # Check oh1 and oh2 against all prior OHs + alien
-            if (!oogga_overlap_pass(
-              oh1, path$ohs, alien_ohs, compat_matrix,
-              max_identity
-            )) {
-              next
-            }
-            if (!oogga_overlap_pass(
-              oh2, path$ohs, alien_ohs, compat_matrix,
-              max_identity
-            )) {
-              next
-            }
-            # oh1 and oh2 must be compatible with each other
-            if (!compat_matrix[oh1, oh2]) next
+            # Vectorized check: oh1 and oh2 vs all prior OHs on the path
+            prior <- path$ohs
+            if (!all(compat_matrix[oh1, prior])) next
+            if (!all(compat_matrix[oh2, prior])) next
 
             # Multiplicative scoring
             candidates[[length(candidates) + 1L]] <- list(
               score = path$score * oh1_scores[b] * oh2_scores[b],
               positions = c(path$positions, b),
-              ohs = c(path$ohs, oh1, oh2)
+              ohs = c(prior, oh1, oh2)
             )
           }
         }
