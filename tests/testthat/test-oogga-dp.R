@@ -499,3 +499,520 @@ test_that("plan_assembly with short test gene (no SBs needed) works for all OOGG
     )
   }
 })
+
+
+# =============================================================================
+# Per-segment tile search tests (tile_segments_oogga + mc_refine)
+# =============================================================================
+
+test_that("tile_segments_oogga with 1 SB (no splits) returns valid tiles", {
+  # TEST_GENE_SEQ (300 nt) fits in one block — SB result is trivial (1 SB)
+  cds <- TEST_GENE_SEQ
+  gene_len <- nchar(cds)
+  tile_size <- compute_max_tile_size(300L, 20L)
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  bsmbi_pw <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+
+  # Trivial SB result: 1 superblock covering entire gene
+  sb_result <- list(
+    n_superblocks = 1L,
+    boundaries = data.frame(
+      sb_id = 1L, start_nt = 1L, end_nt = gene_len,
+      boundary_oh = NA_character_, boundary_score = NA_real_,
+      stringsAsFactors = FALSE
+    ),
+    total_score = 0
+  )
+
+  min_mutable_nt <- max(81L, tile_size %/% 3L)
+  min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
+
+  tiles <- tile_segments_oogga(
+    cds = cds,
+    sb_result = sb_result,
+    gene_len = gene_len,
+    max_mutable_nt = tile_size,
+    min_mutable_nt = min_mutable_nt,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    max_identity = 2L,
+    beam_width = 1L,
+    tile_method = "oogga_two_pass",
+    multi_k = FALSE,
+    dp_k_range = 1L
+  )
+
+  expect_true(is.data.frame(tiles))
+  expect_true(nrow(tiles) >= 1L)
+  # Tiles should cover the entire gene
+  expect_equal(tiles$start_nt[1], 1L)
+  expect_equal(tiles$end_nt[nrow(tiles)], gene_len)
+  # All tile_seq should match the CDS substring
+  for (i in seq_len(nrow(tiles))) {
+    expect_equal(tiles$tile_seq[i], substring(cds, tiles$start_nt[i], tiles$end_nt[i]))
+  }
+})
+
+test_that("tile_segments_oogga with 2+ gene-region SBs has correct alignment", {
+  # TEST_LONG_GENE_SEQ (2100 nt) triggers SB splitting
+  cds <- TEST_LONG_GENE_SEQ
+  gene_len <- nchar(cds)
+  tile_size <- compute_max_tile_size(300L, 20L)
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  bsmbi_pw <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+
+  # First, get SB result with real SB DP
+  full_seq <- paste0(cds, TEST_POLIII)
+  sb_result <- search_sb_boundaries_oogga(
+    full_seq = full_seq,
+    gene_len = gene_len,
+    max_block_length = 1800L - 22L,
+    min_block_length = 300L,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    max_identity = 2L,
+    beam_width = 5L
+  )
+
+  # Should have >1 SB for 2100 nt gene
+
+  expect_true(sb_result$n_superblocks >= 2L)
+
+  min_mutable_nt <- max(81L, tile_size %/% 3L)
+  min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
+
+  tiles <- tile_segments_oogga(
+    cds = cds,
+    sb_result = sb_result,
+    gene_len = gene_len,
+    max_mutable_nt = tile_size,
+    min_mutable_nt = min_mutable_nt,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    max_identity = 2L,
+    beam_width = 5L,
+    tile_method = "oogga_two_pass",
+    multi_k = TRUE,
+    dp_k_range = 3L
+  )
+
+  expect_true(is.data.frame(tiles))
+  expect_true(nrow(tiles) >= 2L)
+
+  # (a) Tiles cover entire gene
+  expect_equal(tiles$start_nt[1], 1L)
+  expect_equal(tiles$end_nt[nrow(tiles)], gene_len)
+
+  # (b) sb_dp_to_partition should have NO skip warnings
+  # We test this by checking that every gene-region SB boundary
+  # matches some tile end_nt
+  sb_df <- sb_result$boundaries
+  for (i in seq_len(sb_result$n_superblocks - 1L)) {
+    if (sb_df$end_nt[i] <= gene_len) {
+      expect_true(
+        sb_df$end_nt[i] %in% tiles$end_nt,
+        info = paste(
+          "SB boundary at", sb_df$end_nt[i],
+          "should match a tile end_nt"
+        )
+      )
+    }
+  }
+
+  # (c) No tile oh1/oh2 collides with SB junction OHs at max_identity=2
+  compat <- build_oh_compatibility(2L)
+  sb_junction_ohs <- sb_df$boundary_oh[!is.na(sb_df$boundary_oh)]
+  sb_junction_rcs <- vapply(sb_junction_ohs, reverse_complement, character(1),
+    USE.NAMES = FALSE
+  )
+  all_sb_ohs <- c(sb_junction_ohs, sb_junction_rcs)
+
+  for (i in seq_len(nrow(tiles))) {
+    oh1 <- tiles$oh1_seq[i]
+    oh2 <- tiles$oh2_seq[i]
+    for (sb_oh in all_sb_ohs) {
+      expect_true(compat[oh1, sb_oh],
+        info = paste("Tile", i, "oh1=", oh1, "collides with SB OH=", sb_oh)
+      )
+      expect_true(compat[oh2, sb_oh],
+        info = paste("Tile", i, "oh2=", oh2, "collides with SB OH=", sb_oh)
+      )
+    }
+  }
+})
+
+test_that("tile_segments_oogga position offsets are correct", {
+  cds <- TEST_LONG_GENE_SEQ
+  gene_len <- nchar(cds)
+  tile_size <- compute_max_tile_size(300L, 20L)
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  bsmbi_pw <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+
+  full_seq <- paste0(cds, TEST_POLIII)
+  sb_result <- search_sb_boundaries_oogga(
+    full_seq = full_seq,
+    gene_len = gene_len,
+    max_block_length = 1800L - 22L,
+    min_block_length = 300L,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    max_identity = 2L,
+    beam_width = 5L
+  )
+
+  min_mutable_nt <- max(81L, tile_size %/% 3L)
+  min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
+
+  tiles <- tile_segments_oogga(
+    cds = cds,
+    sb_result = sb_result,
+    gene_len = gene_len,
+    max_mutable_nt = tile_size,
+    min_mutable_nt = min_mutable_nt,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    max_identity = 2L,
+    beam_width = 5L,
+    tile_method = "oogga_greedy"
+  )
+
+  # Verify tile_seq == substring(cds, start_nt, end_nt)
+  for (i in seq_len(nrow(tiles))) {
+    expect_equal(
+      tiles$tile_seq[i],
+      substring(cds, tiles$start_nt[i], tiles$end_nt[i]),
+      info = paste("Tile", i, "tile_seq mismatch")
+    )
+  }
+
+  # If multiple segments, segment 2 tiles should start after segment 1 ends
+  if (sb_result$n_superblocks >= 2L) {
+    sb_df <- sb_result$boundaries
+    first_sb_end <- sb_df$end_nt[1]
+    if (first_sb_end <= gene_len) {
+      # Find first tile in segment 2
+      seg2_tiles <- tiles[tiles$start_nt > first_sb_end, ]
+      expect_true(nrow(seg2_tiles) >= 1L,
+        info = "Should have tiles in segment 2"
+      )
+      expect_true(seg2_tiles$start_nt[1] > first_sb_end,
+        info = "Segment 2 tile should start after segment 1 end"
+      )
+    }
+  }
+})
+
+test_that("tile_segments_oogga single-tile segment produces exactly 1 tile", {
+  # Create an SB result with a very small first segment (< max_codons)
+  cds <- TEST_LONG_GENE_SEQ
+  gene_len <- nchar(cds)
+  tile_size <- compute_max_tile_size(300L, 20L)
+  max_codons <- tile_size %/% 3L
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  bsmbi_pw <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+
+  # Manually construct SB result with a small first segment (60 codons = 180 nt)
+  small_seg_end <- 180L # 60 codons, within max_codons (~81)
+  sb_result <- list(
+    n_superblocks = 2L,
+    boundaries = data.frame(
+      sb_id = c(1L, 2L),
+      start_nt = c(1L, small_seg_end + 1L),
+      end_nt = c(small_seg_end, gene_len),
+      boundary_oh = c(substring(cds, small_seg_end - 3L, small_seg_end), NA_character_),
+      boundary_score = c(0.5, NA_real_),
+      stringsAsFactors = FALSE
+    ),
+    total_score = 0.5
+  )
+
+  min_mutable_nt <- max(81L, tile_size %/% 3L)
+  min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
+
+  tiles <- tile_segments_oogga(
+    cds = cds,
+    sb_result = sb_result,
+    gene_len = gene_len,
+    max_mutable_nt = tile_size,
+    min_mutable_nt = min_mutable_nt,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    max_identity = 2L,
+    beam_width = 5L,
+    tile_method = "oogga_two_pass",
+    multi_k = TRUE,
+    dp_k_range = 3L
+  )
+
+  # First segment (180 nt = 60 codons) should be a single tile
+  seg1_tiles <- tiles[tiles$end_nt <= small_seg_end, ]
+  expect_equal(nrow(seg1_tiles), 1L,
+    info = "Small segment should produce exactly 1 tile"
+  )
+  expect_equal(seg1_tiles$start_nt[1], 1L)
+  expect_equal(seg1_tiles$end_nt[1], small_seg_end)
+})
+
+test_that("tile_segments_oogga preserves oh2 overlap past SB boundary", {
+  cds <- TEST_LONG_GENE_SEQ
+  gene_len <- nchar(cds)
+  n_codons <- gene_len %/% 3L
+  tile_size <- compute_max_tile_size(300L, 20L)
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  bsmbi_pw <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+  overlap_codons <- 4L
+
+  full_seq <- paste0(cds, TEST_POLIII)
+  sb_result <- search_sb_boundaries_oogga(
+    full_seq = full_seq,
+    gene_len = gene_len,
+    max_block_length = 1800L - 22L,
+    min_block_length = 300L,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    max_identity = 2L,
+    beam_width = 5L
+  )
+
+  min_mutable_nt <- max(81L, tile_size %/% 3L)
+  min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
+
+  tiles <- tile_segments_oogga(
+    cds = cds,
+    sb_result = sb_result,
+    gene_len = gene_len,
+    max_mutable_nt = tile_size,
+    min_mutable_nt = min_mutable_nt,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    max_identity = 2L,
+    beam_width = 5L,
+    tile_method = "oogga_two_pass",
+    overlap_codons = overlap_codons
+  )
+
+  # For non-final tiles, oh2 should extend overlap_codons past end_codon
+  for (i in seq_len(nrow(tiles) - 1L)) {
+    expected_oh2_codon <- min(tiles$end_codon[i] + overlap_codons, n_codons)
+    expected_oh2_pos <- expected_oh2_codon * 3L
+    expected_oh2 <- substring(cds, expected_oh2_pos - 3L, expected_oh2_pos)
+    expect_equal(tiles$oh2_seq[i], expected_oh2,
+      info = paste(
+        "Tile", i, "oh2 should extend overlap_codons past end_codon.",
+        "Expected:", expected_oh2, "Got:", tiles$oh2_seq[i]
+      )
+    )
+  }
+})
+
+test_that("mc_refine_segment_tiles produces valid output", {
+  cds <- TEST_LONG_GENE_SEQ
+  gene_len <- nchar(cds)
+  tile_size <- compute_max_tile_size(300L, 20L)
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  bsmbi_pw <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+
+  max_codons <- tile_size %/% 3L
+  min_mutable_nt <- max(81L, tile_size %/% 3L)
+  min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
+  min_codons <- min_mutable_nt %/% 3L
+
+  # Get initial tiling on first ~500 codons (a manageable segment)
+  seg_len <- min(1500L, gene_len)
+  seg_cds <- substring(cds, 1, seg_len)
+  seg_n_codons <- seg_len %/% 3L
+
+  initial_tiles <- search_tile_boundaries_oogga(
+    cds = seg_cds,
+    max_mutable_nt = tile_size,
+    min_mutable_nt = min_mutable_nt,
+    oh_fidelity = oh_fidelity,
+    multi_k = FALSE,
+    dp_k_range = 1L,
+    overlap_codons = 4L,
+    eff_lookup = eff_lookup,
+    max_identity = 2L,
+    beam_width = 1L
+  )
+
+  set.seed(42)
+  refined_tiles <- mc_refine_segment_tiles(
+    tiles = initial_tiles,
+    cds = seg_cds,
+    alien_ohs = character(0),
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    overlap_codons = 4L,
+    max_identity = 2L,
+    n_iterations = 200L,
+    temperature = 1.0,
+    cooling_rate = 0.99,
+    min_codons = min_codons,
+    max_codons = max_codons
+  )
+
+  expect_true(is.data.frame(refined_tiles))
+  expect_equal(nrow(refined_tiles), nrow(initial_tiles))
+
+  # All tile sizes in range
+  expect_true(all(refined_tiles$n_codons >= min_codons))
+  expect_true(all(refined_tiles$n_codons <= max_codons))
+
+  # Tiles cover the full segment
+  expect_equal(refined_tiles$start_codon[1], 1L)
+  expect_equal(refined_tiles$end_codon[nrow(refined_tiles)], seg_n_codons)
+
+  # Tiles are contiguous (no gaps)
+  for (i in seq_len(nrow(refined_tiles) - 1L)) {
+    expect_equal(refined_tiles$start_codon[i + 1L], refined_tiles$end_codon[i] + 1L)
+  }
+})
+
+test_that("mc_refine_segment_tiles respects alien OHs", {
+  cds <- TEST_LONG_GENE_SEQ
+  gene_len <- nchar(cds)
+  tile_size <- compute_max_tile_size(300L, 20L)
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  bsmbi_pw <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+
+  max_codons <- tile_size %/% 3L
+  min_mutable_nt <- max(81L, tile_size %/% 3L)
+  min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
+  min_codons <- min_mutable_nt %/% 3L
+
+  seg_len <- min(1500L, gene_len)
+  seg_cds <- substring(cds, 1, seg_len)
+
+  # Use some alien OHs (simulating SB junction OHs)
+  alien_ohs <- c("AATC", "GATT", "TTAG", "CTAA")
+
+  initial_tiles <- search_tile_boundaries_oogga(
+    cds = seg_cds,
+    max_mutable_nt = tile_size,
+    min_mutable_nt = min_mutable_nt,
+    oh_fidelity = oh_fidelity,
+    multi_k = FALSE,
+    dp_k_range = 1L,
+    eff_lookup = eff_lookup,
+    alien_ohs = alien_ohs,
+    max_identity = 2L,
+    beam_width = 1L
+  )
+
+  set.seed(123)
+  refined_tiles <- mc_refine_segment_tiles(
+    tiles = initial_tiles,
+    cds = seg_cds,
+    alien_ohs = alien_ohs,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    overlap_codons = 4L,
+    max_identity = 2L,
+    n_iterations = 200L,
+    temperature = 1.0,
+    cooling_rate = 0.99,
+    min_codons = min_codons,
+    max_codons = max_codons
+  )
+
+  # No boundary OH should collide with alien OHs
+  compat <- build_oh_compatibility(2L)
+  seg_n_codons <- nchar(seg_cds) %/% 3L
+
+  for (i in seq_len(nrow(refined_tiles) - 1L)) {
+    b <- refined_tiles$end_codon[i]
+    oh1_pos <- b * 3L + 1L
+    oh1 <- substring(seg_cds, oh1_pos, oh1_pos + 3L)
+    oh2_codon <- min(b + 4L, seg_n_codons)
+    oh2_pos <- oh2_codon * 3L
+    oh2 <- substring(seg_cds, oh2_pos - 3L, oh2_pos)
+
+    for (alien in alien_ohs) {
+      if (nchar(oh1) == 4L && alien %in% rownames(compat)) {
+        expect_true(compat[oh1, alien],
+          info = paste("Boundary", i, "oh1=", oh1, "collides with alien=", alien)
+        )
+      }
+      if (nchar(oh2) == 4L && alien %in% rownames(compat)) {
+        expect_true(compat[oh2, alien],
+          info = paste("Boundary", i, "oh2=", oh2, "collides with alien=", alien)
+        )
+      }
+    }
+  }
+})
+
+test_that("plan_assembly with oogga_two_pass on TEST_LONG_GENE_SEQ has no SB skip warnings", {
+  cds <- TEST_LONG_GENE_SEQ
+  tile_size <- compute_max_tile_size(300L, 20L)
+
+  result <- plan_assembly(
+    cds = cds,
+    polIII = TEST_POLIII,
+    max_mutable_nt = tile_size,
+    config = list(
+      boundary_method = "oogga_two_pass",
+      oogga_max_identity = 2L,
+      oogga_beam_width = 5L,
+      dp_k_range = 3L
+    )
+  )
+
+  expect_true(is.list(result))
+  expect_true(is.data.frame(result$tiles))
+  expect_equal(result$summary$n_sb_collisions, 0L)
+
+  # Verify SB/tile alignment: every gene-region SB boundary matches a tile end
+  sb_df <- result$sb_result$boundaries
+  gene_len <- nchar(cds)
+  for (i in seq_len(result$sb_result$n_superblocks - 1L)) {
+    if (sb_df$end_nt[i] <= gene_len) {
+      expect_true(
+        sb_df$end_nt[i] %in% result$tiles$end_nt,
+        info = paste(
+          "SB boundary at", sb_df$end_nt[i],
+          "not found in tile end_nt values:",
+          paste(result$tiles$end_nt, collapse = ", ")
+        )
+      )
+    }
+  }
+
+  # Superblock count should be reasonable (not exploded)
+  # 2100 nt gene + 250 nt PolIII = 2350 > 1800, so need 2 SBs
+  n_sb <- result$summary$n_superblocks
+  expect_true(n_sb <= 5L,
+    info = paste("Superblock count", n_sb, "seems exploded")
+  )
+})
+
+test_that("plan_assembly with oogga_two_pass_mc works", {
+  cds <- TEST_GENE_SEQ
+  tile_size <- compute_max_tile_size(300L, 20L)
+
+  result <- plan_assembly(
+    cds = cds,
+    polIII = TEST_POLIII,
+    max_mutable_nt = tile_size,
+    config = list(
+      boundary_method = "oogga_two_pass_mc",
+      oogga_max_identity = 2L,
+      oogga_beam_width = 1L,
+      dp_k_range = 1L,
+      mc_iterations = 100L,
+      mc_temperature = 1.0,
+      mc_cooling_rate = 0.99
+    )
+  )
+
+  expect_true(is.list(result))
+  expect_true(is.data.frame(result$tiles))
+  expect_equal(result$summary$n_sb_collisions, 0L)
+})

@@ -1429,6 +1429,7 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
 
     if (seg_n_codons <= max_codons) {
       # --- Single-tile segment: no DP needed ---
+      # Include all columns that DP/greedy produces so rbind() works
       seg_tiles <- data.frame(
         tile_id = 1L,
         start_codon = 1L,
@@ -1436,6 +1437,17 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
         start_nt = 1L,
         end_nt = seg_len,
         n_codons = seg_n_codons,
+        oh1_seq = NA_character_,
+        oh2_seq = NA_character_,
+        oh1_score = NA_real_,
+        oh2_score = NA_real_,
+        oh1_in_hf = NA,
+        oh2_in_hf = NA,
+        oh1_fidelity = NA_real_,
+        oh2_fidelity = NA_real_,
+        tile_seq = NA_character_,
+        boundary_shift = 0L,
+        boundary_score = NA_real_,
         stringsAsFactors = FALSE
       )
       cli::cli_alert_info("    Single-tile segment (no DP needed)")
