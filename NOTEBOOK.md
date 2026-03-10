@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-10 — Entry 30: Per-segment tile OOGGA DP benchmarks (beam width, MC refinement, legacy DP vs OOGGA) -->
+<!-- Last updated: 2026-03-10 — Entry 31: Full pipeline DP vs OOGGA benchmark -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -1040,4 +1040,33 @@ The SB-first architecture places SB boundaries at arbitrary codon positions (Pas
 - Investigate mi=2 infeasibility: what makes the constraint space too tight?
 - Debug "Total score: 0" in tile DP multiplicative scoring
 - Consider defaulting to legacy DP with OOGGA collision post-check as a faster alternative
+
+---
+
+### 2026-03-10 10:56 — Full Pipeline DP vs OOGGA Two-Pass Benchmark
+
+**Type**: benchmark
+**Status**: completed
+**Tags**: [benchmark, oogga, dp, full-pipeline, assembly-simulation]
+
+**Goal**: Run the complete pipeline (all 12 steps + assembly simulation) for 4 genes × 2 boundary methods (legacy DP vs OOGGA two-pass beam=1) to produce full assembly reports for side-by-side comparison.
+
+**Approach**: Created 8 benchmark config files (one per gene × method combo) and ran all 8 in parallel. Each run is fully independent — config, mutation design, tiling, barcoding, oligo assembly, gene block design, QC, and assembly simulation.
+
+**Key findings**:
+- OOGGA produces 2-9 more tiles per gene → fewer variants per tile → 7-8% smaller oligo pools (e.g., TRIO: 650K→604K oligos)
+- OOGGA requires 7-16 more gene blocks to synthesize (more tiles = more WT blocks)
+- Fidelity is gene-dependent: OOGGA wins on GRIN2A/ext (0.894 vs 0.740 min set fidelity), DP wins on AKAP11 (0.858 vs 0.753)
+- OOGGA total runtime overhead is only 5-13% — step 6 (assembly planning) is 6-14x slower, but offset by faster barcode gen (fewer barcodes)
+- Pipeline bottleneck is mutations (38-45%) + barcodes (30-40%) regardless of boundary method
+- All 8 runs pass assembly simulation — both methods produce valid assemblies
+
+**Artifacts**:
+- `benchmarks/260310_full_pipeline/comparison_summary.md` — full comparison with tables
+- `benchmarks/260310_full_pipeline/{gene}_{method}/` — complete output dirs with assembly reports
+- `configs/bench_*.yaml` — 8 benchmark configs
+
+**Related commits**:
+- `5fb6c9b` — benchmark: Add 8 configs for full pipeline DP vs OOGGA comparison
+- `de1d9ac` — benchmark: Full pipeline DP vs OOGGA two-pass on 4 genes
 
