@@ -1,0 +1,507 @@
+{
+  "metadata": {
+    "source": "OOGGA.py (Mukundan & Madhusudhan 2025)",
+    "repo": "github.com/bigbigdumdum/OOGGA",
+    "description": "Golden reference for cross-language equivalence testing",
+    "max_identity_default": 2
+  },
+  "tests": {
+    "positional_identity": [
+      {
+        "oh_a": "AATC",
+        "oh_b": "AATG",
+        "identity": 3
+      },
+      {
+        "oh_a": "AATC",
+        "oh_b": "CATT",
+        "identity": 2
+      },
+      {
+        "oh_a": "AATT",
+        "oh_b": "AATT",
+        "identity": 4
+      },
+      {
+        "oh_a": "ACGT",
+        "oh_b": "ACGT",
+        "identity": 4
+      },
+      {
+        "oh_a": "ACGC",
+        "oh_b": "GCGT",
+        "identity": 2
+      },
+      {
+        "oh_a": "AAAA",
+        "oh_b": "AAAA",
+        "identity": 4
+      },
+      {
+        "oh_a": "ACGT",
+        "oh_b": "TGCA",
+        "identity": 0
+      },
+      {
+        "oh_a": "GATC",
+        "oh_b": "GATC",
+        "identity": 4
+      },
+      {
+        "oh_a": "CGTC",
+        "oh_b": "AGTC",
+        "identity": 3
+      },
+      {
+        "oh_a": "TTTT",
+        "oh_b": "AAAA",
+        "identity": 0
+      },
+      {
+        "oh_a": "ACAC",
+        "oh_b": "ACAC",
+        "identity": 4
+      },
+      {
+        "oh_a": "GTGT",
+        "oh_b": "ACAC",
+        "identity": 0
+      }
+    ],
+    "self_palindrome": [
+      {
+        "candidate": "AATT",
+        "rc_candidate": "AATT",
+        "identity_with_rc": 4,
+        "passes_mi2": false,
+        "passes_mi3": false
+      },
+      {
+        "candidate": "ACGT",
+        "rc_candidate": "ACGT",
+        "identity_with_rc": 4,
+        "passes_mi2": false,
+        "passes_mi3": false
+      },
+      {
+        "candidate": "GATC",
+        "rc_candidate": "GATC",
+        "identity_with_rc": 4,
+        "passes_mi2": false,
+        "passes_mi3": false
+      },
+      {
+        "candidate": "ACGC",
+        "rc_candidate": "GCGT",
+        "identity_with_rc": 2,
+        "passes_mi2": true,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "AATC",
+        "rc_candidate": "GATT",
+        "identity_with_rc": 2,
+        "passes_mi2": true,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "TGCA",
+        "rc_candidate": "TGCA",
+        "identity_with_rc": 4,
+        "passes_mi2": false,
+        "passes_mi3": false
+      },
+      {
+        "candidate": "CATG",
+        "rc_candidate": "CATG",
+        "identity_with_rc": 4,
+        "passes_mi2": false,
+        "passes_mi3": false
+      },
+      {
+        "candidate": "TTAA",
+        "rc_candidate": "TTAA",
+        "identity_with_rc": 4,
+        "passes_mi2": false,
+        "passes_mi3": false
+      },
+      {
+        "candidate": "AAAC",
+        "rc_candidate": "GTTT",
+        "identity_with_rc": 0,
+        "passes_mi2": true,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "AACG",
+        "rc_candidate": "CGTT",
+        "identity_with_rc": 0,
+        "passes_mi2": true,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "CCAG",
+        "rc_candidate": "CTGG",
+        "identity_with_rc": 2,
+        "passes_mi2": true,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "ATCG",
+        "rc_candidate": "CGAT",
+        "identity_with_rc": 0,
+        "passes_mi2": true,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "ATAT",
+        "rc_candidate": "ATAT",
+        "identity_with_rc": 4,
+        "passes_mi2": false,
+        "passes_mi3": false
+      }
+    ],
+    "pairwise_compatibility": [
+      {
+        "candidate": "AATC",
+        "other": "AATG",
+        "description": "3 direct matches",
+        "identity_direct": 3,
+        "rc_other": "CATT",
+        "identity_with_rc": 2,
+        "passes_mi2": false,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "AATC",
+        "other": "CCAG",
+        "description": "low direct identity",
+        "identity_direct": 0,
+        "rc_other": "CTGG",
+        "identity_with_rc": 0,
+        "passes_mi2": true,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "ACCA",
+        "other": "TGGT",
+        "description": "RC match: RC(TGGT)=ACCA, id=4",
+        "identity_direct": 0,
+        "rc_other": "ACCA",
+        "identity_with_rc": 4,
+        "passes_mi2": false,
+        "passes_mi3": false
+      },
+      {
+        "candidate": "GCAC",
+        "other": "GTGC",
+        "description": "RC match: RC(GTGC)=GCAC, id=4",
+        "identity_direct": 2,
+        "rc_other": "GCAC",
+        "identity_with_rc": 4,
+        "passes_mi2": false,
+        "passes_mi3": false
+      },
+      {
+        "candidate": "TGAA",
+        "other": "GGAA",
+        "description": "3 direct matches (pos 2,3,4)",
+        "identity_direct": 3,
+        "rc_other": "TTCC",
+        "identity_with_rc": 1,
+        "passes_mi2": false,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "CCTC",
+        "other": "GAGG",
+        "description": "RC match: RC(GAGG)=CCTC, id=4",
+        "identity_direct": 0,
+        "rc_other": "CCTC",
+        "identity_with_rc": 4,
+        "passes_mi2": false,
+        "passes_mi3": false
+      },
+      {
+        "candidate": "ACAA",
+        "other": "TAGA",
+        "description": "low identity both ways",
+        "identity_direct": 1,
+        "rc_other": "TCTA",
+        "identity_with_rc": 2,
+        "passes_mi2": true,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "CGGA",
+        "other": "CATA",
+        "description": "2 direct matches, low RC",
+        "identity_direct": 2,
+        "rc_other": "TATG",
+        "identity_with_rc": 0,
+        "passes_mi2": true,
+        "passes_mi3": true
+      },
+      {
+        "candidate": "AACG",
+        "other": "AAGT",
+        "description": "2 direct matches (A,A), check RC",
+        "identity_direct": 2,
+        "rc_other": "ACTT",
+        "identity_with_rc": 1,
+        "passes_mi2": true,
+        "passes_mi3": true
+      }
+    ],
+    "full_overlap_pass": [
+      {
+        "name": "typical_3_existing_ohs",
+        "candidate": "ACCA",
+        "prior_ohs": [
+          "CCTC",
+          "TGAA"
+        ],
+        "alien_ohs": [
+          "GCAC"
+        ],
+        "max_identity": 2,
+        "result": true,
+        "check_list": [
+          "CCTC",
+          "TGAA",
+          "GCAC",
+          "GAGG",
+          "TTCA",
+          "GTGC",
+          "TGGT"
+        ],
+        "identities": [
+          1,
+          1,
+          1,
+          0,
+          2,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "collision_with_prior",
+        "candidate": "AATG",
+        "prior_ohs": [
+          "AATC"
+        ],
+        "alien_ohs": [],
+        "max_identity": 2,
+        "result": false,
+        "check_list": [
+          "AATC",
+          "GATT",
+          "CATT"
+        ],
+        "identities": [
+          3,
+          2,
+          2
+        ]
+      },
+      {
+        "name": "collision_via_rc_alien",
+        "candidate": "ACCA",
+        "prior_ohs": [],
+        "alien_ohs": [
+          "TGGT"
+        ],
+        "max_identity": 2,
+        "result": false,
+        "check_list": [
+          "TGGT",
+          "ACCA",
+          "TGGT"
+        ],
+        "identities": [
+          0,
+          4,
+          0
+        ]
+      },
+      {
+        "name": "self_palindrome_rejection",
+        "candidate": "AATT",
+        "prior_ohs": [],
+        "alien_ohs": [],
+        "max_identity": 2,
+        "result": false,
+        "check_list": [
+          "AATT"
+        ],
+        "identities": [
+          4
+        ]
+      },
+      {
+        "name": "passes_mi3_fails_mi2",
+        "candidate": "AATG",
+        "prior_ohs": [
+          "AATC"
+        ],
+        "alien_ohs": [],
+        "max_identity_values": [
+          2,
+          3
+        ],
+        "result_mi2": false,
+        "result_mi3": true
+      },
+      {
+        "name": "many_priors_deep_path",
+        "candidate": "CTAA",
+        "prior_ohs": [
+          "CCTC",
+          "GACA",
+          "GCAC",
+          "AATC",
+          "GTAA",
+          "TGAA"
+        ],
+        "alien_ohs": [
+          "ATTA",
+          "CCAG"
+        ],
+        "max_identity": 2,
+        "result": false,
+        "check_list": [
+          "CCTC",
+          "GACA",
+          "GCAC",
+          "AATC",
+          "GTAA",
+          "TGAA",
+          "ATTA",
+          "CCAG",
+          "GAGG",
+          "TGTC",
+          "GTGC",
+          "GATT",
+          "TTAC",
+          "TTCA",
+          "TAAT",
+          "CTGG",
+          "TTAG"
+        ],
+        "identities": [
+          1,
+          1,
+          1,
+          0,
+          3,
+          2,
+          2,
+          2,
+          0,
+          0,
+          1,
+          0,
+          2,
+          2,
+          1,
+          2,
+          2
+        ]
+      },
+      {
+        "name": "potapov_set3_mutual_compat",
+        "potapov_set3": [
+          "CCTC",
+          "CTAA",
+          "GACA",
+          "GCAC",
+          "AATC",
+          "GTAA",
+          "TGAA",
+          "ATTA",
+          "CCAG",
+          "AGGA",
+          "ACAA",
+          "TAGA",
+          "CGGA",
+          "CATA",
+          "CAGC",
+          "AACG",
+          "AAGT",
+          "CTCC",
+          "AGAT",
+          "ACCA",
+          "AGTG",
+          "GGTA",
+          "GCGA",
+          "AAAA",
+          "ATGA"
+        ],
+        "all_pass_mi2": {
+          "CCTC": true,
+          "CTAA": false,
+          "GACA": true,
+          "GCAC": true,
+          "AATC": true,
+          "GTAA": false,
+          "TGAA": true,
+          "ATTA": false,
+          "CCAG": true,
+          "AGGA": false,
+          "ACAA": false,
+          "TAGA": true,
+          "CGGA": false,
+          "CATA": true,
+          "CAGC": true,
+          "AACG": true,
+          "AAGT": true,
+          "CTCC": true,
+          "AGAT": true,
+          "ACCA": false,
+          "AGTG": true,
+          "GGTA": true,
+          "GCGA": true,
+          "AAAA": false,
+          "ATGA": false
+        },
+        "n_passing": 16,
+        "n_failing": 9
+      }
+    ],
+    "reverse_complement": [
+      {
+        "input": "ACGT",
+        "rc": "ACGT"
+      },
+      {
+        "input": "AATT",
+        "rc": "AATT"
+      },
+      {
+        "input": "GATC",
+        "rc": "GATC"
+      },
+      {
+        "input": "TGCA",
+        "rc": "TGCA"
+      },
+      {
+        "input": "AAAA",
+        "rc": "TTTT"
+      },
+      {
+        "input": "CCCC",
+        "rc": "GGGG"
+      },
+      {
+        "input": "ACGC",
+        "rc": "GCGT"
+      },
+      {
+        "input": "TGAA",
+        "rc": "TTCA"
+      }
+    ]
+  }
+}

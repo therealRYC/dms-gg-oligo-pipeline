@@ -42,6 +42,7 @@ source(file.path(pipeline_dir, "R", "03_codon_table.R"))
 source(file.path(pipeline_dir, "R", "04_mutation_design.R"))
 source(file.path(pipeline_dir, "R", "05_tiling.R"))
 source(file.path(pipeline_dir, "R", "06_overhang_selection.R"))
+source(file.path(pipeline_dir, "R", "06b_oogga_dp.R"))
 source(file.path(pipeline_dir, "R", "07b_linear_codes.R"))
 source(file.path(pipeline_dir, "R", "07_barcode_design.R"))
 source(file.path(pipeline_dir, "R", "08_oligo_assembly.R"))
@@ -181,7 +182,9 @@ if (identical(cfg$barcode_length, "auto")) {
 }
 
 # Step 6: Plan assembly (hybrid: tile-first DP + constrained SB DP)
-cli::cli_h2("Step 6: Planning assembly (hybrid tile DP + constrained SB DP)")
+cli::cli_h2(paste0(
+  "Step 6: Planning assembly (boundary_method=", cfg$boundary_method, ")"
+))
 step_start <- proc.time()
 tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
 assembly_plan <- plan_assembly(
@@ -194,7 +197,10 @@ assembly_plan <- plan_assembly(
     manual_oh4 = cfg$oh4,
     multi_k = cfg$multi_k_search,
     overlap_codons = cfg$overlap_codons,
-    min_geneblock_length = cfg$min_geneblock_length
+    min_geneblock_length = cfg$min_geneblock_length,
+    boundary_method = cfg$boundary_method,
+    oogga_max_identity = cfg$oogga_max_identity,
+    oogga_beam_width = cfg$oogga_beam_width
   ),
   downstream_cassette = if (nzchar(cfg$intergene_concat)) cfg$downstream_cassette else NULL
 )

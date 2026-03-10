@@ -1,0 +1,246 @@
+
+── DMS Golden Gate Oligo Pipeline (3-Enzyme Architecture) ──────────────────────
+ℹ Config: configs/bench_grin2a_dp.yaml
+
+── Step 1: Loading configuration ──
+
+ℹ Intergene elements: WPRE + spacer + bGH_polyA (845 nt total)
+✔ Configuration loaded and validated. [0.1s]
+
+── Step 2: Reading gene ──
+
+✔ Gene 'GRIN2A': 4395 nt, 1465 codons, 1464 aa [2.1s]
+
+── Step 3: Loading codon usage table ──
+
+✔ Codon usage table loaded: built-in CoCoPUTs (Homo sapiens, GRCh38.p13) [0s]
+
+── Step 4: Scanning for enzyme sites (BsaI, BsmBI, PaqCI) ──
+
+! Found 6 enzyme site(s) in gene that need domestication.
+→ Applying domestication (with iterative BsaI/BsmBI resolution)...
+ℹ Domesticated: BsaI site at nt 3604-3609 | codon 1202: GAG -> GAA (E, freq: 39.42 -> 33.87)
+ℹ Domesticated: BsaI site at nt 2374-2379 | codon 792: GAG -> GAA (E, freq: 39.42 -> 33.87)
+ℹ Domesticated: BsaI site at nt 2013-2018 | codon 671: CAG -> CAA (Q, freq: 35.3 -> 14.18)
+ℹ Domesticated: BsmBI site at nt 1629-1634 | codon 543: ACC -> ACA (T, freq: 17.76 -> 16.56)
+ℹ Domesticated: BsmBI site at nt 1279-1284 | codon 427: GAG -> GAA (E, freq: 39.42 -> 33.87)
+ℹ Domesticated: BsaI site at nt 780-785 | codon 260: TTG -> CTT (L, freq: 13.47 -> 14.16)
+✔ Gene domesticated for all 3 enzymes.
+ℹ Step 4 completed. [0.5s]
+
+── Step 5: Designing mutations ──
+
+✔ Designed 30723 variants across 1463 mutable positions (codons 2-1464; skipped codon 1=Met and codon 1465=stop). [27797 missense + 1463 nonsense + 1463 WT controls]
+ℹ Fixed 343 variant(s) that would have created enzyme sites.
+There were 47 warnings (use warnings() to see them)
+✔ 30723 variants designed. [183.2s]
+
+── Step 6: Planning assembly (boundary_method=dp) ──
+
+ℹ Max mutable region: 234 nt (78 codons) | Fixed overhead: 64 nt
+
+── Phase 1: Selecting fixed overhangs (oh_L, oh3, oh4) 
+ℹ Derived oh3=CACC from PolIII promoter 3' end (fidelity=0.417)
+✔ Fixed overhangs: oh3=CACC (non-HF), oh4=AGAA (non-HF)
+
+── Phase 2: Searching tile boundaries 
+ℹ Using DP optimizer
+ℹ Precomputing boundary scores for 1464 candidate positions...
+✔ Boundary scores precomputed in 3.1s.
+ℹ DP boundary search: 1465 codons, 1175 valid candidate positions, K range [19, 24]
+ℹ Stopping K search at K=24: avg score improvement 0.13% < 0.5% threshold
+ℹ DP tile boundary search completed in 0.3s (6 K values).
+ℹ Multi-K: K=19 score=18.7, K=20 score=22.7, K=21 score=25.7, K=22 score=27.2, K=23 score=28.7, K=24 score=29.9 | best K=24
+✔ DP boundary search: 25 tiles, 24 boundaries (both_HF=1, one_HF=5, neither=18)
+! SB boundary 2 (tile 18, oh2=AAAT): collision detected.
+ℹ SB collision: blacklisting oh2=AAAT. Re-running DP...
+
+── SB-aware refinement iteration 2 (blacklisted: AAAA, CCCC, GGGG, TTTT, AAAT) 
+ℹ Precomputing boundary scores for 1464 candidate positions...
+✔ Boundary scores precomputed in 2.9s.
+ℹ DP boundary search: 1465 codons, 1164 valid candidate positions, K range [19, 24]
+ℹ Stopping K search at K=24: avg score improvement 0.11% < 0.5% threshold
+ℹ DP tile boundary search completed in 0.3s (6 K values).
+ℹ Multi-K: K=19 score=18.0, K=20 score=22.5, K=21 score=25.4, K=22 score=27.0, K=23 score=28.4, K=24 score=29.7 | best K=24
+✔ DP boundary search: 25 tiles, 24 boundaries (both_HF=1, one_HF=3, neither=20)
+! SB boundary 3 (tile 21, oh2=TCAG): collision detected.
+ℹ SB collision: blacklisting oh2=TCAG. Re-running DP...
+
+── SB-aware refinement iteration 3 (blacklisted: AAAA, CCCC, GGGG, TTTT, AAAT, TCAG) 
+ℹ Precomputing boundary scores for 1464 candidate positions...
+✔ Boundary scores precomputed in 2.9s.
+ℹ DP boundary search: 1465 codons, 1157 valid candidate positions, K range [19, 24]
+ℹ Stopping K search at K=24: avg score improvement 0.13% < 0.5% threshold
+ℹ DP tile boundary search completed in 0.3s (6 K values).
+ℹ Multi-K: K=19 score=18.0, K=20 score=22.4, K=21 score=25.3, K=22 score=26.9, K=23 score=28.3, K=24 score=29.5 | best K=24
+✔ DP boundary search: 25 tiles, 24 boundaries (both_HF=1, one_HF=3, neither=20)
+✔ SB collision resolved after 3 iteration(s).
+
+── Phase 3: Superblock partitioning (constrained SB DP) 
+ℹ Precomputing SB boundary scores for 5485 positions...
+ℹ 741 valid SB boundary candidates out of 5485 positions.
+ℹ SB boundary DP: 5485 bp, K range [3, 5]
+ℹ SB boundary DP completed in 0.2s (3 K values).
+ℹ SB multi-K: K=3 score=2.300, K=4 score=3.121, K=5 score=3.942 | best K=5
+✔ SB boundary search: 6 superblocks, 5 boundaries, total score = 3.9424
+ℹ SB collision: blacklisting gene: GAAA, TTTC, TTCC. Re-running constrained SB DP...
+ℹ SB collision avoidance iteration 2 (extra blacklist: GAAA, TTTC, TTCC)
+ℹ Precomputing SB boundary scores for 5485 positions...
+ℹ 733 valid SB boundary candidates out of 5485 positions.
+ℹ SB boundary DP: 5485 bp, K range [3, 5]
+ℹ SB boundary DP completed in 0.2s (3 K values).
+ℹ SB multi-K: K=3 score=1.784, K=4 score=2.545, K=5 score=3.233 | best K=5
+✔ SB boundary search: 6 superblocks, 5 boundaries, total score = 3.2325
+ℹ SB DP placed 2 cassette boundary(ies) at positions 3, 397 (overhangs: AAAT, AAAT)
+ℹ SB collision: blacklisting gene: TCCA, AAGA cassette: AAAT. Re-running constrained SB DP...
+ℹ SB collision avoidance iteration 3 (extra blacklist: GAAA, TTTC, TTCC, TCCA, AAGA)
+ℹ Precomputing SB boundary scores for 5485 positions...
+ℹ 715 valid SB boundary candidates out of 5485 positions.
+ℹ SB boundary DP: 5485 bp, K range [3, 5]
+ℹ SB boundary DP completed in 0.2s (3 K values).
+ℹ SB multi-K: K=3 score=1.784, K=4 score=2.456, K=5 score=3.128 | best K=5
+✔ SB boundary search: 6 superblocks, 5 boundaries, total score = 3.1283
+ℹ SB DP placed 2 cassette boundary(ies) at positions 6, 482 (overhangs: TCAA, TCAA)
+ℹ SB collision: blacklisting  cassette: TCAA. Re-running constrained SB DP...
+ℹ SB collision avoidance iteration 4 (extra blacklist: GAAA, TTTC, TTCC, TCCA, AAGA)
+ℹ Precomputing SB boundary scores for 5485 positions...
+ℹ 709 valid SB boundary candidates out of 5485 positions.
+ℹ SB boundary DP: 5485 bp, K range [3, 5]
+ℹ SB boundary DP completed in 0.2s (3 K values).
+ℹ SB multi-K: K=3 score=1.784, K=4 score=2.416, K=5 score=3.048 | best K=5
+✔ SB boundary search: 6 superblocks, 5 boundaries, total score = 3.0485
+ℹ SB DP placed 2 cassette boundary(ies) at positions 46, 377 (overhangs: ATTC, ATTC)
+ℹ SB collision: blacklisting  cassette: ATTC. Re-running constrained SB DP...
+ℹ SB collision avoidance iteration 5 (extra blacklist: GAAA, TTTC, TTCC, TCCA, AAGA)
+ℹ Precomputing SB boundary scores for 5485 positions...
+ℹ 702 valid SB boundary candidates out of 5485 positions.
+ℹ SB boundary DP: 5485 bp, K range [3, 5]
+ℹ Stopping SB K search at K=5: avg score improvement 0.11% < 0.5% threshold
+ℹ SB boundary DP completed in 0.2s (3 K values).
+ℹ SB multi-K: K=3 score=1.784, K=4 score=2.411, K=5 score=3.018 | best K=5
+✔ SB boundary search: 6 superblocks, 5 boundaries, total score = 3.0175
+ℹ SB DP placed 2 cassette boundary(ies) at positions 149, 712 (overhangs: ATAA, CTAA)
+✔ SB collision resolved after 5 iteration(s).
+ℹ dp SB: 4 superblocks, 3 boundary(ies). 1 junction(s) in HF set. 69 per-tile split entries. 0 unresolved collision(s).
+
+── Phase 4: Validating per-reaction overhang fidelity 
+! 1 reaction(s) below set fidelity warning threshold (0.8). Min: 0.7402
+! 42 variant(s) at gene edges have partial oh1/oh2 overlap. These mutations may not fully assemble as intended.
+! Skipped 42 gene-edge variant(s) with partial oh1/oh2 overlap
+✔ Assembly planned: 25 tiles, 1/24 boundaries both in HF set [14.2s]
+
+── Step 7: Designing barcodes ──
+
+ℹ Barcode mode: unified hierarchical, barcode_length=20, prefix_length=12
+ℹ Junction context for barcode filtering: left='CACACC', right='AGAATG'
+ℹ Unified hierarchical mode: generating barcodes (length=20, prefix=12, suffix=8, min_hamming=3, need 30681 variants x 10 barcodes = 306810)
+→ Generating 30681 unique prefixes (hard Hamming >= 3)...
+ℹ Building GF(4) Hamming code: Ham_4(3) = [21, 18, 3]_4, shortened to [12, 9, >=3]_4
+ℹ Code capacity: 4^9 = 262,144 codewords
+→ Enumerating all 262,144 codewords...
+✔ Generated 262,144 prefix codewords (d >= 3 guaranteed by algebraic construction)
+ℹ Removed 4237 prefixes with enzyme sites at junction boundaries.
+✔ GF(4) linear code: 244106 prefixes after filtering (need 30681)
+ℹ Generated 30681 unique prefixes (method=linear).
+→ Generating barcodes (random suffixes per prefix)...
+ℹ Batch suffix generation: 30681 variants x 500 candidates = 15,340,500 total
+✔ Barcode generation: 306810 barcodes for 30681 variants in 210.2s.
+✔ Skipping prefix distance validation (d >= 3 guaranteed by linear construction).
+✔ Generated 306810 barcodes (mode=unified hierarchical, length=20, prefix_method=linear)
+→ Computing per-barcode nearest-neighbor Hamming distances...
+ℹ Using prefix-group optimization for NN computation (306810 barcodes, prefix_length=12)
+✔ Nearest-neighbor distances: min=1, median=3, max=3
+ℹ Step 7 completed. [222.1s]
+
+── Step 8: Assembling oligos (universal 3-enzyme structure) ──
+
+✔ All 306810 oligos within length limit. Range: 149-284 nt.
+✔ 306810 oligos assembled. [0.9s]
+
+── Step 9: Designing gene blocks and helper plasmid ──
+
+ℹ Deduplicated blocks: 115 -> 52 (63 duplicates removed)
+✔ Helper plasmid insert designed: oh_L=ATGG, oh_R=AGAA (72 nt)
+✔ All 52 gene blocks within synthesis limit. Range: 99-1730 nt.
+✔ 52 gene blocks designed. [1.1s]
+ℹ Recomputing reaction fidelity from actual block overhangs...
+✔ Reaction fidelity recomputed. Min: 0.7402
+
+── Step 10: Running QC checks ──
+
+✖ 3 QC check(s) failed:
+!   FAIL: Tile boundary overhangs have adequate fidelity | 22 tile(s) with low-fidelity boundary overhangs (<0.80)
+!   FAIL: Per-reaction set-level overhang fidelity | Min set fidelity: 0.7402 across 50 reactions | 3 reaction(s) below 0.90
+!   FAIL: All gene blocks above synthesis minimum length | 5 block(s) below 300 nt minimum. Range: 99-1730 nt
+ℹ [PASS] All oligos within synthesis length limit — Range: 149-284 nt (limit: 300)
+ℹ [PASS] All gene blocks within synthesis length limit — Range: 99-1730 nt (limit: 1800)
+ℹ [PASS] No enzyme sites at barcode-context junctions — 0 barcode(s) with junction enzyme sites (left='CACACC', right='AGAATG')
+ℹ [PASS] All barcodes are unique — 306810 unique / 306810 total
+ℹ [PASS] Tiles cover entire gene without gaps — 4395 / 4395 nt covered
+ℹ [PASS] Expected number of variants generated — 30681 unique variants (expected: 30681 across 1461/1463 mutable positions; 27759 missense + 1461 nonsense + 1461 wt_control; 2 position(s) skipped)
+ℹ [PASS] Each non-control variant differs by exactly one codon from WT — 292200 / 292200 variants confirmed (WT controls excluded)
+ℹ [PASS] Oligo GC content within reasonable range (25-75%) — GC range: 38.2-69.1% | 0 oligo(s) with extreme GC
+ℹ [PASS] Gene domesticated for all 3 enzymes (BsaI, BsmBI, PaqCI) — No enzyme sites in gene
+ℹ [FAIL] Tile boundary overhangs have adequate fidelity — 22 tile(s) with low-fidelity boundary overhangs (<0.80)
+ℹ [PASS] Per-tile assembly manifests complete — 25 tile manifest(s) generated
+ℹ [PASS] Helper plasmid free of unintended BsmBI sites — OK
+ℹ [FAIL] Per-reaction set-level overhang fidelity — Min set fidelity: 0.7402 across 50 reactions | 3 reaction(s) below 0.90
+ℹ [PASS] No barcodes contain PolIII terminator signal (TTTT) — 0 / 306810 barcode(s) contain TTTT
+ℹ [FAIL] All gene blocks above synthesis minimum length — 5 block(s) below 300 nt minimum. Range: 99-1730 nt
+ℹ [PASS] Superblock boundary overhangs are unique (no collisions) — 5 SB boundary OH(s), all unique
+✔ QC: ISSUES FOUND [33s]
+
+── Step 10b: In-silico GG assembly simulation ──
+
+✔ Assembly simulation: 25/25 tiles passed. [1.7s]
+
+── Step 11: Writing outputs ──
+
+✔ Wrote oligo pool: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_oligo_pool.csv (306810 oligos)
+✔ Wrote gene block order: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_geneblock_order.csv (52 blocks)
+✔ Wrote variant-barcode map: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_variant_barcode_map.csv (306810 variants)
+✔ Wrote tile manifests: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_tile_manifests.csv
+✔ Wrote helper plasmid: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_helper_plasmid.csv
+✔ Wrote QC report: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_qc_report.csv
+✔ Wrote oligo FASTA: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_oligo_pool.fasta
+✔ Wrote gene block FASTA: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_geneblock_order.fasta
+✔ Wrote sequences FASTA: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_sequences.fasta
+✔ Wrote skipped variants: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_skipped_variants.csv (42 variants)
+✔ Outputs written. [12.8s]
+
+── Step 12: Generating wetlab assembly report ──
+
+✔ Wrote wetlab assembly report: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_assembly_report.md
+✔ Report generated. [6.9s]
+
+── Pipeline Complete ───────────────────────────────────────────────────────────
+✔ Gene: GRIN2A
+✔ Architecture: 3-enzyme (BsaI + BsmBI + PaqCI)
+✔ Variants: 30681 (unique mutations), 42 skipped (gene-edge overlap)
+✔ Oligos: 306810 (10 barcodes/variant)
+✔ Gene blocks: 52
+✔ Tiles: 25
+✔ Fixed overhangs: oh3=CACC, oh4=AGAA
+✔ Intergene elements: WPRE + spacer + bGH_polyA (845 nt)
+✔ Downstream cassette: 1095 nt (intergene + PolIII)
+✔ Barcodes: mode=unified hierarchical, length=20, prefix=12, effective_hamming=3
+✔ QC: ISSUES FOUND
+✔ Wetlab report: benchmarks/260310_full_pipeline/grin2a_dp/GRIN2A_assembly_report.md
+✔ Output directory: benchmarks/260310_full_pipeline/grin2a_dp
+
+── Timing Breakdown ──
+
+ℹ 1_config             0.1s
+ℹ 2_gene_input         2.1s
+ℹ 3_codon_usage        0s
+ℹ 4_enzyme_scan        0.5s
+ℹ 5_mutations          183.2s
+ℹ 6_assembly_plan      14.2s
+ℹ 7_barcodes           222.1s
+ℹ 8_oligo_assembly     0.9s
+ℹ 9_geneblocks         1.1s
+ℹ 10_qc                33s
+ℹ 10b_simulation       1.7s
+ℹ 11_output            12.8s
+ℹ 12_report            6.9s
+✔ Total pipeline time: 479.3s

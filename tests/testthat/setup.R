@@ -19,6 +19,7 @@ source(file.path(pipeline_dir, "R", "03_codon_table.R"))
 source(file.path(pipeline_dir, "R", "04_mutation_design.R"))
 source(file.path(pipeline_dir, "R", "05_tiling.R"))
 source(file.path(pipeline_dir, "R", "06_overhang_selection.R"))
+source(file.path(pipeline_dir, "R", "06b_oogga_dp.R"))
 source(file.path(pipeline_dir, "R", "07b_linear_codes.R"))
 source(file.path(pipeline_dir, "R", "07_barcode_design.R"))
 source(file.path(pipeline_dir, "R", "08_oligo_assembly.R"))
@@ -36,16 +37,16 @@ source(file.path(pipeline_dir, "R", "13_gg_simulator.R"))
 # Build a clean 300 nt test gene
 TEST_GENE_SEQ <- paste0(
   # 100 codons = 300 nt, starts ATG, ends TAA
-  "ATG", "GCT", "GAA", "CTT", "AAA", "GCT", "GCC", "AAG", "GAT", "TTC",  # 1-10
-  "GGT", "ACC", "CTG", "AAC", "GAT", "ATC", "CCA", "GCT", "CAG", "AAG",  # 11-20
-  "TTC", "ATC", "GCT", "AAC", "CTG", "TGG", "AAG", "AAC", "GGT", "GAC",  # 21-30
-  "TTC", "CGT", "CTC", "GAT", "CTG", "AAA", "GAA", "CTG", "GCT", "GAC",  # 31-40 (CGTCTC at codons 32-33)
-  "TAC", "ATC", "AAG", "AAC", "CCG", "GCT", "ACC", "GTT", "GCT", "CTG",  # 41-50
-  "GAA", "GGT", "ATC", "GCT", "AAC", "GGT", "GCT", "CCG", "ATC", "TTC",  # 51-60
-  "AAA", "GCT", "GCT", "AAA", "GAA", "CTG", "ATC", "GAA", "TCC", "TTC",  # 61-70
-  "GCT", "TAC", "GTT", "AAA", "GCT", "ACC", "AAA", "GGT", "GAA", "AAC",  # 71-80
-  "CTG", "ATC", "TCC", "GCT", "ATC", "GAC", "AAA", "GCT", "GTT", "GAC",  # 81-90
-  "AAA", "CTG", "GCT", "GAA", "TAC", "ATC", "AAA", "GCT", "GAA", "TAA"   # 91-100 (100th = stop)
+  "ATG", "GCT", "GAA", "CTT", "AAA", "GCT", "GCC", "AAG", "GAT", "TTC", # 1-10
+  "GGT", "ACC", "CTG", "AAC", "GAT", "ATC", "CCA", "GCT", "CAG", "AAG", # 11-20
+  "TTC", "ATC", "GCT", "AAC", "CTG", "TGG", "AAG", "AAC", "GGT", "GAC", # 21-30
+  "TTC", "CGT", "CTC", "GAT", "CTG", "AAA", "GAA", "CTG", "GCT", "GAC", # 31-40 (CGTCTC at codons 32-33)
+  "TAC", "ATC", "AAG", "AAC", "CCG", "GCT", "ACC", "GTT", "GCT", "CTG", # 41-50
+  "GAA", "GGT", "ATC", "GCT", "AAC", "GGT", "GCT", "CCG", "ATC", "TTC", # 51-60
+  "AAA", "GCT", "GCT", "AAA", "GAA", "CTG", "ATC", "GAA", "TCC", "TTC", # 61-70
+  "GCT", "TAC", "GTT", "AAA", "GCT", "ACC", "AAA", "GGT", "GAA", "AAC", # 71-80
+  "CTG", "ATC", "TCC", "GCT", "ATC", "GAC", "AAA", "GCT", "GTT", "GAC", # 81-90
+  "AAA", "CTG", "GCT", "GAA", "TAC", "ATC", "AAA", "GCT", "GAA", "TAA" # 91-100 (100th = stop)
 )
 
 TEST_POLIII <- "GAGGGCCTATTTCCCATGATTCCTTCATATTTGCATATACGATACAAGGCTGTTAGAGAGATAATTAGAATTAATTTGACTGTAAACACAAAGATATTAGTACAAAATACGTGACGTAGAAAGTAATAATTTCTTGGGTAGTTTGCAGTTTTTAATACGACTCACTATAGGGACTATCATATGCTTACCGTAACTTGAAAGTATTTCGATTTCTTGGCTTTATATATCTTGTGGAAAGGACGAAACACCG"

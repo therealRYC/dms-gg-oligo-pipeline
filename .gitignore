@@ -13,10 +13,20 @@ figures/
 *.html
 /260*/
 
-# Large pipeline outputs in Example Genes (too big for GitHub)
+# Large pipeline outputs (too big for GitHub, regenerable)
 Example Genes/**/*_oligo_pool.csv
 Example Genes/**/*_oligo_pool.fasta
 Example Genes/**/*_variant_barcode_map.csv
+benchmarks/**/*_oligo_pool.csv
+benchmarks/**/*_oligo_pool.fasta
+benchmarks/**/*_variant_barcode_map.csv
+benchmarks/**/*_geneblock_order.csv
+benchmarks/**/*_geneblock_order.fasta
+benchmarks/**/*_helper_plasmid.csv
+benchmarks/**/*_qc_report.csv
+benchmarks/**/*_sequences.fasta
+benchmarks/**/*_skipped_variants.csv
+benchmarks/**/*_tile_manifests.csv
 
 # Raw data downloads (processed versions in .rds are tracked)
 data/o537-Human_CDS.tsv
