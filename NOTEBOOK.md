@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-09 — Entry 28: OOGGA rewrite complete, benchmark results -->
+<!-- Last updated: 2026-03-09 — Entry 29: 4-gene full pipeline benchmark (dp vs oogga_two_pass vs oogga_greedy) -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -49,6 +49,8 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-08 | Keep DP (dp_v2) for tile boundaries, discard tile MC | MC never improved beyond dp_v2 initial solution, 1.8-2.8x slower, failed on TRIO | Entry 26 |
 | 2026-03-09 | BUG-009: All DPs missing OOGGA collision prevention | Our DPs pre-compute scores independently per position — no inter-boundary collision check. OOGGA's `__overlap_pass()` rejects OHs sharing >2/4 bases with any prior OH. Root cause of repeated-overhang failures. | Entry 27 |
 | 2026-03-09 | Switch to two-pass OOGGA (SB junctions + tile boundaries) | Replace SB MC + dp_v2 architecture entirely. Both passes use proper OOGGA DP with collision checking and BsmBI cycling data. | Entry 27 |
+| 2026-03-09 | oogga_greedy not suitable as default | Fails on TRIO (3098 codons); can't find valid boundaries at max_identity=3 for long genes | Entry 29 |
+| 2026-03-09 | SB-first architecture has alignment bug | SB boundaries at arbitrary codon positions don't align with tile boundaries, causing gene block fragmentation | Entry 29 |
 | 2026-03-09 | OOGGA 2-condition compat check (remove 3rd identity check) | Match OOGGA Python exactly: only check identity(A,B) and identity(A,RC(B)), not identity(RC(A),B) | Entry 28 |
 | 2026-03-09 | Multiplicative DP scoring (product, not sum) | OOGGA uses ∏(eff_i × fid_i); our additive sum was incorrect. Initial score 0→1.0, +=→*= | Entry 28 |
 | 2026-03-09 | Beam search with beam_width=10 default | Improvement over OOGGA's single-path; path-dependent collision breaks Bellman optimality | Entry 28 |
@@ -883,7 +885,79 @@ Three-worktree structure: parent (bug fixes) → two children (DP vs MC comparis
 - Re-adding `identity(RC(A),B)` as optional `strict_compat=TRUE` — would make compat matrix symmetric
 
 **Next steps**:
-- Run cross-language equivalence tests against OOGGA Python (deferred Step 8)
-- Consider making `oogga_greedy` the default boundary method
-- Test on TRIO (3098 codons) to verify performance at scale
+- ~~Run cross-language equivalence tests against OOGGA Python~~ Done (Entry 29)
+- ~~Consider making `oogga_greedy` the default boundary method~~ No — fails on TRIO (Entry 29)
+- ~~Test on TRIO (3098 codons) to verify performance at scale~~ Done (Entry 29)
+
+---
+
+### 2026-03-09 19:13 — 4-Gene Full Pipeline Benchmark: dp vs OOGGA Methods
+
+**Type**: session
+**Status**: completed
+**Tags**: [benchmark, oogga, boundary-selection, collision-prevention, bug-fix]
+
+**Goal**: Run the full pipeline on 4 real genes (GRIN2A, AKAP11, TRIO, GRIN2A long cassette) with 3 boundary methods (dp, oogga_two_pass beam=10, oogga_greedy) and compare results.
+
+**Approach**: Created 4 git worktrees branched from `260309-oogga-comparison`. Generated 3 method-specific YAML configs per gene (12 total). Ran `run_pipeline.R` for each config (12 pipeline runs in parallel across worktrees, sequential within). Used `barcodes_per_variant: 1` for speed (barcodes don't affect boundary selection). Collected assembly reports and compared metrics.
+
+**Critical bug found**: `run_pipeline.R` was not passing `boundary_method`, `oogga_max_identity`, or `oogga_beam_width` from the YAML config to `plan_assembly()`. The config list on line 193-199 was missing these 3 keys. Result: ALL runs used the legacy `dp` path regardless of config. First batch of 12 runs produced identical results. Fixed in commit `750103d`, then re-ran all 12.
+
+**Benchmark results** (after fix):
+
+| Gene | Method | Tiles | Gene Blocks | SB OHs | Min Set Fid | Low-Fid Tiles | Time |
+|------|--------|-------|-------------|--------|-------------|---------------|------|
+| GRIN2A (1464 cod) | dp | 25 | 52 | 5 | 0.740 | 22 | 289s |
+| GRIN2A | oogga_two_pass | 24 | 83 | 3 | 0.794 | 22 | 574s |
+| GRIN2A | oogga_greedy | 29 | 95 | 3 | 0.874 | 26 | 330s |
+| AKAP11 (1902 cod) | dp | 31 | 66 | 5 | 0.858 | 23 | 442s |
+| AKAP11 | oogga_two_pass | 27 | 119 | 4 | 0.853 | 25 | 770s |
+| AKAP11 | oogga_greedy | 37 | 147 | 4 | 0.783 | 35 | 447s |
+| TRIO (3098 cod) | dp | 47 | 103 | 7 | 0.783 | 44 | 645s |
+| TRIO | oogga_two_pass | 45 | 235 | 6 | 0.749 | 44 | 1354s |
+| TRIO | oogga_greedy | — | — | — | — | — | **FAILED** |
+| GRIN2A LC (1464 cod) | dp | 25 | 57 | 4 | 0.740 | 21 | 290s |
+| GRIN2A LC | oogga_two_pass | 24 | 98 | 3 | 0.794 | 22 | 641s |
+| GRIN2A LC | oogga_greedy | 29 | 116 | 3 | 0.850 | 26 | 371s |
+
+**Key findings**:
+- **OOGGA methods produce distinct boundaries** — different tile counts, overhangs, and SB structures vs dp. Collision prevention is working.
+- **oogga_two_pass finds fewer, wider tiles** (24 vs 25 for GRIN2A, 27 vs 31 for AKAP11, 45 vs 47 for TRIO) — collision-aware DP finds efficient solutions.
+- **oogga_greedy finds more, smaller tiles** (29, 37) — greedy makes locally optimal but globally suboptimal choices.
+- **oogga_greedy FAILS on TRIO** — can't find valid boundaries for 3098-codon gene even at max_identity=3. The greedy approach gets trapped. DP succeeds.
+- **Gene block explosion in OOGGA** — 83-235 blocks vs 52-103 for dp. Root cause: SB boundaries don't align with tile boundaries ("SB boundary at position X does not match any tile end_nt. Skipping."). This is a fundamental issue with the SB-first architecture.
+- **Tile DP always falls back to max_identity=3** — mi=2 is infeasible for all genes. With 24+ overhangs per reaction, the constraint space is too tight at mi=2.
+- **oogga_two_pass is ~2x slower** — SB DP adds 60-136s, plus collision-aware tile DP overhead.
+- **Overhang fidelity is comparable** across all methods — OOGGA doesn't significantly improve or worsen fidelity.
+
+**Decisions made**:
+- oogga_greedy cannot be the default: fails on long genes (over greedy DP approach)
+- SB-first architecture has an alignment bug: SB boundaries need to align with tile boundaries, or the partition logic needs restructuring (over keeping current SB-first design as-is)
+
+**Architecture issue — SB/tile boundary misalignment**:
+The SB-first architecture places SB boundaries at arbitrary codon positions (Pass 1), then tile boundaries are found independently (Pass 2). Since these are decoupled, SB boundary positions rarely coincide with tile boundary positions. `sb_dp_to_partition()` then skips non-matching SB boundaries, causing excessive gene block fragmentation. Possible fixes:
+1. Constrain SB DP to only place boundaries at positions that are valid tile boundaries
+2. Add a post-hoc alignment step that adjusts SB boundaries to nearest tile boundary
+3. Return to tile-boundary-constrained SB architecture (our legacy approach) but with OOGGA collision checking
+
+**Artifacts**:
+- `archive/benchmark_260309/` — 11 assembly reports (3 methods × 4 genes, minus TRIO greedy)
+- `scripts/run_gene_benchmark.sh` — Benchmark runner script
+- Worktrees: `260309-benchmark-{grin2a,akap11,trio,grin2a-long-cassette}`
+
+**Related commits**:
+- `153b9af` — benchmark: 4-gene × 3-method full pipeline comparison
+- `750103d` — Fix boundary_method not passed from config to plan_assembly()
+- `6b956dd` — docs: update build_oh_compatibility docstring with redundancy proof
+- `6d184b8` — Add cross-language equivalence tests + mark BUG-009 as fixed
+
+**Open questions**:
+- How to fix SB/tile boundary alignment? Option 1 (constrain SB DP to tile-valid positions) seems cleanest but requires knowing valid tile positions before running SB DP — circular dependency.
+- Is oogga_two_pass worth the 2x runtime cost given comparable fidelity to dp?
+- Should we consider a hybrid: dp for tiles (fast, good fidelity) + OOGGA collision checking as a post-hoc filter?
+
+**Next steps**:
+- Fix SB/tile boundary alignment bug
+- Investigate the "Total score: 0" issue in OOGGA tile DP
+- Consider hybrid approach: legacy dp tiles + OOGGA collision validation
 
