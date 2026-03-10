@@ -940,19 +940,13 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
 
   # Compute per-OH scores for multiplicative DP (OOGGA-faithful)
   # precomp$score is additive (oh1 + oh2) — we need individual products
+  # Delegate to overhang_score() directly — it handles unknown/short overhangs
+  # with a 0.5 fallback, avoiding the zero-multiplication trap
   oh1_scores <- vapply(precomp$oh1_seq, function(oh) {
-    if (nchar(oh) == 4L && oh %in% names(fid_lookup)) {
-      overhang_score(oh, fid_lookup, eff_lookup)
-    } else {
-      0
-    }
+    overhang_score(oh, fid_lookup, eff_lookup)
   }, numeric(1), USE.NAMES = FALSE)
   oh2_scores <- vapply(precomp$oh2_seq, function(oh) {
-    if (nchar(oh) == 4L && oh %in% names(fid_lookup)) {
-      overhang_score(oh, fid_lookup, eff_lookup)
-    } else {
-      0
-    }
+    overhang_score(oh, fid_lookup, eff_lookup)
   }, numeric(1), USE.NAMES = FALSE)
 
   # Build compatibility matrix
@@ -1103,7 +1097,8 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
 
   cli::cli_alert_success(paste0(
     "OOGGA tile DP: ", n_tiles, " tiles, ", K, " collision-free boundaries. ",
-    "Total score: ", round(best_result$total_score, 3)
+    "Geo-mean score: ", round(best_result$total_score^(1 / K), 4),
+    " (raw product: ", format(best_result$total_score, digits = 3, scientific = TRUE), ")"
   ))
 
   attr(tiles, "max_identity_used") <- effective_max_identity

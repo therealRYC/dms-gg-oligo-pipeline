@@ -384,9 +384,9 @@ compute_overhang_efficiency <- function(pairwise_matrix) {
 #' @param eff_lookup Named numeric vector (overhang -> efficiency, i.e. P_eff)
 #' @return Numeric score (higher is better)
 overhang_score <- function(oh, fid_lookup, eff_lookup) {
-  # Look up P_fid; fall back to 0.5 for unknown overhangs (conservative default)
+  # Falls back to 0.5 for unknown/empty overhangs (conservative default).
+  # This ensures multiplicative scoring never produces exact zeros.
   fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else 0.5
-  # Look up P_eff; fall back to 0.5 for unknown overhangs
   eff <- if (oh %in% names(eff_lookup)) unname(eff_lookup[oh]) else 0.5
   fid * eff
 }
