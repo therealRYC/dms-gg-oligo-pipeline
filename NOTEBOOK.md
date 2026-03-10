@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-09 — Entry 29: 4-gene full pipeline benchmark (dp vs oogga_two_pass vs oogga_greedy) -->
+<!-- Last updated: 2026-03-10 — Entry 30: Per-segment tile OOGGA DP benchmarks (beam width, MC refinement, legacy DP vs OOGGA) -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -55,6 +55,9 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-09 | Multiplicative DP scoring (product, not sum) | OOGGA uses ∏(eff_i × fid_i); our additive sum was incorrect. Initial score 0→1.0, +=→*= | Entry 28 |
 | 2026-03-09 | Beam search with beam_width=10 default | Improvement over OOGGA's single-path; path-dependent collision breaks Bellman optimality | Entry 28 |
 | 2026-03-09 | max_identity fallback: mi=2 → mi=3 → error (no legacy DP) | Never fall back to collision-unaware DP; mi=3 is acceptable safety net | Entry 28 |
+| 2026-03-10 | Per-segment tile DP fixes SB/tile alignment | Tile DP runs within each SB segment, so tile endpoints naturally align with SB boundaries | Entry 30 |
+| 2026-03-10 | beam_width=1 as practical default | beam=1 is 1.5-3.7x faster than beam=10 with negligible fidelity difference | Entry 30 |
+| 2026-03-10 | MC refinement not useful for tile boundaries | 0 moves accepted across all genes; DP at mi=3 is locally optimal under mi=2 MC constraints | Entry 30 |
 | 2026-03-09 | Precompute static checks for OOGGA DP (20-76x speedup) | Position-dependent but path-independent checks (self-palindrome, alien compat) computed once before DP loop | Entry 28 |
 
 ## Entries
@@ -960,4 +963,81 @@ The SB-first architecture places SB boundaries at arbitrary codon positions (Pas
 - Fix SB/tile boundary alignment bug
 - Investigate the "Total score: 0" issue in OOGGA tile DP
 - Consider hybrid approach: legacy dp tiles + OOGGA collision validation
+
+---
+
+### 2026-03-10 10:02 — Per-Segment Tile OOGGA DP: Implementation + 3 Benchmarks
+
+**Type**: session
+**Status**: completed
+**Tags**: [oogga, per-segment-tiling, benchmark, beam-search, mc-refinement, collision-aware]
+
+**Goal**: Fix the SB/tile boundary alignment bug (Entry 29) by running tile DP per SB segment, then benchmark beam width, MC refinement, and legacy DP vs OOGGA.
+
+**Approach**: Implemented `tile_segments_oogga()` — after SB DP finds superblock boundaries (Pass 1), Pass 2 runs tile DP independently within each SB segment. Tiles naturally end at SB boundaries by construction, eliminating the alignment bug. Also added `mc_refine_segment_tiles()` (Metropolis-Hastings) as an optional post-DP refinement. Ran three benchmarks on 4 genes (GRIN2A, AKAP11, TRIO, GRIN2A_ext).
+
+**Key findings**:
+
+*Benchmark 1 — Beam width (beam=1 vs beam=10):*
+- beam=1 is 1.5-3.7x faster with negligible fidelity difference
+- Both produce identical tile counts; beam=10 only rarely finds marginally better solutions
+- **Verdict**: beam=1 is the practical default
+
+*Benchmark 2 — MC refinement (DP only vs DP+MC):*
+- 0 moves accepted across all 4 genes (0/4000 iterations per segment)
+- Root cause: tile DP falls back to mi=3 when mi=2 is infeasible. At mi=3, boundaries are already locally optimal. MC checks at mi=2 → all proposals rejected.
+- **Verdict**: MC refinement adds cost (marginal) with zero benefit; not worth including
+
+*Benchmark 3 — Legacy DP vs OOGGA two-pass (beam=1):*
+
+| Gene | Method | Tiles | SBs | Blocks | Min Fid | Mi2 | Mi3 | Time |
+|------|--------|-------|-----|--------|---------|-----|-----|------|
+| GRIN2A | Legacy DP | 25 | 4 | 69 | 0.858 | 30 | 0 | 6.3s |
+| GRIN2A | OOGGA | 26 | 3 | 50 | 0.804 | 37 | 2 | 27.1s |
+| AKAP11 | Legacy DP | 31 | 5 | 116 | 0.913 | 131 | 0 | 7.0s |
+| AKAP11 | OOGGA | 32 | 4 | 93 | 0.826 | 53 | 13 | 33.9s |
+| TRIO | Legacy DP | 47 | 8 | 315 | 0.783 | 109 | 0 | 20.5s |
+| TRIO | OOGGA | 55 | 6 | 270 | 0.813 | 84 | 3 | 65.1s |
+| GRIN2A_ext | Legacy DP | 25 | 4 | 69 | 0.740 | 38 | 0 | 6.8s |
+| GRIN2A_ext | OOGGA | 27 | 3 | 52 | 0.894 | 25 | 0 | 35.1s |
+
+- OOGGA uses fewer SBs (3-6 vs 4-8) → fewer gene blocks (50-270 vs 69-315)
+- OOGGA has fewer mi2 violations on 3/4 genes (proactive collision checking works)
+- OOGGA introduces some mi3 violations (2-13) from tile DP fallback mi2→mi3
+- Min fidelity mixed: OOGGA wins on TRIO (+0.030) and GRIN2A_ext (+0.154), loses on GRIN2A (-0.054) and AKAP11 (-0.087)
+- OOGGA is 3-5x slower
+
+**Decisions made**:
+- Per-segment tile DP fixes alignment bug: tile DP runs within each SB segment so endpoints naturally match (over full-CDS tile DP with post-hoc alignment)
+- beam=1 as default: 1.5-3.7x faster with negligible quality difference (over beam=10)
+- MC refinement not useful: 0 moves accepted; DP at mi=3 already locally optimal (over keeping MC as option)
+
+**Artifacts**:
+- `R/06b_oogga_dp.R` — `tile_segments_oogga()` + `mc_refine_segment_tiles()`
+- `R/06_overhang_selection.R` — Updated Pass 2 dispatch to per-segment tiling
+- `tests/testthat/test-oogga-dp.R` — 8 new per-segment tile + MC tests
+- `scripts/benchmark_beam_width.R` — Beam width benchmark script
+- `scripts/benchmark_mc_refinement.R` — MC refinement benchmark script
+- `scripts/benchmark_dp_vs_oogga.R` — Legacy DP vs OOGGA benchmark script
+- `benchmarks/260310_beam_width_comparison.md` — Beam width results
+- `benchmarks/260310_mc_refinement_comparison.md` — MC refinement results
+- `benchmarks/260310_dp_vs_oogga_two_pass.md` — Legacy DP vs OOGGA results
+
+**Related commits**:
+- `eb6f3c7` — Add per-segment tile OOGGA DP to fix SB/tile alignment
+- `a20b70a` — Add per-segment tile + MC refinement tests, fix single-tile rbind
+- `10504e6` — Add beam width + MC refinement benchmark scripts
+- `86925b7` — benchmark: beam width + MC refinement on 4 genes
+- `ce953cd` — benchmark: legacy DP vs OOGGA two-pass (beam=1) on 4 genes
+
+**Open questions**:
+- Why does OOGGA tile DP always fall back to mi=3? Is the alien OH set too large for mi=2 to be feasible?
+- "Total score: 0" in OOGGA tile DP — is multiplicative scoring zeroing out due to one bad boundary?
+- Is the 3-5x runtime cost of OOGGA justified given the mi3 violations it introduces?
+- Should we consider a hybrid: legacy DP speed + OOGGA collision validation as post-hoc filter?
+
+**Next steps**:
+- Investigate mi=2 infeasibility: what makes the constraint space too tight?
+- Debug "Total score: 0" in tile DP multiplicative scoring
+- Consider defaulting to legacy DP with OOGGA collision post-check as a faster alternative
 
