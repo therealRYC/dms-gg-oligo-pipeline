@@ -1318,6 +1318,454 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
 
 
 # =============================================================================
+# PER-SEGMENT TILE SEARCH (used by oogga_two_pass, oogga_greedy, oogga_two_pass_mc)
+# =============================================================================
+
+#' Tile the gene per SB segment, ensuring SB/tile alignment
+#'
+#' After Pass 1 finds SB boundaries, this function runs tile search (DP or
+#' greedy) independently within each SB gene-region segment. This guarantees
+#' that tile end positions align with SB boundaries — eliminating the skip
+#' warnings from `sb_dp_to_partition()` and the gene block explosion bug.
+#'
+#' ALL SB junction overhangs are treated as alien for tile search because
+#' every tile's Level 1 BsmBI reaction reconstructs the full gene, so all
+#' SB junction OHs appear in every tile's reaction pot.
+#'
+#' @param cds Domesticated gene CDS sequence
+#' @param sb_result SB result list from `search_sb_boundaries_oogga()` with
+#'   `$boundaries` data frame (sb_id, start_nt, end_nt, boundary_oh) and
+#'   `$n_superblocks`
+#' @param gene_len Integer, length of gene CDS in nt
+#' @param max_mutable_nt Integer, max mutable region in nt
+#' @param min_mutable_nt Integer, min mutable region in nt
+#' @param oh_fidelity Data frame with overhang + fidelity columns
+#' @param eff_lookup Named numeric vector (overhang -> efficiency)
+#' @param base_alien_ohs Character vector of fixed overhangs (oh3, oh4, oh_L + RCs)
+#' @param max_identity Integer, max positional identity (default 2)
+#' @param beam_width Integer, beam search width (default 10)
+#' @param tile_method Character, "oogga_two_pass" or "oogga_greedy"
+#' @param multi_k Logical, try multiple tile counts in DP?
+#' @param dp_k_range Integer, search K_ideal +/- dp_k_range
+#' @param overlap_codons Integer, number of overlap codons between adjacent tiles
+#' @param mc_refine Logical, apply MC refinement after tile search?
+#' @param mc_iterations Integer, number of MC iterations (default 1000)
+#' @param mc_temperature Numeric, initial MC temperature (default 1.0)
+#' @param mc_cooling_rate Numeric, MC cooling rate per iteration (default 0.995)
+#' @return Data frame with tile info (same format as search_tile_boundaries_oogga),
+#'   with attribute "max_identity_used" set to the worst max_identity across segments.
+tile_segments_oogga <- function(cds, sb_result, gene_len,
+                                max_mutable_nt, min_mutable_nt,
+                                oh_fidelity, eff_lookup,
+                                base_alien_ohs = character(0),
+                                max_identity = 2L, beam_width = 10L,
+                                tile_method = "oogga_two_pass",
+                                multi_k = TRUE, dp_k_range = 5L,
+                                overlap_codons = 4L,
+                                mc_refine = FALSE,
+                                mc_iterations = 1000L,
+                                mc_temperature = 1.0,
+                                mc_cooling_rate = 0.995) {
+  sb_df <- sb_result$boundaries
+  n_sb <- sb_result$n_superblocks
+
+  max_codons <- max_mutable_nt %/% 3L
+  min_codons <- min_mutable_nt %/% 3L
+  total_n_codons <- gene_len %/% 3L
+
+  # --- Extract gene-region SB segments ---
+  # SB boundaries span gene + cassette. We only tile the gene region.
+  # Gene-region segments: each from sb start to min(sb end, gene_len).
+  segments <- list()
+  for (i in seq_len(n_sb)) {
+    seg_start <- sb_df$start_nt[i]
+    seg_end <- min(sb_df$end_nt[i], gene_len)
+    if (seg_start > gene_len) next # Cassette-only SB, skip
+    segments[[length(segments) + 1L]] <- list(
+      start_nt = seg_start,
+      end_nt = seg_end,
+      sb_id = i
+    )
+  }
+
+  if (length(segments) == 0L) {
+    stop("No gene-region SB segments found. Check SB result.")
+  }
+
+  # --- Collect ALL SB junction OHs (alien for tile search) ---
+  # Every tile's Level 1 reaction includes all SB junction OHs
+  sb_junction_ohs <- sb_df$boundary_oh[!is.na(sb_df$boundary_oh)]
+  sb_junction_rcs <- vapply(sb_junction_ohs, reverse_complement, character(1),
+    USE.NAMES = FALSE
+  )
+  tile_alien_ohs <- unique(c(base_alien_ohs, sb_junction_ohs, sb_junction_rcs))
+
+  cli::cli_alert_info(paste0(
+    "Per-segment tile search: ", length(segments), " gene segment(s), ",
+    length(sb_junction_ohs), " SB junction OH(s) added to alien set"
+  ))
+
+  # Load lookups needed for post-processing
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+  hf_set <- load_high_fidelity_set()
+
+  # --- Tile each segment ---
+  all_tiles <- list()
+  max_identity_used <- max_identity
+
+  for (seg_idx in seq_along(segments)) {
+    seg <- segments[[seg_idx]]
+    seg_start <- seg$start_nt
+    seg_end <- seg$end_nt
+    seg_len <- seg_end - seg_start + 1L
+    seg_n_codons <- seg_len %/% 3L
+
+    cli::cli_alert_info(paste0(
+      "  Segment ", seg_idx, "/", length(segments),
+      ": nt ", seg_start, "-", seg_end,
+      " (", seg_n_codons, " codons)"
+    ))
+
+    if (seg_n_codons <= max_codons) {
+      # --- Single-tile segment: no DP needed ---
+      seg_tiles <- data.frame(
+        tile_id = 1L,
+        start_codon = 1L,
+        end_codon = seg_n_codons,
+        start_nt = 1L,
+        end_nt = seg_len,
+        n_codons = seg_n_codons,
+        stringsAsFactors = FALSE
+      )
+      cli::cli_alert_info("    Single-tile segment (no DP needed)")
+    } else {
+      # --- Multi-tile segment: run tile DP or greedy ---
+      seg_cds <- substring(cds, seg_start, seg_end)
+
+      if (tile_method == "oogga_two_pass") {
+        seg_tiles <- search_tile_boundaries_oogga(
+          cds = seg_cds,
+          max_mutable_nt = max_mutable_nt,
+          min_mutable_nt = min_mutable_nt,
+          oh_fidelity = oh_fidelity,
+          multi_k = multi_k,
+          dp_k_range = dp_k_range,
+          overlap_codons = overlap_codons,
+          eff_lookup = eff_lookup,
+          alien_ohs = tile_alien_ohs,
+          max_identity = max_identity,
+          beam_width = beam_width
+        )
+      } else {
+        # oogga_greedy
+        seg_tiles <- search_tile_boundaries_greedy_seq(
+          cds = seg_cds,
+          max_mutable_nt = max_mutable_nt,
+          min_mutable_nt = min_mutable_nt,
+          oh_fidelity = oh_fidelity,
+          overlap_codons = overlap_codons,
+          eff_lookup = eff_lookup,
+          alien_ohs = tile_alien_ohs,
+          max_identity = max_identity,
+          beam_width = beam_width
+        )
+      }
+
+      # Track worst-case max_identity used across segments
+      seg_mi <- attr(seg_tiles, "max_identity_used")
+      if (!is.null(seg_mi) && seg_mi > max_identity_used) {
+        max_identity_used <- seg_mi
+      }
+    }
+
+    # --- MC refinement (optional) ---
+    if (mc_refine && nrow(seg_tiles) > 1L) {
+      seg_cds_for_mc <- substring(cds, seg_start, seg_end)
+      seg_tiles <- mc_refine_segment_tiles(
+        tiles = seg_tiles,
+        cds = seg_cds_for_mc,
+        alien_ohs = tile_alien_ohs,
+        oh_fidelity = oh_fidelity,
+        eff_lookup = eff_lookup,
+        overlap_codons = overlap_codons,
+        max_identity = max_identity,
+        n_iterations = mc_iterations,
+        temperature = mc_temperature,
+        cooling_rate = mc_cooling_rate,
+        min_codons = min_codons,
+        max_codons = max_codons
+      )
+    }
+
+    # --- Offset positions to gene-absolute coordinates ---
+    offset_nt <- seg_start - 1L
+    offset_codon <- offset_nt %/% 3L
+    seg_tiles$start_codon <- seg_tiles$start_codon + offset_codon
+    seg_tiles$end_codon <- seg_tiles$end_codon + offset_codon
+    seg_tiles$start_nt <- seg_tiles$start_nt + offset_nt
+    seg_tiles$end_nt <- seg_tiles$end_nt + offset_nt
+
+    all_tiles[[seg_idx]] <- seg_tiles
+  }
+
+  # --- Merge all segment tiles ---
+  tiles <- do.call(rbind, all_tiles)
+  tiles$tile_id <- seq_len(nrow(tiles))
+  rownames(tiles) <- NULL
+
+  # --- Recompute oh1/oh2 from full CDS (critical for correctness) ---
+  # oh2 of non-final segment tiles may need to extend past the SB boundary
+  # into the next segment (overlap_codons). Post-processing from full CDS
+  # handles this correctly.
+  for (i in seq_len(nrow(tiles))) {
+    # oh1: first 4 nt of this tile
+    tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
+    # oh2: extends overlap_codons past tile end, capped at gene end
+    oh2_codon <- min(tiles$end_codon[i] + overlap_codons, total_n_codons)
+    oh2_pos <- oh2_codon * 3L
+    tiles$oh2_seq[i] <- substring(cds, oh2_pos - 3L, oh2_pos)
+
+    tiles$oh1_score[i] <- overhang_score(tiles$oh1_seq[i], fid_lookup, eff_lookup)
+    tiles$oh2_score[i] <- overhang_score(tiles$oh2_seq[i], fid_lookup, eff_lookup)
+    tiles$oh1_in_hf[i] <- tiles$oh1_seq[i] %in% hf_set
+    tiles$oh2_in_hf[i] <- tiles$oh2_seq[i] %in% hf_set
+    tiles$oh1_fidelity[i] <- if (tiles$oh1_seq[i] %in% names(fid_lookup)) {
+      unname(fid_lookup[tiles$oh1_seq[i]])
+    } else {
+      NA_real_
+    }
+    tiles$oh2_fidelity[i] <- if (tiles$oh2_seq[i] %in% names(fid_lookup)) {
+      unname(fid_lookup[tiles$oh2_seq[i]])
+    } else {
+      NA_real_
+    }
+    tiles$tile_seq[i] <- substring(cds, tiles$start_nt[i], tiles$end_nt[i])
+    tiles$boundary_score[i] <- tiles$oh1_score[i] + tiles$oh2_score[i]
+    if (!"boundary_shift" %in% names(tiles)) tiles$boundary_shift <- 0L
+  }
+
+  n_tiles <- nrow(tiles)
+  cli::cli_alert_success(paste0(
+    "Per-segment tile search: ", n_tiles, " tiles across ",
+    length(segments), " segment(s)"
+  ))
+
+  attr(tiles, "max_identity_used") <- max_identity_used
+  tiles
+}
+
+
+#' Refine tile boundaries within a segment using Metropolis-Hastings MC
+#'
+#' Takes an initial tiling from DP/greedy and attempts to improve it by
+#' randomly shifting internal boundary positions. Uses simulated annealing
+#' (exponentially decaying temperature) to escape local optima.
+#'
+#' @param tiles Data frame with tile info (segment-local coordinates)
+#' @param cds Segment CDS sequence (NOT full gene — just this segment)
+#' @param alien_ohs Character vector of all alien overhangs (includes SB junction OHs)
+#' @param oh_fidelity Data frame with overhang + fidelity
+#' @param eff_lookup Named numeric vector (overhang -> efficiency)
+#' @param overlap_codons Integer, overlap codons for oh2 computation
+#' @param max_identity Integer, max positional identity
+#' @param n_iterations Integer, number of MC iterations
+#' @param temperature Numeric, initial temperature for simulated annealing
+#' @param cooling_rate Numeric, temperature multiplier per iteration (0 < rate < 1)
+#' @param min_codons Integer, minimum tile size in codons
+#' @param max_codons Integer, maximum tile size in codons
+#' @return Data frame with tile info (potentially improved boundaries)
+mc_refine_segment_tiles <- function(tiles, cds, alien_ohs,
+                                    oh_fidelity, eff_lookup,
+                                    overlap_codons = 4L,
+                                    max_identity = 2L,
+                                    n_iterations = 1000L,
+                                    temperature = 1.0,
+                                    cooling_rate = 0.995,
+                                    min_codons, max_codons) {
+  n_tiles <- nrow(tiles)
+  if (n_tiles <= 1L) {
+    return(tiles)
+  } # Nothing to refine
+
+  seg_len <- nchar(cds)
+  seg_n_codons <- seg_len %/% 3L
+
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+
+  # Build compatibility matrix
+  compat <- build_oh_compatibility(max_identity)
+
+  # --- Internal boundary positions (between tiles) ---
+  # Boundary at position b means: tile ends at codon b, next starts at b+1
+  boundaries <- tiles$end_codon[-n_tiles] # n_tiles - 1 boundaries
+
+  if (length(boundaries) == 0L) {
+    return(tiles)
+  } # Only 1 tile
+
+  # --- Helper: compute oh1/oh2 at a boundary position ---
+  boundary_ohs <- function(b) {
+    # oh1 of next tile: first 4 nt starting at codon b+1
+    oh1_pos <- b * 3L + 1L
+    oh1 <- substring(cds, oh1_pos, oh1_pos + 3L)
+    # oh2 of current tile: at codon min(b + overlap_codons, seg_n_codons)
+    oh2_codon <- min(b + overlap_codons, seg_n_codons)
+    oh2_pos <- oh2_codon * 3L
+    oh2 <- substring(cds, oh2_pos - 3L, oh2_pos)
+    list(oh1 = oh1, oh2 = oh2)
+  }
+
+  # --- Helper: compute total log-score for all boundaries ---
+  compute_log_score <- function(bounds) {
+    log_score <- 0
+    for (b in bounds) {
+      ohs <- boundary_ohs(b)
+      s1 <- overhang_score(ohs$oh1, fid_lookup, eff_lookup)
+      s2 <- overhang_score(ohs$oh2, fid_lookup, eff_lookup)
+      if (s1 <= 0 || s2 <= 0) {
+        return(-Inf)
+      }
+      log_score <- log_score + log(s1) + log(s2)
+    }
+    log_score
+  }
+
+  # --- Helper: collect all OHs for a boundary set ---
+  all_boundary_ohs <- function(bounds) {
+    ohs <- character(0)
+    for (b in bounds) {
+      pair <- boundary_ohs(b)
+      ohs <- c(ohs, pair$oh1, pair$oh2)
+    }
+    ohs
+  }
+
+  # --- Helper: validate boundary set for all constraints ---
+  validate_boundaries <- function(bounds) {
+    # Tile size constraints
+    starts <- c(1L, bounds + 1L)
+    ends <- c(bounds, seg_n_codons)
+    sizes <- ends - starts + 1L
+    if (any(sizes < min_codons) || any(sizes > max_codons)) {
+      return(FALSE)
+    }
+
+    # Check all OHs for hard filters and collisions
+    all_ohs <- character(0)
+    for (b in bounds) {
+      pair <- boundary_ohs(b)
+      oh1 <- pair$oh1
+      oh2 <- pair$oh2
+      if (nchar(oh1) != 4L || nchar(oh2) != 4L) {
+        return(FALSE)
+      }
+      if (oh1 %in% PALINDROMIC_4NT || oh2 %in% PALINDROMIC_4NT) {
+        return(FALSE)
+      }
+      if (oh1 %in% HOMOPOLYMER_4NT || oh2 %in% HOMOPOLYMER_4NT) {
+        return(FALSE)
+      }
+      # Collision with alien OHs
+      if (!oogga_overlap_pass(oh1, all_ohs, alien_ohs, compat, max_identity)) {
+        return(FALSE)
+      }
+      if (!oogga_overlap_pass(oh2, all_ohs, alien_ohs, compat, max_identity)) {
+        return(FALSE)
+      }
+      # Mutual oh1/oh2 compatibility
+      if (!compat[oh1, oh2]) {
+        return(FALSE)
+      }
+      all_ohs <- c(all_ohs, oh1, oh2)
+    }
+    TRUE
+  }
+
+  # --- MC loop ---
+  current_bounds <- boundaries
+  current_log_score <- compute_log_score(current_bounds)
+  best_bounds <- current_bounds
+  best_log_score <- current_log_score
+  temp <- temperature
+  n_accepted <- 0L
+
+  for (iter in seq_len(n_iterations)) {
+    # Pick a random boundary to shift
+    idx <- sample.int(length(current_bounds), 1L)
+    direction <- sample(c(-1L, 1L), 1L)
+    proposed <- current_bounds
+    proposed[idx] <- proposed[idx] + direction
+
+    # Validate proposed boundaries
+    if (validate_boundaries(proposed)) {
+      proposed_log_score <- compute_log_score(proposed)
+      if (is.finite(proposed_log_score)) {
+        # Metropolis acceptance criterion
+        delta <- proposed_log_score - current_log_score
+        if (delta > 0 || runif(1) < exp(delta / temp)) {
+          current_bounds <- proposed
+          current_log_score <- proposed_log_score
+          n_accepted <- n_accepted + 1L
+          if (current_log_score > best_log_score) {
+            best_bounds <- current_bounds
+            best_log_score <- current_log_score
+          }
+        }
+      }
+    }
+
+    # Cool temperature
+    temp <- temp * cooling_rate
+  }
+
+  cli::cli_alert_info(paste0(
+    "MC refinement: ", n_accepted, "/", n_iterations, " moves accepted. ",
+    "Score: ", round(exp(best_log_score), 4),
+    if (best_log_score > compute_log_score(boundaries)) " (improved)" else " (unchanged)"
+  ))
+
+  # --- Rebuild tile data frame from best boundaries ---
+  tile_starts_codon <- c(1L, best_bounds + 1L)
+  tile_ends_codon <- c(best_bounds, seg_n_codons)
+  tile_starts_nt <- (tile_starts_codon - 1L) * 3L + 1L
+  tile_ends_nt <- tile_ends_codon * 3L
+
+  result <- data.frame(
+    tile_id = seq_len(n_tiles),
+    start_codon = tile_starts_codon,
+    end_codon = tile_ends_codon,
+    start_nt = tile_starts_nt,
+    end_nt = tile_ends_nt,
+    n_codons = tile_ends_codon - tile_starts_codon + 1L,
+    stringsAsFactors = FALSE
+  )
+
+  # oh1/oh2 will be recomputed in tile_segments_oogga() from full CDS,
+  # but add placeholders for structural consistency
+  result$oh1_seq <- NA_character_
+  result$oh2_seq <- NA_character_
+  result$oh1_score <- NA_real_
+  result$oh2_score <- NA_real_
+  result$oh1_in_hf <- NA
+  result$oh2_in_hf <- NA
+  result$oh1_fidelity <- NA_real_
+  result$oh2_fidelity <- NA_real_
+  result$tile_seq <- NA_character_
+  result$boundary_shift <- 0L
+  result$boundary_score <- NA_real_
+
+  for (i in seq_len(n_tiles)) {
+    result$tile_seq[i] <- substring(cds, result$start_nt[i], result$end_nt[i])
+  }
+
+  attr(result, "max_identity_used") <- max_identity
+  result
+}
+
+
+# =============================================================================
 # METHOD A3: oogga_single — Single-pass OOGGA DP on entire gene+cassette
 # =============================================================================
 

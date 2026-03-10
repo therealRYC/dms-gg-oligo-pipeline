@@ -2978,7 +2978,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   # so they bypass the iterative refinement loop entirely.
   # Legacy methods (dp, greedy) use the existing iterative blacklisting.
 
-  is_oogga <- boundary_method %in% c("oogga_two_pass", "oogga_greedy", "oogga_single")
+  is_oogga <- boundary_method %in% c("oogga_two_pass", "oogga_greedy", "oogga_single", "oogga_two_pass_mc")
 
   # Build alien overhangs set — fixed overhangs that OOGGA must avoid
   # (oh3, oh4, oh_L, and all their RCs)
@@ -3003,9 +3003,10 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     # =======================================================================
     # OOGGA collision-aware path (Phases 2+3 combined)
     # =======================================================================
-    # Architecture: SB-FIRST → tiles within, with SB junction OHs as alien.
-    # This ensures SB junction overhangs are known BEFORE tile selection,
-    # and all tile reactions include SB OHs in their collision domain.
+    # Architecture: SB-first → per-segment tile search.
+    # Pass 1: SB DP on full gene+cassette → SB boundaries + junction OHs.
+    # Pass 2: Tile DP/greedy per SB segment, with ALL SB junction OHs as
+    #   alien. Tiles naturally end at SB boundaries → perfect alignment.
     #
     # Collision prevention is built into the DP transition — no iterative
     # blacklisting needed.
@@ -3080,47 +3081,40 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       }
 
       # ---------------------------------------------------------------
-      # Pass 2: Tile boundaries on full CDS
+      # Pass 2: Per-segment tile search
       # ---------------------------------------------------------------
-      # Alien OHs for tiles include SB junction OHs (because every tile's
-      # Level 1 BsmBI reaction reconstructs the full gene, so ALL SB
-      # junction OHs are present in every tile's reaction pot).
-      tile_alien_ohs <- unique(c(
-        alien_ohs, # oh3, oh4, oh_L + RCs
-        sb_junction_ohs,
-        vapply(sb_junction_ohs, reverse_complement, character(1))
+      # Each SB segment gets its own tile DP/greedy. SB junction OHs are
+      # alien to prevent tile OH collisions with SB OHs in the BsmBI
+      # reaction pot. This ensures SB boundaries = tile boundaries →
+      # perfect alignment, no skipping in sb_dp_to_partition().
+      cli::cli_alert_info(paste0(
+        "Pass 2: Per-segment tile search (",
+        if (boundary_method %in% c("oogga_two_pass", "oogga_two_pass_mc")) {
+          "OOGGA DP"
+        } else {
+          "OOGGA greedy"
+        }, ")"
       ))
-
-      if (boundary_method == "oogga_two_pass") {
-        cli::cli_alert_info("Pass 2: Tile boundary search (OOGGA DP)")
-        tiles <- search_tile_boundaries_oogga(
-          cds = cds,
-          max_mutable_nt = max_mutable_nt,
-          min_mutable_nt = min_mutable_nt,
-          oh_fidelity = oh_fidelity,
-          multi_k = multi_k,
-          dp_k_range = dp_k_range,
-          overlap_codons = overlap_codons,
-          eff_lookup = eff_lookup,
-          alien_ohs = tile_alien_ohs,
-          max_identity = oogga_max_identity,
-          beam_width = oogga_beam_width
-        )
-      } else {
-        # oogga_greedy
-        cli::cli_alert_info("Pass 2: Tile boundary search (OOGGA greedy)")
-        tiles <- search_tile_boundaries_greedy_seq(
-          cds = cds,
-          max_mutable_nt = max_mutable_nt,
-          min_mutable_nt = min_mutable_nt,
-          oh_fidelity = oh_fidelity,
-          overlap_codons = overlap_codons,
-          eff_lookup = eff_lookup,
-          alien_ohs = tile_alien_ohs,
-          max_identity = oogga_max_identity,
-          beam_width = oogga_beam_width
-        )
-      }
+      tiles <- tile_segments_oogga(
+        cds = cds,
+        sb_result = sb_result,
+        gene_len = gene_len,
+        max_mutable_nt = max_mutable_nt,
+        min_mutable_nt = min_mutable_nt,
+        oh_fidelity = oh_fidelity,
+        eff_lookup = eff_lookup,
+        base_alien_ohs = alien_ohs, # oh3, oh4, oh_L + RCs
+        max_identity = oogga_max_identity,
+        beam_width = oogga_beam_width,
+        tile_method = if (boundary_method == "oogga_two_pass_mc") "oogga_two_pass" else boundary_method,
+        multi_k = multi_k,
+        dp_k_range = dp_k_range,
+        overlap_codons = overlap_codons,
+        mc_refine = (boundary_method == "oogga_two_pass_mc"),
+        mc_iterations = config$mc_iterations %||% 1000L,
+        mc_temperature = config$mc_temperature %||% 1.0,
+        mc_cooling_rate = config$mc_cooling_rate %||% 0.995
+      )
     }
 
     # Convert SB result to partition format (shared with legacy path)
