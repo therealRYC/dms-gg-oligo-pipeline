@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-10 — Entry 31: Full pipeline DP vs OOGGA benchmark -->
+<!-- Last updated: 2026-03-10 — Entry 32: Git branch cleanup + OOGGA PR -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -1069,4 +1069,29 @@ The SB-first architecture places SB boundaries at arbitrary codon positions (Pas
 **Related commits**:
 - `5fb6c9b` — benchmark: Add 8 configs for full pipeline DP vs OOGGA comparison
 - `de1d9ac` — benchmark: Full pipeline DP vs OOGGA two-pass on 4 genes
+
+---
+
+### 2026-03-10 12:30 — Cleanup: Git Branch Cleanup + OOGGA PR Merge
+
+**Type**: session
+**Status**: completed
+**Tags**: [cleanup, git, branches, worktrees, pr]
+
+**Goal**: Clean up 15+ local branches and 7 worktrees accumulated during the OOGGA rewrite, then merge `260309-oogga-comparison` to main via PR.
+
+**What was done**:
+- Pushed `260308-low-set-fidelity-optimization` (1 unpushed brainstorm commit) for archival
+- Removed 7 git worktrees (benchmark runners + superseded MC method)
+- Deleted 12 local branches (7 merged to main, 5 superseded by OOGGA rewrite)
+- Deleted 11 stale remote branches (old features, Claude-generated, docs)
+- 3 local branches need manual `git branch -D` (hook blocks force-delete): `260308-fixing-sb-first-mc-method`, `260308-tile-dp-comparison`, `260308-tile-mc-comparison`
+- Added .gitignore patterns for large regenerable benchmark outputs (~1.85 GB CSVs/FASTAs)
+- Created PR merging `260309-oogga-comparison` → `main`
+
+**End state**: Local and remote have only `main` + `260309-oogga-comparison`. Single worktree.
+
+**Artifacts**:
+- `Plans/2026-03-10_git-branch-cleanup.md` — full cleanup plan with branch listing
+- `.gitignore` — updated with benchmark output patterns
 
