@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-10 — Entry 32: Git branch cleanup + OOGGA PR -->
+<!-- Last updated: 2026-03-10 — Entry 33: Code review walkthrough -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -1094,4 +1094,20 @@ The SB-first architecture places SB boundaries at arbitrary codon positions (Pas
 **Artifacts**:
 - `Plans/2026-03-10_git-branch-cleanup.md` — full cleanup plan with branch listing
 - `.gitignore` — updated with benchmark output patterns
+
+---
+
+### Entry 33 — 2026-03-10 | review: Full pipeline code review
+
+**Type**: session (ongoing)
+**Status**: in-progress
+**Tags**: [code-review, walkthrough, learning, documentation]
+
+**Goal**: Systematic code review of the entire pipeline — Robert reading each R script in RStudio, asking questions, and building deep understanding of the codebase. Notes drafted in Asana, discussed here.
+
+**Approach**: File-by-file walkthrough. Robert reviews in RStudio, pastes questions/comments here. Claude explains design choices, flags issues, and researches anything unclear. This entry accumulates findings throughout the session.
+
+**Findings**:
+
+*(updated as review progresses)*
 
