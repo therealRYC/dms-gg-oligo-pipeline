@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-10 — Entry 33: Code review walkthrough -->
+<!-- Last updated: 2026-03-12 — Entry 34: BUG-010 fix attempt (shelved) -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -1110,4 +1110,38 @@ The SB-first architecture places SB boundaries at arbitrary codon positions (Pas
 **Findings**:
 
 *(updated as review progresses)*
+
+### Entry 34 — 2026-03-12 | fix (shelved): BUG-010 oh2 recomputation + backward segment extension
+
+**Type**: bugfix (abandoned)
+**Status**: shelved
+**Tags**: [bug-010, oogga, oh2, superblock, backward-extension, failed-experiment]
+**Branch**: `fix/oh2-recomputation-backward-ext` (archived as tag `archive/bug010-oh2-recomputation-backward-ext`)
+
+**Problem being solved**: AKAP11 OOGGA two-pass produces tiles 1-3 with low BsmBI set fidelity (0.75-0.83) due to junction overhang CACA colliding with oh3=CACC (positional identity 3/4). Additionally, post-processing in `tile_segments_oogga()` recomputes oh2 from the full CDS, overwriting the segment-capped oh2 — causing gene sequence corruption (wrong 4 nt) at every SB boundary junction.
+
+**What was implemented** (7 commits):
+1. **Cap oh2 for SB boundary tiles** — SB boundary tiles keep oh2 at the segment end instead of extending past it
+2. **Backward segment extension** — non-first segments extend backward by `overlap_codons * 3` nt, aiming to eliminate the ~2-codon dead zone at SB boundaries
+3. **SB DP oh1_next check** — `precompute_sb_boundary_candidates()` rejects SB positions where oh1_next (from backward extension) is palindromic, homopolymer, in blacklist, or has positional identity >2 with boundary OH
+4. **Junction OH invariant** — `convert_partition_to_splits()` warns if `junction_oh != gene[split_nt-3:split_nt]`
+5. **Alien safety net** — post-processing warns on oh2/alien collisions for interior tiles
+6. **Gene reconstruct QC** — new `qc_gene_reconstruct()` verifies SB junction OHs match gene sequence
+
+**Benchmark results** (all 4 genes passed, tests: FAIL 0 / PASS 7838):
+
+| Gene | Min Fidelity | Mi2 Violations (before → after) |
+|------|-------------|-------------------------------|
+| GRIN2A | 0.9010 | 30 → 11 |
+| AKAP11 | 0.8382 | 131 → 35 |
+| TRIO | 0.8382 | 109 → 79 |
+| GRIN2A_ext | 0.8940 | 38 → 23 |
+
+**Why it was shelved**: The backward extension approach is a band-aid. The real problem is that the SB DP doesn't score overhangs the same way the tile DP does. At each SB boundary, there are TWO overhangs that matter — oh2 of the last tile (at the boundary) and oh1 of the first tile of the next segment (at the start of the overlap). The SB DP currently only picks a boundary position and gets one overhang from the gene sequence; it doesn't jointly score the oh1/oh2 pair. The correct fix is to make the SB DP "two-overhang-aware" — at each candidate boundary position, compute both oh1 and oh2 and score them the same way the tile DP does (fidelity, efficiency, collision checking against all other overhangs in the reaction). This eliminates the dead zone by construction rather than patching it with backward extension. The backward extension also introduced a known limitation: cross-boundary oh1 collisions for the backward-extended first tiles, since their oh1 is gene-determined (not DP-chosen) and never validated against all aliens.
+
+**What to carry forward**:
+- The gene reconstruct QC idea is sound and should be reimplemented in the correct fix
+- The junction OH invariant assertion is useful
+- The core oh2-capping logic (don't extend oh2 past SB boundaries) is correct but should fall out naturally from a properly designed SB DP
+- The investigation in `260310-understanding-oogga-vs-legacy-dp` (Entry 32b) remains relevant: `optimize_split_points()` greedy sub-block splitting is a separate source of low fidelity
 
