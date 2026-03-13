@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-12 — Entry 35: Fix tile overlap + cassette over-splitting -->
+<!-- Last updated: 2026-03-13 — Entry 36: Codebase simplification + oh2 double-extension bug fix -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
