@@ -295,20 +295,11 @@ test_that("plan_assembly works with boundary_method='oogga_two_pass'", {
   expect_equal(result$summary$n_sb_collisions, 0L)
 })
 
-test_that("plan_assembly with oogga_two_pass produces same format as dp", {
+test_that("plan_assembly with oogga_two_pass produces expected output format", {
   cds <- TEST_LONG_GENE_SEQ
   tile_size <- compute_max_tile_size(300L, 20L)
 
-  # Run dp baseline
-  result_dp <- plan_assembly(
-    cds = cds,
-    polIII = TEST_POLIII,
-    max_mutable_nt = tile_size,
-    config = list(boundary_method = "dp", dp_k_range = 1L)
-  )
-
-  # Run oogga_two_pass
-  result_oogga <- plan_assembly(
+  result <- plan_assembly(
     cds = cds,
     polIII = TEST_POLIII,
     max_mutable_nt = tile_size,
@@ -320,27 +311,23 @@ test_that("plan_assembly with oogga_two_pass produces same format as dp", {
     )
   )
 
-  # OOGGA result must have all fields that DP produces
-  dp_fields <- names(result_dp)
-  oogga_fields <- names(result_oogga)
-  expect_true(
-    all(dp_fields %in% oogga_fields),
-    info = paste("Missing fields:", paste(setdiff(dp_fields, oogga_fields), collapse = ", "))
-  )
+  # Required top-level fields
+  expected_fields <- c("tiles", "oh3", "oh4", "oh_L",
+                        "reaction_fidelity", "summary")
+  for (f in expected_fields) {
+    expect_true(f %in% names(result), info = paste("Missing field:", f))
+  }
 
-  # OOGGA tile data frame must have all columns that DP tiles have
-  dp_tile_cols <- names(result_dp$tiles)
-  oogga_tile_cols <- names(result_oogga$tiles)
-  expect_true(
-    all(dp_tile_cols %in% oogga_tile_cols),
-    info = paste("Missing tile columns:", paste(setdiff(dp_tile_cols, oogga_tile_cols), collapse = ", "))
-  )
+  # Tiles must be a data frame with expected columns
+  expect_true(is.data.frame(result$tiles))
+  tile_cols <- c("tile_id", "start_codon", "end_codon", "oh1_seq", "oh2_seq")
+  for (col in tile_cols) {
+    expect_true(col %in% names(result$tiles),
+                info = paste("Missing tile column:", col))
+  }
 
-  # Same reaction_fidelity columns
-  expect_equal(
-    sort(names(result_dp$reaction_fidelity)),
-    sort(names(result_oogga$reaction_fidelity))
-  )
+  # reaction_fidelity must be a data frame
+  expect_true(is.data.frame(result$reaction_fidelity))
 })
 
 

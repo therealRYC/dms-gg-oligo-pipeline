@@ -296,15 +296,25 @@ test_that("TEST_GENE_SEQ full assembly simulation succeeds", {
               info = "Should have simulation results")
   n_pass <- sum(sim_results$pass, na.rm = TRUE)
   n_total <- nrow(sim_results)
+  # Build detailed failure info for diagnostics
+  fail_rows <- sim_results[!sim_results$pass | is.na(sim_results$pass), , drop = FALSE]
+  fail_detail <- if (nrow(fail_rows) > 0) {
+    paste(sprintf("tile=%s variant=%s error=%s mut_gene=%s polIII=%s bc=%s order=%s",
+                  fail_rows$tile_id, fail_rows$variant_id,
+                  fail_rows$error, fail_rows$has_mut_gene,
+                  fail_rows$has_polIII, fail_rows$has_barcode,
+                  fail_rows$correct_order),
+          collapse = " | ")
+  } else { "none" }
   expect_equal(n_pass, n_total,
                info = paste0("All tiles should pass: ", n_pass, "/", n_total,
-                             ". Failures: ",
-                             paste(sim_results$error[!sim_results$pass], collapse = "; ")))
+                             ". Detail: ", fail_detail))
 })
 
-test_that("TEST_LONG_GENE_SEQ assembly simulation detects overhang collisions", {
-  # The long test gene has a repeating 120-nt pattern. Tile overhangs will
-  # repeat, causing ambiguous ligation in the BsaI reaction for some tiles.
+test_that("TEST_LONG_GENE_SEQ assembly simulation runs with collision-aware boundaries", {
+  # With oogga_two_pass, the collision-aware algorithm avoids overhang identity
+  # collisions, so ambiguous ligation errors should not occur. This test verifies
+  # the simulator runs and produces results for a long gene with superblocking.
   cu <- builtin_human_codon_usage()
   cds <- TEST_LONG_GENE_SEQ
 
@@ -336,7 +346,6 @@ test_that("TEST_LONG_GENE_SEQ assembly simulation detects overhang collisions", 
     assembly_plan = plan
   )
 
-  # Try to simulate — expect errors due to repeating overhangs
   sim_results <- simulate_pipeline_assembly(
     oligos = oligos,
     geneblock_result = gb_result,
@@ -349,18 +358,13 @@ test_that("TEST_LONG_GENE_SEQ assembly simulation detects overhang collisions", 
     samples_per_tile = 1L
   )
 
-  # Some tiles should fail (repeating gene with identical overhangs at
-  # different tile boundaries causes ambiguous ligation)
-  n_fail <- sum(!sim_results$pass, na.rm = TRUE)
-  # We expect at least some failures but the exact count depends on
-  # which tile boundaries the DP optimizer chose. Just verify the
-  # simulator ran and produced results.
+  # Simulator should produce results for all sampled tiles
   expect_true(nrow(sim_results) > 0)
 
-  # If there are failures, they should mention "Ambiguous" in the error
-  if (n_fail > 0) {
+  # With collision-aware boundaries, no failures should be due to ambiguous overhangs
+  if (any(!sim_results$pass, na.rm = TRUE)) {
     errors <- sim_results$error[!sim_results$pass & !is.na(sim_results$error)]
-    expect_true(any(grepl("Ambiguous|ambiguous", errors)),
-                info = "Failures should be due to ambiguous overhang collisions")
+    expect_false(any(grepl("Ambiguous|ambiguous", errors)),
+                 info = "OOGGA should prevent ambiguous overhang collisions")
   }
 })
