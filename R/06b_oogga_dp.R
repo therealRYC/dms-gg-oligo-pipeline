@@ -146,11 +146,20 @@ count_positional_identity <- function(oh_a, oh_b) {
 # SB BOUNDARY OOGGA DP (shared by oogga_two_pass and oogga_greedy)
 # =============================================================================
 
-#' Precompute SB boundary candidate scores and overhangs
+#' Precompute SB boundary candidate scores and overhangs (two-OH model)
 #'
 #' For each valid nucleotide position in the full sequence (gene + cassette),
-#' extracts the 4-nt overhang, computes its score, and applies hard filters
-#' (palindromes, homopolymers, blacklist).
+#' computes the boundary overhangs and scores with hard filtering.
+#'
+#' **Gene-region boundaries** (p <= gene_len): Uses the unified two-overhang
+#' model — same formula as tile boundaries in precompute_boundary_scores().
+#' Each boundary has oh1 (first 4 nt past boundary = start of next segment)
+#' and oh2 (4 nt at the overlap extension point). Score is multiplicative:
+#' overhang_score(oh1) * overhang_score(oh2). Both must pass hard filters.
+#'
+#' **Cassette-region boundaries** (p > gene_len): Single-OH model. No tile
+#' overlap in the cassette, so only one junction OH is needed. oh1 = the
+#' junction OH at the split point, oh2 = "" (empty, not used).
 #'
 #' @param full_seq Character, full sequence (gene + cassette)
 #' @param gene_len Integer, length of gene CDS portion
@@ -163,13 +172,19 @@ count_positional_identity <- function(oh_a, oh_b) {
 #'   region (> gene_len) are excluded as candidates. This prevents the SB DP
 #'   from placing boundaries inside a cassette that fits within a single block.
 #'   Default TRUE (allow cassette-region candidates).
-#' @return List with vectors: oh_seq, score, valid (all length = nchar(full_seq))
+#' @param overlap_codons Integer, number of overlap codons for oh2 computation
+#'   in gene-region boundaries (default 4). Must match the tile DP's
+#'   overlap_codons to ensure SB and tile boundaries use the same formula.
+#' @return List with vectors: oh1_seq, oh2_seq, score, valid (all length =
+#'   nchar(full_seq)). oh2_seq is "" for cassette-region positions.
 precompute_sb_boundary_candidates <- function(full_seq, gene_len,
                                               oh_fidelity, eff_lookup,
                                               blacklist_ohs = character(0),
                                               allowed_gene_positions = NULL,
-                                              cassette_needs_splitting = TRUE) {
+                                              cassette_needs_splitting = TRUE,
+                                              overlap_codons = 4L) {
   total_len <- nchar(full_seq)
+  n_codons_gene <- gene_len %/% 3L
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
 
@@ -179,60 +194,105 @@ precompute_sb_boundary_candidates <- function(full_seq, gene_len,
     vapply(blacklist_ohs, reverse_complement, character(1))
   ))
 
-  oh_seq <- character(total_len)
+  oh1_seq <- character(total_len)
+  oh2_seq <- character(total_len)
   scores <- rep(-Inf, total_len)
   valid <- rep(FALSE, total_len)
 
   for (p in 4L:total_len) {
-    oh <- substring(full_seq, p - 3L, p)
-    oh_seq[p] <- oh
-
-    # Hard filters
-    if (oh %in% blacklist_set) next
-    if (oh %in% PALINDROMIC_4NT) next
-    if (oh %in% HOMOPOLYMER_4NT) next
-
-    # Gene-region constraints
     if (p <= gene_len) {
-      if ((p %% 3L) != 0L) next # codon boundary
+      # --- Gene-region: two-overhang model ---
+      # Same formula as tile DP's precompute_boundary_scores()
+      if ((p %% 3L) != 0L) next # codon boundary only
       if (!is.null(allowed_gene_positions) && !(p %in% allowed_gene_positions)) next
+
+      # oh1: first 4 nt past boundary (= oh1 of next segment's first tile)
+      if (p + 4L > total_len) next # need room for oh1
+      oh1 <- substring(full_seq, p + 1L, p + 4L)
+
+      # oh2: 4 nt at overlap extension (= oh2 of prev segment's last tile)
+      # Same as tile DP: oh2_codon = min(b + overlap_codons, n_codons)
+      boundary_codon <- p %/% 3L
+      oh2_codon <- min(boundary_codon + overlap_codons, n_codons_gene)
+      oh2_pos <- oh2_codon * 3L
+      oh2 <- substring(full_seq, oh2_pos - 3L, oh2_pos)
+
+      oh1_seq[p] <- oh1
+      oh2_seq[p] <- oh2
+
+      # Hard filters on BOTH oh1 and oh2
+      if (oh1 %in% blacklist_set || oh2 %in% blacklist_set) next
+      if (oh1 %in% PALINDROMIC_4NT || oh2 %in% PALINDROMIC_4NT) next
+      if (oh1 %in% HOMOPOLYMER_4NT || oh2 %in% HOMOPOLYMER_4NT) next
+
+      # Multiplicative score (same as tile DP)
+      scores[p] <- overhang_score(oh1, fid_lookup, eff_lookup) *
+        overhang_score(oh2, fid_lookup, eff_lookup)
+      valid[p] <- TRUE
+
+    } else {
+      # --- Cassette-region: single-OH model ---
+      # No tile overlap in cassette, only a junction OH for gene block splitting
+
+      # Cassette-region gate: skip when cassette doesn't need splitting
+      if (!cassette_needs_splitting) next
+
+      oh <- substring(full_seq, p - 3L, p)
+      oh1_seq[p] <- oh
+      # oh2_seq[p] stays "" (no second overhang for cassette boundaries)
+
+      # Hard filters
+      if (oh %in% blacklist_set) next
+      if (oh %in% PALINDROMIC_4NT) next
+      if (oh %in% HOMOPOLYMER_4NT) next
+
+      scores[p] <- overhang_score(oh, fid_lookup, eff_lookup)
+      valid[p] <- TRUE
     }
-
-    # Cassette-region gate: skip cassette positions when cassette doesn't
-    # need splitting. The DP's max_block constraint ensures the last block
-    # (gene_tail + intact cassette) still fits within synthesis limits.
-    if (p > gene_len && !cassette_needs_splitting) next
-
-    scores[p] <- overhang_score(oh, fid_lookup, eff_lookup)
-    valid[p] <- TRUE
   }
 
-  list(oh_seq = oh_seq, score = scores, valid = valid)
+  list(oh1_seq = oh1_seq, oh2_seq = oh2_seq, score = scores, valid = valid)
 }
 
 
-#' Solve SB boundary placement with OOGGA collision-aware DP (v2)
+#' Solve SB boundary placement with OOGGA collision-aware DP (v2, two-OH)
 #'
-#' Stores full (score, positions, ohs) tuples for path reconstruction.
-#' Uses beam search: retains top beam_width paths per position to explore
-#' multiple collision-compatible paths (Bellman optimality doesn't hold
-#' because the collision constraint is path-dependent).
+#' Stores full (score, positions, ohs, oh1s, oh2s) tuples for path
+#' reconstruction. Uses beam search: retains top beam_width paths per position
+#' to explore multiple collision-compatible paths (Bellman optimality doesn't
+#' hold because the collision constraint is path-dependent).
 #'
-#' Scoring is multiplicative (OOGGA-faithful): each boundary's
-#' overhang_score(oh) is multiplied into a running product. This matches
-#' OOGGA's ∏(eff_i × fid_i) formulation exactly.
+#' Scoring is multiplicative (OOGGA-faithful): each boundary's score is
+#' multiplied into a running product. For gene-region boundaries, the score
+#' is overhang_score(oh1) * overhang_score(oh2). For cassette-region
+#' boundaries (oh2 = ""), the score is overhang_score(oh1) only.
 #'
-#' @inheritParams oogga_sb_dp_solve_k
+#' **Two-OH model**: Each gene-region boundary contributes 2 overhangs
+#' (oh1 + oh2) to the path's collision set. Cassette-region boundaries
+#' contribute 1 overhang (oh1 only). All overhangs on the path must be
+#' pairwise compatible (no identity or RC collisions).
+#'
+#' @param K Number of internal boundaries (superblocks = K + 1)
+#' @param total_len Total sequence length in nucleotides
+#' @param min_len Minimum segment length in nucleotides
+#' @param max_len Maximum segment length in nucleotides
+#' @param boundary_scores Numeric vector of scores per position
+#' @param boundary_valid Logical vector of valid positions
+#' @param oh1_seq Character vector of oh1 overhang at each position
+#' @param oh2_seq Character vector of oh2 overhang at each position
+#'   ("" for cassette-region positions where no oh2 exists)
+#' @param alien_ohs Character vector of fixed overhangs to avoid
+#' @param compat_matrix Named 256x256 logical compatibility matrix
 #' @param beam_width Integer, max paths to retain per position (default 10).
-#'   Higher = more exploration but slower. beam_width=1 matches OOGGA's
-#'   single-path behavior.
+#'   Higher = more exploration but slower.
 #' @param max_identity Integer, max positional identity for self-palindrome
-#'   check in oogga_overlap_pass (must match compat_matrix's max_identity).
-#' @return List with boundaries (integer vector), total_score, boundary_ohs,
+#'   check (must match compat_matrix's max_identity).
+#' @return List with boundaries, total_score, boundary_oh1s, boundary_oh2s,
 #'   or NULL if no feasible solution
 oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
                                    boundary_scores, boundary_valid,
-                                   oh_seq, alien_ohs, compat_matrix,
+                                   oh1_seq, oh2_seq,
+                                   alien_ohs, compat_matrix,
                                    beam_width = 10L,
                                    max_identity = 2L) {
   if (K == 0L) {
@@ -242,14 +302,14 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
     return(NULL)
   }
 
-  # Each path entry: list(score, positions = int vector, ohs = char vector)
+  # Each path entry: list(score, positions, ohs, oh1s, oh2s)
+  # ohs = all non-empty overhangs on the path (for collision checking)
+  # oh1s/oh2s = per-boundary oh1/oh2 (for output reconstruction)
   # dp_paths[[p]] = list of path entries ending at position p
-  # Score is a multiplicative product of overhang_score values.
 
   # ---- Precompute static (path-independent) checks per position ----
   # Self-palindrome + alien compat are position-dependent but NOT path-
-  # dependent. Computing them once avoids millions of redundant R function
-  # calls inside the DP inner loop.
+  # dependent. Computing them once avoids redundant R function calls.
 
   # Filter alien_ohs to only include valid compat_matrix entries
   valid_ohs <- rownames(compat_matrix)
@@ -259,14 +319,37 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
   has_aliens <- length(alien_ohs) > 0L
   for (p in seq_len(total_len)) {
     if (!boundary_valid[p]) next
-    oh <- oh_seq[p]
-    if (!oh %in% valid_ohs) next
-    # Self-palindrome check
-    rc_oh <- reverse_complement(oh)
-    if (count_positional_identity(oh, rc_oh) > max_identity) next
-    # Alien compat
-    if (has_aliens && !all(compat_matrix[oh, alien_ohs])) next
+    oh1 <- oh1_seq[p]
+    oh2 <- oh2_seq[p]
+    has_oh2 <- nchar(oh2) == 4L
+
+    if (!oh1 %in% valid_ohs) next
+    # Self-palindrome check for oh1
+    rc1 <- reverse_complement(oh1)
+    if (count_positional_identity(oh1, rc1) > max_identity) next
+    # Alien compat for oh1
+    if (has_aliens && !all(compat_matrix[oh1, alien_ohs])) next
+
+    if (has_oh2) {
+      if (!oh2 %in% valid_ohs) next
+      # Self-palindrome check for oh2
+      rc2 <- reverse_complement(oh2)
+      if (count_positional_identity(oh2, rc2) > max_identity) next
+      # Alien compat for oh2
+      if (has_aliens && !all(compat_matrix[oh2, alien_ohs])) next
+      # Mutual compat between oh1 and oh2
+      if (!compat_matrix[oh1, oh2]) next
+    }
+
     static_ok[p] <- TRUE
+  }
+
+  # Helper: collect non-empty OHs for a new boundary at position p
+  # Returns character vector of OHs to add to the path's collision set
+  get_new_ohs <- function(p) {
+    ohs <- oh1_seq[p]
+    if (nchar(oh2_seq[p]) == 4L) ohs <- c(ohs, oh2_seq[p])
+    ohs
   }
 
   # Layer k=1
@@ -277,10 +360,13 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
   if (lo_p <= hi_p) {
     for (p in lo_p:hi_p) {
       if (!static_ok[p]) next
+      new_ohs <- get_new_ohs(p)
       dp_paths[[p]] <- list(list(
-        score = boundary_scores[p], # first boundary: product starts here
+        score = boundary_scores[p],
         positions = p,
-        ohs = oh_seq[p]
+        ohs = new_ohs,
+        oh1s = oh1_seq[p],
+        oh2s = oh2_seq[p]
       ))
     }
   }
@@ -299,7 +385,7 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
 
       for (p in lo_p:hi_p) {
         if (!static_ok[p]) next
-        oh <- oh_seq[p]
+        new_ohs <- get_new_ohs(p)
 
         lo <- max(1L, p - max_len)
         hi <- p - min_len
@@ -310,14 +396,23 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
         for (pp in lo:hi) {
           if (is.null(dp_paths[[pp]])) next
           for (path in dp_paths[[pp]]) {
-            # Vectorized check: oh vs all prior OHs on the path
-            if (!all(compat_matrix[oh, path$ohs])) next
+            # Vectorized check: ALL new OHs vs ALL prior OHs on the path
+            all_compat <- TRUE
+            for (new_oh in new_ohs) {
+              if (!all(compat_matrix[new_oh, path$ohs])) {
+                all_compat <- FALSE
+                break
+              }
+            }
+            if (!all_compat) next
 
-            # Multiplicative scoring: product of overhang scores
+            # Multiplicative scoring
             candidates[[length(candidates) + 1L]] <- list(
               score = path$score * boundary_scores[p],
               positions = c(path$positions, p),
-              ohs = c(path$ohs, oh)
+              ohs = c(path$ohs, new_ohs),
+              oh1s = c(path$oh1s, oh1_seq[p]),
+              oh2s = c(path$oh2s, oh2_seq[p])
             )
           }
         }
@@ -325,8 +420,8 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
         # Beam pruning: keep top beam_width paths by score
         if (length(candidates) > 0L) {
           if (length(candidates) > beam_width) {
-            scores <- vapply(candidates, function(c) c$score, numeric(1))
-            keep_idx <- order(scores, decreasing = TRUE)[seq_len(beam_width)]
+            cand_scores <- vapply(candidates, function(c) c$score, numeric(1))
+            keep_idx <- order(cand_scores, decreasing = TRUE)[seq_len(beam_width)]
             candidates <- candidates[keep_idx]
           }
           dp_paths_new[[p]] <- candidates
@@ -360,15 +455,17 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
   list(
     boundaries = best_path$positions,
     total_score = best_total,
-    boundary_ohs = best_path$ohs
+    boundary_oh1s = best_path$oh1s,
+    boundary_oh2s = best_path$oh2s
   )
 }
 
 
-#' Search SB boundaries using OOGGA collision-aware DP
+#' Search SB boundaries using OOGGA collision-aware DP (two-OH model)
 #'
-#' Multi-K wrapper for oogga_sb_dp_solve_k_v2. Returns the same format as
-#' search_superblock_boundaries_dp() for drop-in replacement.
+#' Multi-K wrapper for oogga_sb_dp_solve_k_v2. Uses the unified two-overhang
+#' model: gene-region boundaries have oh1_sb + oh2_sb (same formula as tile
+#' boundaries), cassette-region boundaries have oh1_sb only.
 #'
 #' @param full_seq Character, full sequence (gene + cassette)
 #' @param gene_len Integer, length of gene CDS portion
@@ -379,12 +476,15 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
 #' @param oh_fidelity Data frame with overhang + fidelity columns
 #' @param eff_lookup Named numeric vector of overhang efficiencies
 #' @param max_identity Integer, max allowed positional identity (default 2)
+#' @param beam_width Integer, beam search width (default 10)
 #' @param allowed_gene_positions Integer vector of valid gene-region positions
 #' @param cassette_blacklist_ohs Character vector of tile oh1/oh2 values to
 #'   exclude from cassette-region SB boundaries
 #' @param cassette_needs_splitting Logical: if FALSE, cassette-region positions
 #'   are excluded as boundary candidates (default TRUE)
-#' @return List with n_superblocks, boundaries (data frame), total_score
+#' @param overlap_codons Integer, overlap codons for two-OH scoring (default 4)
+#' @return List with n_superblocks, boundaries (data frame with oh1_sb/oh2_sb),
+#'   total_score
 search_sb_boundaries_oogga <- function(full_seq, gene_len,
                                        max_block_length = 1800L,
                                        min_block_length = 300L,
@@ -395,7 +495,8 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
                                        beam_width = 10L,
                                        allowed_gene_positions = NULL,
                                        cassette_blacklist_ohs = character(0),
-                                       cassette_needs_splitting = TRUE) {
+                                       cassette_needs_splitting = TRUE,
+                                       overlap_codons = 4L) {
   total_len <- nchar(full_seq)
 
   # Load data if not provided
@@ -405,28 +506,35 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
     eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
   }
 
-  # Edge case: sequence fits in a single block
-  if (total_len <= max_block_length) {
-    return(list(
+  # Helper to build single-SB return value (no boundaries needed)
+  make_single_sb <- function() {
+    list(
       n_superblocks = 1L,
       boundaries = data.frame(
         sb_id = 1L, start_nt = 1L, end_nt = total_len,
-        boundary_oh = NA_character_, boundary_score = NA_real_,
+        oh1_sb = NA_character_, oh2_sb = NA_character_,
+        boundary_score = NA_real_,
         stringsAsFactors = FALSE
       ),
       total_score = 0
-    ))
+    )
   }
 
-  # Build blacklist: alien_ohs + homopolymers + cassette blacklist
+  # Edge case: sequence fits in a single block
+  if (total_len <= max_block_length) {
+    return(make_single_sb())
+  }
+
+  # Build blacklist: alien_ohs + homopolymers
   blacklist <- unique(c(alien_ohs, HOMOPOLYMER_4NT))
 
-  # Precompute candidates (cassette_needs_splitting gates cassette-region positions)
+  # Precompute candidates with two-OH model
   candidates <- precompute_sb_boundary_candidates(
     full_seq, gene_len, oh_fidelity, eff_lookup,
     blacklist_ohs = blacklist,
     allowed_gene_positions = allowed_gene_positions,
-    cassette_needs_splitting = cassette_needs_splitting
+    cassette_needs_splitting = cassette_needs_splitting,
+    overlap_codons = overlap_codons
   )
 
   # Additionally filter cassette-region positions against tile oh1/oh2
@@ -436,7 +544,8 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
       vapply(cassette_blacklist_ohs, reverse_complement, character(1))
     ))
     for (p in which(candidates$valid)) {
-      if (p > gene_len && candidates$oh_seq[p] %in% cass_bl_set) {
+      # Cassette boundaries use oh1_seq only (oh2 is "" for cassette)
+      if (p > gene_len && candidates$oh1_seq[p] %in% cass_bl_set) {
         candidates$valid[p] <- FALSE
         candidates$score[p] <- -Inf
       }
@@ -450,15 +559,7 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
 
   if (n_valid == 0L) {
     cli::cli_alert_warning("No valid SB boundary positions for OOGGA DP.")
-    return(list(
-      n_superblocks = 1L,
-      boundaries = data.frame(
-        sb_id = 1L, start_nt = 1L, end_nt = total_len,
-        boundary_oh = NA_character_, boundary_score = NA_real_,
-        stringsAsFactors = FALSE
-      ),
-      total_score = 0
-    ))
+    return(make_single_sb())
   }
 
   # Build compatibility matrix
@@ -471,30 +572,34 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
 
   cli::cli_alert_info("OOGGA SB DP: K range [{K_min}, {K_max}]")
 
-  # Run DP for each K
+  # Run DP for each K (two-OH model)
   # Multiplicative scoring: compare via geometric mean (score^(1/K))
-  # to normalize across different K values
   best_result <- NULL
   best_geo_mean <- -Inf
 
-  dp_start <- proc.time()
-  for (K in k_range) {
-    result <- oogga_sb_dp_solve_k_v2(
-      K, total_len, min_block_length, max_block_length,
-      candidates$score, candidates$valid, candidates$oh_seq,
-      alien_ohs, compat,
-      beam_width = beam_width,
-      max_identity = max_identity
-    )
-    if (!is.null(result) && result$total_score > 0) {
-      geo_mean <- result$total_score^(1 / K)
-      if (geo_mean > best_geo_mean) {
-        best_geo_mean <- geo_mean
-        best_result <- result
-        best_result$K <- K
+  run_dp <- function(compat_mat, mi) {
+    for (K in k_range) {
+      result <- oogga_sb_dp_solve_k_v2(
+        K, total_len, min_block_length, max_block_length,
+        candidates$score, candidates$valid,
+        candidates$oh1_seq, candidates$oh2_seq,
+        alien_ohs, compat_mat,
+        beam_width = beam_width,
+        max_identity = mi
+      )
+      if (!is.null(result) && result$total_score > 0) {
+        geo_mean <- result$total_score^(1 / K)
+        if (geo_mean > best_geo_mean) {
+          best_geo_mean <<- geo_mean
+          best_result <<- result
+          best_result$K <<- K
+        }
       }
     }
   }
+
+  dp_start <- proc.time()
+  run_dp(compat, max_identity)
   dp_elapsed <- (proc.time() - dp_start)[["elapsed"]]
   cli::cli_alert_info("OOGGA SB DP completed in {round(dp_elapsed, 1)}s.")
 
@@ -504,23 +609,7 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
       "OOGGA SB DP infeasible at max_identity=2. Retrying with max_identity=3."
     )
     compat3 <- build_oh_compatibility(3L)
-    for (K in k_range) {
-      result <- oogga_sb_dp_solve_k_v2(
-        K, total_len, min_block_length, max_block_length,
-        candidates$score, candidates$valid, candidates$oh_seq,
-        alien_ohs, compat3,
-        beam_width = beam_width,
-        max_identity = 3L
-      )
-      if (!is.null(result) && result$total_score > 0) {
-        geo_mean <- result$total_score^(1 / K)
-        if (geo_mean > best_geo_mean) {
-          best_geo_mean <- geo_mean
-          best_result <- result
-          best_result$K <- K
-        }
-      }
-    }
+    run_dp(compat3, 3L)
     if (!is.null(best_result)) {
       cli::cli_alert_info("OOGGA SB DP succeeded at max_identity=3.")
     }
@@ -533,28 +622,28 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
     )
   }
 
-  # Convert to output format matching search_superblock_boundaries_dp()
+  # Convert to output format with two-OH columns
   K <- best_result$K
   boundaries <- best_result$boundaries
-  boundary_ohs <- best_result$boundary_ohs
+  boundary_oh1s <- best_result$boundary_oh1s
+  boundary_oh2s <- best_result$boundary_oh2s
 
   # Build boundaries data frame
   sb_starts <- c(1L, boundaries + 1L)
   sb_ends <- c(boundaries, total_len)
   n_sbs <- K + 1L
 
+  fid_lookup <- setNames(oh_fidelity$fidelity, oh_fidelity$overhang)
+
   bnd_df <- data.frame(
     sb_id = seq_len(n_sbs),
     start_nt = sb_starts,
     end_nt = sb_ends,
-    boundary_oh = c(boundary_ohs, NA_character_),
+    oh1_sb = c(boundary_oh1s, NA_character_),
+    oh2_sb = c(boundary_oh2s, NA_character_),
     boundary_score = c(
       vapply(seq_len(K), function(i) {
-        overhang_score(
-          boundary_ohs[i],
-          setNames(oh_fidelity$fidelity, oh_fidelity$overhang),
-          eff_lookup
-        )
+        candidates$score[boundaries[i]]
       }, numeric(1)),
       NA_real_
     ),
@@ -774,6 +863,11 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
 #' @param alien_ohs Character vector of fixed overhangs to avoid (SB junction
 #'   OHs + oh3 + oh_L + oh4 and their RCs)
 #' @param max_identity Integer, max positional identity (default 2)
+#' @param n_codons_tile Integer or NULL. If provided, overrides the CDS-derived
+#'   codon count for tile boundary placement. Used when CDS is forward-extended
+#'   past a SB boundary: the DP places boundaries within n_codons_tile codons,
+#'   but precompute_boundary_scores() sees the full extended CDS for oh2
+#'   computation at the last boundary.
 #' @return Data frame with tile info (same format as search_tile_boundaries_dp)
 search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
                                          min_mutable_nt = NULL,
@@ -784,9 +878,22 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
                                          eff_lookup = NULL,
                                          alien_ohs = character(0),
                                          max_identity = 2L,
-                                         beam_width = 10L) {
+                                         beam_width = 10L,
+                                         n_codons_tile = NULL) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
+
+  # If n_codons_tile is provided, use it for tile boundary placement.
+  # The CDS may be longer (forward-extended) but boundaries are constrained
+  # to the original segment length. precompute_boundary_scores() still sees
+  # the full CDS for correct oh2 extraction at the last boundary.
+  # n_codons_cds preserves the full CDS length for oh2 computation in
+  # post-processing (last tile's oh2 extends into the overlap zone).
+  n_codons_cds <- n_codons
+  if (!is.null(n_codons_tile)) {
+    stopifnot(n_codons_tile <= n_codons)
+    n_codons <- n_codons_tile
+  }
 
   if (is.null(min_mutable_nt)) {
     min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
@@ -969,8 +1076,12 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   for (i in seq_len(n_tiles)) {
     # oh1: first 4 nt of this tile
     tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
-    # oh2: last 4 nt of this tile (tile already includes overlap extension)
-    oh2_pos <- tiles$end_nt[i]
+    # oh2: extends overlap_codons past tile end, capped at full CDS length
+    # (not n_codons which may be overridden by n_codons_tile).
+    # With forward extension, the last tile's oh2 reaches into the overlap zone
+    # past the SB boundary — this is correct and matches oh2_sb from SB DP.
+    oh2_codon <- min(tiles$end_codon[i] + overlap_codons, n_codons_cds)
+    oh2_pos <- oh2_codon * 3L
     tiles$oh2_seq[i] <- substring(cds, oh2_pos - 3L, oh2_pos)
 
     tiles$oh1_score[i] <- overhang_score(tiles$oh1_seq[i], fid_lookup, eff_lookup)
@@ -1013,7 +1124,7 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
 #'
 #' @param cds Domesticated gene CDS sequence
 #' @param sb_result SB result list from `search_sb_boundaries_oogga()` with
-#'   `$boundaries` data frame (sb_id, start_nt, end_nt, boundary_oh) and
+#'   `$boundaries` data frame (sb_id, start_nt, end_nt, oh1_sb, oh2_sb) and
 #'   `$n_superblocks`
 #' @param gene_len Integer, length of gene CDS in nt
 #' @param max_mutable_nt Integer, max mutable region in nt
