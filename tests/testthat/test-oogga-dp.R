@@ -265,95 +265,6 @@ test_that("search_tile_boundaries_oogga produces collision-free tiles on TEST_LO
 
 
 # =============================================================================
-# OOGGA greedy tests (oogga_greedy)
-# =============================================================================
-
-test_that("search_tile_boundaries_greedy_seq produces collision-free tiles", {
-  oh_fidelity <- load_overhang_fidelity("BsmBI")
-  bsmbi_pw <- load_pairwise_matrix("BsmBI")
-  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
-
-  # TEST_LONG_GENE_SEQ is pre-validated and enzyme-free
-  cds <- TEST_LONG_GENE_SEQ
-  max_mutable_nt <- 243L
-  oh_L <- substring(cds, 1, 4)
-
-  alien_ohs <- unique(c(oh_L, reverse_complement(oh_L)))
-
-  tiles <- search_tile_boundaries_greedy_seq(
-    cds = cds,
-    max_mutable_nt = max_mutable_nt,
-    oh_fidelity = oh_fidelity,
-    overlap_codons = 4L,
-    eff_lookup = eff_lookup,
-    alien_ohs = alien_ohs,
-    max_identity = 2L,
-    beam_width = 1L
-  )
-
-  expect_true(is.data.frame(tiles))
-  expect_true(nrow(tiles) >= 2L)
-
-  # Verify columns exist
-  expect_true("oh2_fidelity" %in% names(tiles))
-  expect_true("tile_seq" %in% names(tiles))
-
-  # Verify boundary OHs are 4 characters
-  expect_true(all(nchar(tiles$oh1_seq) == 4L))
-  expect_true(all(nchar(tiles$oh2_seq) == 4L))
-
-  # Per-tile: oh1 and oh2 within each tile are mutually compatible
-  # Use the effective max_identity (greedy may fall back from 2 to 3)
-  effective_mi <- attr(tiles, "max_identity_used") %||% 2L
-  compat <- build_oh_compatibility(effective_mi)
-  for (i in seq_len(nrow(tiles))) {
-    expect_true(
-      compat[tiles$oh1_seq[i], tiles$oh2_seq[i]],
-      info = paste("Tile", i, "oh1/oh2 collision:", tiles$oh1_seq[i], "vs", tiles$oh2_seq[i])
-    )
-  }
-})
-
-
-# =============================================================================
-# OOGGA single-pass tests (oogga_single)
-# =============================================================================
-
-test_that("search_boundaries_oogga_single produces valid tiles", {
-  oh_fidelity <- load_overhang_fidelity("BsmBI")
-  bsmbi_pw <- load_pairwise_matrix("BsmBI")
-  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
-
-  # TEST_LONG_GENE_SEQ is pre-validated and enzyme-free
-  cds <- TEST_LONG_GENE_SEQ
-  max_mutable_nt <- 243L
-  oh_L <- substring(cds, 1, 4)
-
-  alien_ohs <- unique(c(oh_L, reverse_complement(oh_L)))
-
-  result <- search_boundaries_oogga_single(
-    cds = cds,
-    cassette_seq = TEST_POLIII,
-    max_mutable_nt = max_mutable_nt,
-    max_block_length = 1800L,
-    min_block_length = 300L,
-    oh_fidelity = oh_fidelity,
-    eff_lookup = eff_lookup,
-    alien_ohs = alien_ohs,
-    max_identity = 2L,
-    beam_width = 1L,
-    dp_k_range = 1L,
-    overlap_codons = 4L
-  )
-
-  expect_true(is.list(result))
-  expect_true(is.data.frame(result$tiles))
-  expect_true(nrow(result$tiles) >= 2L)
-  expect_true(!is.null(result$sb_result))
-})
-
-
-# =============================================================================
 # Integration tests: plan_assembly with OOGGA methods
 # =============================================================================
 
@@ -381,49 +292,6 @@ test_that("plan_assembly works with boundary_method='oogga_two_pass'", {
   expect_true(is.data.frame(result$reaction_fidelity))
 
   # Verify zero SB collisions
-  expect_equal(result$summary$n_sb_collisions, 0L)
-})
-
-test_that("plan_assembly works with boundary_method='oogga_greedy'", {
-  cds <- TEST_LONG_GENE_SEQ
-  tile_size <- compute_max_tile_size(300L, 20L)
-
-  result <- plan_assembly(
-    cds = cds,
-    polIII = TEST_POLIII,
-    max_mutable_nt = tile_size,
-    config = list(
-      boundary_method = "oogga_greedy",
-      oogga_max_identity = 2L,
-      oogga_beam_width = 1L
-    )
-  )
-
-  expect_true(is.list(result))
-  expect_true(is.data.frame(result$tiles))
-  expect_true(nrow(result$tiles) >= 2L)
-  expect_equal(result$summary$n_sb_collisions, 0L)
-})
-
-test_that("plan_assembly works with boundary_method='oogga_single'", {
-  cds <- TEST_LONG_GENE_SEQ
-  tile_size <- compute_max_tile_size(300L, 20L)
-
-  result <- plan_assembly(
-    cds = cds,
-    polIII = TEST_POLIII,
-    max_mutable_nt = tile_size,
-    config = list(
-      boundary_method = "oogga_single",
-      oogga_max_identity = 2L,
-      oogga_beam_width = 1L,
-      dp_k_range = 1L
-    )
-  )
-
-  expect_true(is.list(result))
-  expect_true(is.data.frame(result$tiles))
-  expect_true(nrow(result$tiles) >= 2L)
   expect_equal(result$summary$n_sb_collisions, 0L)
 })
 
@@ -475,34 +343,9 @@ test_that("plan_assembly with oogga_two_pass produces same format as dp", {
   )
 })
 
-test_that("plan_assembly with short test gene (no SBs needed) works for all OOGGA methods", {
-  cds <- TEST_GENE_SEQ
-  tile_size <- compute_max_tile_size(300L, 20L)
-
-  for (method in c("oogga_two_pass", "oogga_greedy", "oogga_single")) {
-    result <- plan_assembly(
-      cds = cds,
-      polIII = TEST_POLIII,
-      max_mutable_nt = tile_size,
-      config = list(
-        boundary_method = method,
-        oogga_max_identity = 2L,
-        oogga_beam_width = 1L,
-        dp_k_range = 1L
-      )
-    )
-
-    expect_true(is.list(result), info = paste("Failed for", method))
-    expect_true(is.data.frame(result$tiles), info = paste("Failed for", method))
-    expect_equal(result$summary$n_sb_collisions, 0L,
-      info = paste("Collisions for", method)
-    )
-  }
-})
-
 
 # =============================================================================
-# Per-segment tile search tests (tile_segments_oogga + mc_refine)
+# Per-segment tile search tests (tile_segments_oogga)
 # =============================================================================
 
 test_that("tile_segments_oogga with 1 SB (no splits) returns valid tiles", {
@@ -538,7 +381,6 @@ test_that("tile_segments_oogga with 1 SB (no splits) returns valid tiles", {
     eff_lookup = eff_lookup,
     max_identity = 2L,
     beam_width = 1L,
-    tile_method = "oogga_two_pass",
     multi_k = FALSE,
     dp_k_range = 1L
   )
@@ -593,7 +435,6 @@ test_that("tile_segments_oogga with 2+ gene-region SBs has correct alignment", {
     eff_lookup = eff_lookup,
     max_identity = 2L,
     beam_width = 5L,
-    tile_method = "oogga_two_pass",
     multi_k = TRUE,
     dp_k_range = 3L
   )
@@ -675,8 +516,7 @@ test_that("tile_segments_oogga position offsets are correct", {
     oh_fidelity = oh_fidelity,
     eff_lookup = eff_lookup,
     max_identity = 2L,
-    beam_width = 5L,
-    tile_method = "oogga_greedy"
+    beam_width = 5L
   )
 
   # Verify tile_seq == substring(cds, start_nt, end_nt)
@@ -743,7 +583,6 @@ test_that("tile_segments_oogga single-tile segment produces exactly 1 tile", {
     eff_lookup = eff_lookup,
     max_identity = 2L,
     beam_width = 5L,
-    tile_method = "oogga_two_pass",
     multi_k = TRUE,
     dp_k_range = 3L
   )
@@ -792,7 +631,6 @@ test_that("tile_segments_oogga preserves oh2 overlap past SB boundary", {
     eff_lookup = eff_lookup,
     max_identity = 2L,
     beam_width = 5L,
-    tile_method = "oogga_two_pass",
     overlap_codons = overlap_codons
   )
 
@@ -807,145 +645,6 @@ test_that("tile_segments_oogga preserves oh2 overlap past SB boundary", {
         "Expected:", expected_oh2, "Got:", tiles$oh2_seq[i]
       )
     )
-  }
-})
-
-test_that("mc_refine_segment_tiles produces valid output", {
-  cds <- TEST_LONG_GENE_SEQ
-  gene_len <- nchar(cds)
-  tile_size <- compute_max_tile_size(300L, 20L)
-  oh_fidelity <- load_overhang_fidelity("BsmBI")
-  bsmbi_pw <- load_pairwise_matrix("BsmBI")
-  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
-
-  max_codons <- tile_size %/% 3L
-  min_mutable_nt <- max(81L, tile_size %/% 3L)
-  min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
-  min_codons <- min_mutable_nt %/% 3L
-
-  # Get initial tiling on first ~500 codons (a manageable segment)
-  seg_len <- min(1500L, gene_len)
-  seg_cds <- substring(cds, 1, seg_len)
-  seg_n_codons <- seg_len %/% 3L
-
-  initial_tiles <- search_tile_boundaries_oogga(
-    cds = seg_cds,
-    max_mutable_nt = tile_size,
-    min_mutable_nt = min_mutable_nt,
-    oh_fidelity = oh_fidelity,
-    multi_k = FALSE,
-    dp_k_range = 1L,
-    overlap_codons = 4L,
-    eff_lookup = eff_lookup,
-    max_identity = 2L,
-    beam_width = 1L
-  )
-
-  set.seed(42)
-  refined_tiles <- mc_refine_segment_tiles(
-    tiles = initial_tiles,
-    cds = seg_cds,
-    alien_ohs = character(0),
-    oh_fidelity = oh_fidelity,
-    eff_lookup = eff_lookup,
-    overlap_codons = 4L,
-    max_identity = 2L,
-    n_iterations = 200L,
-    temperature = 1.0,
-    cooling_rate = 0.99,
-    min_codons = min_codons,
-    max_codons = max_codons
-  )
-
-  expect_true(is.data.frame(refined_tiles))
-  expect_equal(nrow(refined_tiles), nrow(initial_tiles))
-
-  # All tile sizes in range
-  expect_true(all(refined_tiles$n_codons >= min_codons))
-  expect_true(all(refined_tiles$n_codons <= max_codons))
-
-  # Tiles cover the full segment
-  expect_equal(refined_tiles$start_codon[1], 1L)
-  expect_equal(refined_tiles$end_codon[nrow(refined_tiles)], seg_n_codons)
-
-  # Tiles are contiguous (no gaps)
-  for (i in seq_len(nrow(refined_tiles) - 1L)) {
-    expect_equal(refined_tiles$start_codon[i + 1L], refined_tiles$end_codon[i] + 1L)
-  }
-})
-
-test_that("mc_refine_segment_tiles respects alien OHs", {
-  cds <- TEST_LONG_GENE_SEQ
-  gene_len <- nchar(cds)
-  tile_size <- compute_max_tile_size(300L, 20L)
-  oh_fidelity <- load_overhang_fidelity("BsmBI")
-  bsmbi_pw <- load_pairwise_matrix("BsmBI")
-  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
-
-  max_codons <- tile_size %/% 3L
-  min_mutable_nt <- max(81L, tile_size %/% 3L)
-  min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
-  min_codons <- min_mutable_nt %/% 3L
-
-  seg_len <- min(1500L, gene_len)
-  seg_cds <- substring(cds, 1, seg_len)
-
-  # Use some alien OHs (simulating SB junction OHs)
-  alien_ohs <- c("AATC", "GATT", "TTAG", "CTAA")
-
-  initial_tiles <- search_tile_boundaries_oogga(
-    cds = seg_cds,
-    max_mutable_nt = tile_size,
-    min_mutable_nt = min_mutable_nt,
-    oh_fidelity = oh_fidelity,
-    multi_k = FALSE,
-    dp_k_range = 1L,
-    eff_lookup = eff_lookup,
-    alien_ohs = alien_ohs,
-    max_identity = 2L,
-    beam_width = 1L
-  )
-
-  set.seed(123)
-  refined_tiles <- mc_refine_segment_tiles(
-    tiles = initial_tiles,
-    cds = seg_cds,
-    alien_ohs = alien_ohs,
-    oh_fidelity = oh_fidelity,
-    eff_lookup = eff_lookup,
-    overlap_codons = 4L,
-    max_identity = 2L,
-    n_iterations = 200L,
-    temperature = 1.0,
-    cooling_rate = 0.99,
-    min_codons = min_codons,
-    max_codons = max_codons
-  )
-
-  # No boundary OH should collide with alien OHs
-  compat <- build_oh_compatibility(2L)
-  seg_n_codons <- nchar(seg_cds) %/% 3L
-
-  for (i in seq_len(nrow(refined_tiles) - 1L)) {
-    b <- refined_tiles$end_codon[i]
-    oh1_pos <- b * 3L + 1L
-    oh1 <- substring(seg_cds, oh1_pos, oh1_pos + 3L)
-    oh2_codon <- min(b + 4L, seg_n_codons)
-    oh2_pos <- oh2_codon * 3L
-    oh2 <- substring(seg_cds, oh2_pos - 3L, oh2_pos)
-
-    for (alien in alien_ohs) {
-      if (nchar(oh1) == 4L && alien %in% rownames(compat)) {
-        expect_true(compat[oh1, alien],
-          info = paste("Boundary", i, "oh1=", oh1, "collides with alien=", alien)
-        )
-      }
-      if (nchar(oh2) == 4L && alien %in% rownames(compat)) {
-        expect_true(compat[oh2, alien],
-          info = paste("Boundary", i, "oh2=", oh2, "collides with alien=", alien)
-        )
-      }
-    }
   }
 })
 
@@ -993,26 +692,3 @@ test_that("plan_assembly with oogga_two_pass on TEST_LONG_GENE_SEQ has no SB ski
   )
 })
 
-test_that("plan_assembly with oogga_two_pass_mc works", {
-  cds <- TEST_GENE_SEQ
-  tile_size <- compute_max_tile_size(300L, 20L)
-
-  result <- plan_assembly(
-    cds = cds,
-    polIII = TEST_POLIII,
-    max_mutable_nt = tile_size,
-    config = list(
-      boundary_method = "oogga_two_pass_mc",
-      oogga_max_identity = 2L,
-      oogga_beam_width = 1L,
-      dp_k_range = 1L,
-      mc_iterations = 100L,
-      mc_temperature = 1.0,
-      mc_cooling_rate = 0.99
-    )
-  )
-
-  expect_true(is.list(result))
-  expect_true(is.data.frame(result$tiles))
-  expect_equal(result$summary$n_sb_collisions, 0L)
-})

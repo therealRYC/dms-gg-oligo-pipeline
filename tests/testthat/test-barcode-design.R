@@ -5,41 +5,10 @@
 # Core helpers
 # ============================================================================
 
-test_that("generate_all_kmers generates correct count", {
-  expect_equal(length(generate_all_kmers(1)), 4)
-  expect_equal(length(generate_all_kmers(2)), 16)
-  expect_equal(length(generate_all_kmers(3)), 64)
-})
-
 test_that("hamming_distance calculates correctly", {
   expect_equal(hamming_distance("AAAA", "AAAA"), 0L)
   expect_equal(hamming_distance("AAAA", "TTTT"), 4L)
   expect_equal(hamming_distance("AACG", "ATCG"), 1L)
-})
-
-test_that("passes_barcode_filters works", {
-  # Good barcode: balanced GC, no homopolymers, no enzyme sites
-  expect_true(passes_barcode_filters("ACGTACGTACGT", c(0.25, 0.75), 4))
-  # Bad GC
-  expect_false(passes_barcode_filters("AAAAAAAAAAAA", c(0.25, 0.75), 4))
-  # Homopolymer
-  expect_false(passes_barcode_filters("AAAAACGTACGT", c(0.25, 0.75), 4))
-})
-
-test_that("barcode filters enforce GC range", {
-  # All A = 0% GC
-  expect_false(passes_barcode_filters("AAAAAAAAAAAA", c(0.25, 0.75), 4))
-  # All G = 100% GC
-  expect_false(passes_barcode_filters("GGGGGGGGGGGG", c(0.25, 0.75), 4))
-  # 50% GC = good
-  expect_true(passes_barcode_filters("ACACACACGTGT", c(0.25, 0.75), 4))
-})
-
-test_that("barcode filters enforce enzyme site exclusion", {
-  # BsaI site (GGTCTC)
-  expect_false(passes_barcode_filters("GGTCTCAACAGT", c(0.0, 1.0), 12))
-  # BsmBI site (CGTCTC)
-  expect_false(passes_barcode_filters("CGTCTCAACAGT", c(0.0, 1.0), 12))
 })
 
 # ============================================================================

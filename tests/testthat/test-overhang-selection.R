@@ -10,41 +10,6 @@ test_that("load_overhang_fidelity BsmBI returns all 256 overhangs", {
   expect_gte(sum(oh_data$fidelity >= 0.80), 30)
 })
 
-test_that("builtin_overhang_fidelity (T4 legacy) returns all 256 overhangs", {
-  oh_data <- builtin_overhang_fidelity()
-  expect_equal(nrow(oh_data), 256)
-  expect_true(all(nchar(oh_data$overhang) == 4))
-  expect_true(all(oh_data$fidelity > 0 & oh_data$fidelity <= 1))
-  # T4 data: at least 60 overhangs should have >= 0.95 fidelity
-  expect_gte(sum(oh_data$fidelity >= 0.95), 60)
-})
-
-test_that("generate_hf_set selects mutually orthogonal overhangs", {
-  oh_data <- load_overhang_fidelity("BsmBI")
-  hf20 <- generate_hf_set(oh_data, 20)
-
-  expect_equal(length(hf20), 20)
-  expect_equal(length(unique(hf20)), 20)
-
-  # No identity or RC collisions
-  for (i in seq_along(hf20)) {
-    for (j in seq_along(hf20)) {
-      if (i != j) {
-        expect_true(hf20[i] != hf20[j])
-        expect_true(hf20[i] != reverse_complement(hf20[j]))
-      }
-    }
-  }
-
-  # All should be from the top tier of BsmBI cycling fidelity
-  fid_lookup <- oh_data$fidelity
-  names(fid_lookup) <- oh_data$overhang
-  fids <- fid_lookup[hf20]
-  # BsmBI cycling fidelities are lower than T4 — top 20 should still be
-  # among the best available (>= 0.50 median under cycling)
-  expect_true(all(fids >= 0.50))
-})
-
 test_that("load_high_fidelity_set returns Potapov Table 1 Set 3 (25 overhangs)", {
   hf_set <- load_high_fidelity_set()
   expect_equal(length(hf_set), 25)
@@ -77,75 +42,6 @@ test_that("load_high_fidelity_set legacy fallback still works", {
   hf_set_legacy <- load_high_fidelity_set("greedy_fidelity_20")
   expect_equal(length(hf_set_legacy), 20)
   expect_true(all(nchar(hf_set_legacy) == 4))
-})
-
-test_that("generate_pairwise_from_fidelity produces correct dimensions", {
-  oh_data <- load_overhang_fidelity("BsmBI")
-  mat <- generate_pairwise_from_fidelity(oh_data)
-
-  expect_equal(nrow(mat), 256)
-  expect_equal(ncol(mat), 256)
-  # Diagonal should be large
-  expect_true(all(diag(mat) > 0))
-  # Fidelity should approximately match
-  for (i in 1:5) { # spot-check a few
-    oh <- oh_data$overhang[i]
-    computed_fid <- mat[oh, oh] / sum(mat[oh, ])
-    expect_equal(computed_fid, oh_data$fidelity[i], tolerance = 0.001)
-  }
-})
-
-test_that("compute_set_fidelity works for small sets", {
-  oh_data <- load_overhang_fidelity("BsmBI")
-  mat <- generate_pairwise_from_fidelity(oh_data)
-
-  # Two overhangs
-  result <- compute_set_fidelity(c("AACA", "CCAA"), mat)
-  expect_true(result$set_fidelity > 0 && result$set_fidelity <= 1)
-  expect_equal(nrow(result$per_overhang), 2)
-
-  # Single overhang
-  result1 <- compute_set_fidelity("AACA", mat)
-  expect_equal(result1$set_fidelity, 1.0)
-})
-
-test_that("search_tile_boundaries returns valid tiles for short gene", {
-  cds <- TEST_GENE_SEQ
-  # Domesticate first
-  cu <- builtin_human_codon_usage()
-  scan_result <- scan_enzyme_sites(cds, "", cu)
-  if (nrow(scan_result$domestication) > 0) {
-    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
-  }
-
-  tile_size <- compute_max_tile_size(300, 12)
-  tiles <- search_tile_boundaries(cds, tile_size)
-
-  # Short gene should have 2 tiles (300nt / 243nt max = 2)
-  expect_true(nrow(tiles) >= 1)
-  # First tile starts at nt 1
-  expect_equal(tiles$start_nt[1], 1)
-  # Last tile ends at gene length
-  expect_equal(tiles$end_nt[nrow(tiles)], nchar(cds))
-  # No gaps between tiles
-  for (i in seq_len(nrow(tiles) - 1)) {
-    expect_equal(tiles$end_nt[i] + 1, tiles$start_nt[i + 1])
-  }
-  # oh1 and oh2 are 4-nt
-  expect_true(all(nchar(tiles$oh1_seq) == 4))
-  expect_true(all(nchar(tiles$oh2_seq) == 4))
-  # Has HF membership columns
-  expect_true("oh1_in_hf" %in% names(tiles))
-  expect_true("oh2_in_hf" %in% names(tiles))
-  expect_true("oh1_fidelity" %in% names(tiles))
-  expect_true("oh2_fidelity" %in% names(tiles))
-})
-
-test_that("search_tile_boundaries returns single tile for small gene", {
-  tiles <- search_tile_boundaries("ATGGCTTAA", 300)
-  expect_equal(nrow(tiles), 1)
-  expect_equal(tiles$start_codon[1], 1)
-  expect_equal(tiles$end_codon[1], 3)
 })
 
 test_that("plan_assembly returns complete assembly plan", {
@@ -181,34 +77,6 @@ test_that("plan_assembly returns complete assembly plan", {
   expect_true(nrow(plan$reaction_fidelity) > 0)
 })
 
-test_that("select_orthogonal_set picks distinct overhangs", {
-  candidates <- c("AAAA", "AATG", "ACAA", "ACTA", "AGGA")
-  selected <- select_orthogonal_set(candidates, 3)
-
-  expect_equal(length(selected), 3)
-  expect_equal(length(unique(selected)), 3)
-
-  # No RC collisions
-  for (i in seq_along(selected)) {
-    for (j in seq_along(selected)) {
-      if (i != j) {
-        expect_true(selected[i] != reverse_complement(selected[j]))
-      }
-    }
-  }
-})
-
-test_that("validate_reaction_overhangs detects non-orthogonal pairs", {
-  # Same overhang twice
-  expect_false(validate_reaction_overhangs(c("AAAA", "AAAA"), "test"))
-
-  # RC collision
-  expect_false(validate_reaction_overhangs(c("ACGT", "ACGT"), "test"))
-
-  # Orthogonal
-  expect_true(validate_reaction_overhangs(c("AAAA", "CCCC"), "test"))
-})
-
 test_that("validate_fixed_overhangs catches invalid inputs", {
   expect_error(validate_fixed_overhangs("AA", "CCCC")) # too short
   expect_error(validate_fixed_overhangs("AAAA", "AAAA")) # identical
@@ -219,16 +87,6 @@ test_that("manual oh3/oh4 are validated by validate_fixed_overhangs", {
   expect_silent(validate_fixed_overhangs("ACTA", "GATA"))
   expect_error(validate_fixed_overhangs("ACTA", "ACTA")) # identical
   expect_error(validate_fixed_overhangs("AAAA", "GATA")) # homopolymer
-})
-
-test_that("tiles from search_tile_boundaries have overhang fidelity columns", {
-  cds <- TEST_GENE_SEQ
-  tiles <- search_tile_boundaries(cds, 150)
-
-  expect_true(all(nchar(tiles$oh1_seq) == 4))
-  expect_true(all(nchar(tiles$oh2_seq) == 4))
-  expect_true(all(!is.na(tiles$oh1_fidelity)))
-  expect_true(all(!is.na(tiles$oh2_fidelity)))
 })
 
 test_that("plan_assembly handles long gene with superblocking", {
@@ -257,189 +115,6 @@ test_that("plan_assembly handles long gene with superblocking", {
   if (nrow(plan$superblock_splits) > 0) {
     expect_true(all(nchar(plan$superblock_splits$junction_oh) == 4))
   }
-})
-
-# =============================================================================
-# DP BOUNDARY SEARCH TESTS
-# =============================================================================
-
-test_that("dp_solve_k returns valid boundaries for simple case (K=1)", {
-  # Create a simple score vector: 20 codons, scores mostly 5, one peak at position 10
-  scores <- rep(5.0, 20)
-  scores[10] <- 15.0
-  valid <- rep(TRUE, 20)
-  valid[c(1, 20)] <- FALSE # endpoints invalid
-
-  result <- dp_solve_k(1L, 20L, 5L, 15L, scores, valid)
-  expect_true(!is.null(result))
-  expect_equal(length(result$boundaries), 1)
-  # Both tiles must be valid size [5, 15]
-  b <- result$boundaries[1]
-  expect_gte(b, 5)
-  expect_lte(20 - b, 15)
-  expect_gte(20 - b, 5)
-  # Should pick position 10 (highest score)
-  expect_equal(b, 10)
-})
-
-test_that("dp_solve_k handles K=2 correctly", {
-  scores <- rep(5.0, 30)
-  scores[10] <- 15.0
-  scores[20] <- 15.0
-  valid <- rep(TRUE, 30)
-
-  result <- dp_solve_k(2L, 30L, 5L, 15L, scores, valid)
-  expect_true(!is.null(result))
-  expect_equal(length(result$boundaries), 2)
-  # 3 tiles, each must be [5, 15] codons
-  b <- result$boundaries
-  expect_gte(b[1], 5)
-  expect_lte(b[2] - b[1], 15)
-  expect_gte(b[2] - b[1], 5)
-  expect_lte(30 - b[2], 15)
-  expect_gte(30 - b[2], 5)
-})
-
-test_that("dp_solve_k returns NULL for impossible K", {
-  scores <- rep(5.0, 10)
-  valid <- rep(TRUE, 10)
-  # K=5 boundaries in 10 codons with min_size=5 is impossible
-  result <- dp_solve_k(5L, 10L, 5L, 8L, scores, valid)
-  expect_null(result)
-})
-
-test_that("precompute_boundary_scores returns correct structure", {
-  cds <- TEST_GENE_SEQ
-  oh_fidelity <- load_overhang_fidelity("BsmBI")
-
-  precomp <- precompute_boundary_scores(cds, oh_fidelity)
-  n_codons <- nchar(cds) %/% 3
-
-  expect_equal(length(precomp$oh1_seq), n_codons)
-  expect_equal(length(precomp$oh2_seq), n_codons)
-  expect_equal(length(precomp$score), n_codons)
-  expect_equal(length(precomp$valid), n_codons)
-
-  # oh_L collision positions should be invalid
-  oh_L <- substring(cds, 1, 4)
-  for (b in seq_len(n_codons - 1)) {
-    if (precomp$oh1_seq[b] == oh_L ||
-      precomp$oh1_seq[b] == reverse_complement(oh_L)) {
-      expect_false(precomp$valid[b])
-    }
-  }
-})
-
-test_that("search_tile_boundaries_dp returns valid tiles for short gene", {
-  cds <- TEST_GENE_SEQ
-  cu <- builtin_human_codon_usage()
-  scan_result <- scan_enzyme_sites(cds, "", cu)
-  if (nrow(scan_result$domestication) > 0) {
-    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
-  }
-
-  tile_size <- compute_max_tile_size(300, 12)
-  tiles <- search_tile_boundaries_dp(cds, tile_size, multi_k = FALSE)
-
-  expect_true(nrow(tiles) >= 1)
-  expect_equal(tiles$start_nt[1], 1)
-  expect_equal(tiles$end_nt[nrow(tiles)], nchar(cds))
-  # Adjacent tiles overlap (default overlap_codons=4)
-  for (i in seq_len(nrow(tiles) - 1)) {
-    expect_true(tiles$start_nt[i + 1] <= tiles$end_nt[i],
-      info = paste("DP tiles", i, "and", i + 1, "should overlap")
-    )
-  }
-  # 4-nt overhangs
-  expect_true(all(nchar(tiles$oh1_seq) == 4))
-  expect_true(all(nchar(tiles$oh2_seq) == 4))
-  # Same column structure as greedy
-  expected_cols <- c(
-    "tile_id", "start_codon", "end_codon", "start_nt", "end_nt",
-    "oh1_seq", "oh2_seq", "oh1_in_hf", "oh2_in_hf",
-    "oh1_fidelity", "oh2_fidelity", "tile_seq", "boundary_shift"
-  )
-  expect_true(all(expected_cols %in% names(tiles)))
-})
-
-test_that("search_tile_boundaries_dp single-tile gene returns 1 tile", {
-  tiles <- search_tile_boundaries_dp("ATGGCTTAA", 300)
-  expect_equal(nrow(tiles), 1)
-  expect_equal(tiles$start_codon[1], 1)
-  expect_equal(tiles$end_codon[1], 3)
-})
-
-test_that("search_tile_boundaries_dp produces same or better results than greedy", {
-  cds <- TEST_LONG_GENE_SEQ
-  cu <- builtin_human_codon_usage()
-  scan_result <- scan_enzyme_sites(cds, "", cu)
-  if (nrow(scan_result$domestication) > 0) {
-    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
-  }
-
-  tile_size <- compute_max_tile_size(300, 12)
-  oh_fidelity <- load_overhang_fidelity("BsmBI")
-
-  tiles_greedy <- search_tile_boundaries(cds, tile_size,
-    oh_fidelity = oh_fidelity
-  )
-  tiles_dp <- search_tile_boundaries_dp(cds, tile_size,
-    oh_fidelity = oh_fidelity, multi_k = TRUE
-  )
-
-  # DP optimizes total boundary score (P_fid * P_eff), and may choose
-  # a different K than greedy. With multi_k=TRUE, compare average boundary
-  # fidelity rather than HF counts (which aren't comparable across different K).
-  greedy_fid <- mean(c(
-    tiles_greedy$oh1_fidelity[-1],
-    tiles_greedy$oh2_fidelity[-nrow(tiles_greedy)]
-  ))
-  dp_fid <- mean(c(
-    tiles_dp$oh1_fidelity[-1],
-    tiles_dp$oh2_fidelity[-nrow(tiles_dp)]
-  ))
-  # DP should find boundaries with reasonable average fidelity.
-  # With multi_k=TRUE, DP may choose more tiles than greedy (diluting avg fidelity),
-  # but total score should still be competitive. Allow 0.10 tolerance.
-  expect_gte(dp_fid, greedy_fid - 0.10,
-    label = paste(
-      "DP avg fidelity", round(dp_fid, 3),
-      "vs greedy", round(greedy_fid, 3)
-    )
-  )
-  # DP should find some HF-matching overhangs (sanity check)
-  dp_hf <- sum(tiles_dp$oh1_in_hf[-1]) + sum(tiles_dp$oh2_in_hf[-nrow(tiles_dp)])
-  expect_gte(dp_hf, 1, label = "DP should find at least 1 HF boundary overhang")
-
-  # Both should cover the entire gene
-  expect_equal(tiles_greedy$start_nt[1], 1)
-  expect_equal(tiles_greedy$end_nt[nrow(tiles_greedy)], nchar(cds))
-  expect_equal(tiles_dp$start_nt[1], 1)
-  expect_equal(tiles_dp$end_nt[nrow(tiles_dp)], nchar(cds))
-})
-
-test_that("plan_assembly uses DP by default", {
-  cu <- builtin_human_codon_usage()
-  cds <- TEST_GENE_SEQ
-  scan_result <- scan_enzyme_sites(cds, "", cu)
-  if (nrow(scan_result$domestication) > 0) {
-    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
-  }
-
-  tile_size <- compute_max_tile_size(300, 12)
-  # Default should use DP
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
-  expect_true(is.list(plan))
-  expect_true(!is.null(plan$tiles))
-  expect_true(!is.null(plan$oh3))
-  expect_true(!is.null(plan$oh4))
-
-  # Greedy fallback should also work
-  plan_g <- plan_assembly(cds, TEST_POLIII, tile_size,
-    config = list(boundary_method = "greedy")
-  )
-  expect_true(is.list(plan_g))
-  expect_true(!is.null(plan_g$tiles))
 })
 
 # =============================================================================
@@ -487,41 +162,6 @@ test_that("oh3 and oh4 are never homopolymers (long gene)", {
 # =============================================================================
 # GLOBAL SUPERBLOCK BOUNDARY TESTS
 # =============================================================================
-
-test_that("dp_solve_superblock_splits returns empty for short region", {
-  cds <- TEST_GENE_SEQ
-  oh_fidelity <- load_overhang_fidelity("BsmBI")
-
-  # Region of 200 nt + 0 extra < 1778 max_sub_length → no splits needed
-  result <- dp_solve_superblock_splits(
-    cds,
-    region_start_nt = 1L, region_end_nt = 200L,
-    max_sub_length = 1778L, extra_content_length = 0L,
-    exclude_ohs = c("ATGG"), oh_fidelity = oh_fidelity
-  )
-  expect_equal(nrow(result), 0)
-})
-
-test_that("dp_solve_superblock_splits finds valid splits for long region", {
-  cds <- TEST_LONG_GENE_SEQ
-  oh_fidelity <- load_overhang_fidelity("BsmBI")
-  gene_len <- nchar(cds)
-
-  # Region: most of the gene (e.g., position 244 to end) + 250 PolIII
-  # Total: ~1857 + 250 = ~2107 > 1778 → needs splitting
-  result <- dp_solve_superblock_splits(
-    cds,
-    region_start_nt = 244L, region_end_nt = gene_len,
-    max_sub_length = 1778L, extra_content_length = nchar(TEST_POLIII),
-    exclude_ohs = c("ATGG", "ACTA"),
-    oh_fidelity = oh_fidelity
-  )
-  expect_true(nrow(result) >= 1, info = "Should need at least 1 split")
-  expect_true(all(nchar(result$junction_oh) == 4))
-  # Junction overhangs should not be in the exclusion set
-  exclude_set <- c("ATGG", "ACTA", reverse_complement("ATGG"), reverse_complement("ACTA"))
-  expect_false(any(result$junction_oh %in% exclude_set))
-})
 
 test_that("global boundaries produce shared splits across tiles", {
   cu <- builtin_human_codon_usage()
@@ -667,7 +307,7 @@ test_that("convert_partition_to_splits round-trips through plan_assembly correct
 
 test_that("compute_overhang_efficiency returns valid P_eff values", {
   oh_data <- load_overhang_fidelity("BsmBI")
-  mat <- generate_pairwise_from_fidelity(oh_data)
+  mat <- load_pairwise_matrix("BsmBI")
   eff <- compute_overhang_efficiency(mat)
 
   # Should have 256 named values
@@ -724,29 +364,35 @@ test_that("overhang_score falls back to 0.5 for unknown overhangs", {
   expect_equal(score, 0.5 * 0.5, tolerance = 1e-6)
 })
 
-test_that("oogga_score legacy alias ignores hf_set and w_hf (BUG-008)", {
-  # oogga_score now delegates to overhang_score, ignoring HF bonus params
-  fid_lookup <- c("AACG" = 0.95, "TGGT" = 0.95)
-  eff_lookup <- c("AACG" = 0.85, "TGGT" = 0.85)
-  hf_set <- c("AACG")
+test_that("precompute_boundary_scores returns correct structure", {
+  cds <- TEST_GENE_SEQ
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
 
-  # Both should score equally despite HF membership — bonus is dropped
-  score_hf <- oogga_score("AACG", fid_lookup, eff_lookup, hf_set, w_hf = 0.5)
-  score_nohf <- oogga_score("TGGT", fid_lookup, eff_lookup, hf_set, w_hf = 0.5)
+  precomp <- precompute_boundary_scores(cds, oh_fidelity)
+  n_codons <- nchar(cds) %/% 3
 
-  expect_equal(score_hf, 0.95 * 0.85, tolerance = 1e-6)
-  expect_equal(score_nohf, 0.95 * 0.85, tolerance = 1e-6)
-  expect_equal(score_hf, score_nohf, tolerance = 1e-6)
+  expect_equal(length(precomp$oh1_seq), n_codons)
+  expect_equal(length(precomp$oh2_seq), n_codons)
+  expect_equal(length(precomp$score), n_codons)
+  expect_equal(length(precomp$valid), n_codons)
+
+  # oh_L collision positions should be invalid
+  oh_L <- substring(cds, 1, 4)
+  for (b in seq_len(n_codons - 1)) {
+    if (precomp$oh1_seq[b] == oh_L ||
+      precomp$oh1_seq[b] == reverse_complement(oh_L)) {
+      expect_false(precomp$valid[b])
+    }
+  }
 })
 
 test_that("precompute_boundary_scores works with eff_lookup parameter", {
-  # Use the test gene from setup.R
   skip_if_not(exists("TEST_GENE_SEQ"), message = "TEST_GENE_SEQ not available")
 
   oh_data <- load_overhang_fidelity("BsmBI")
 
-  # Generate efficiency lookup
-  mat <- generate_pairwise_from_fidelity(oh_data)
+  # Generate efficiency lookup via load_pairwise_matrix
+  mat <- load_pairwise_matrix("BsmBI")
   eff_lookup <- compute_overhang_efficiency(mat)
 
   # Call with eff_lookup (new scoring: P_fid * P_eff)
@@ -773,4 +419,28 @@ test_that("precompute_boundary_scores works with eff_lookup parameter", {
       label = paste("Position", i, ": eff-adjusted score should be <= base score")
     )
   }
+})
+
+test_that("plan_assembly uses oogga_two_pass by default", {
+  cu <- builtin_human_codon_usage()
+  cds <- TEST_GENE_SEQ
+  scan_result <- scan_enzyme_sites(cds, "", cu)
+  if (nrow(scan_result$domestication) > 0) {
+    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
+  }
+
+  tile_size <- compute_max_tile_size(300, 12)
+  # Default should use oogga_two_pass
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  expect_true(is.list(plan))
+  expect_true(!is.null(plan$tiles))
+  expect_true(!is.null(plan$oh3))
+  expect_true(!is.null(plan$oh4))
+
+  # Explicit oogga_two_pass should also work
+  plan_otp <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(boundary_method = "oogga_two_pass")
+  )
+  expect_true(is.list(plan_otp))
+  expect_true(!is.null(plan_otp$tiles))
 })
