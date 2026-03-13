@@ -298,7 +298,14 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
   # 17. SB boundary overhang collisions (critical — causes ambiguous ligation)
   if (!is.null(assembly_plan) && !is.null(assembly_plan$sb_result)) {
     sb_df <- assembly_plan$sb_result$boundaries
-    sb_ohs <- sb_df$boundary_oh[!is.na(sb_df$boundary_oh)]
+    # Two-OH model: collect both oh1_sb and oh2_sb; fall back to boundary_oh
+    if ("oh1_sb" %in% names(sb_df)) {
+      sb_oh1s <- sb_df$oh1_sb[!is.na(sb_df$oh1_sb)]
+      sb_oh2s <- sb_df$oh2_sb[!is.na(sb_df$oh2_sb) & nchar(sb_df$oh2_sb) == 4L]
+      sb_ohs <- unique(c(sb_oh1s, sb_oh2s))
+    } else {
+      sb_ohs <- sb_df$boundary_oh[!is.na(sb_df$boundary_oh)]
+    }
     n_sb_collisions <- 0L
     colliding_ohs <- character(0)
     if (length(sb_ohs) >= 2L) {

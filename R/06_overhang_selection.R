@@ -863,10 +863,12 @@ sb_dp_to_partition <- function(sb_result, tiles, gene_len, polIII_len,
   )
   if (cassette_needs_splitting) {
     for (i in seq_len(n_sb_total - 1L)) {
-      if (sb_df$end_nt[i] > gene_len && !is.na(sb_df$boundary_oh[i])) {
+      # Cassette-region boundaries use oh1_sb (single-OH model; oh2_sb is "" for cassette)
+      cass_oh <- if ("oh1_sb" %in% names(sb_df)) sb_df$oh1_sb[i] else sb_df$boundary_oh[i]
+      if (sb_df$end_nt[i] > gene_len && !is.na(cass_oh)) {
         cassette_splits <- rbind(cassette_splits, data.frame(
           split_pos = sb_df$end_nt[i] - gene_len,
-          junction_oh = sb_df$boundary_oh[i],
+          junction_oh = cass_oh,
           stringsAsFactors = FALSE
         ))
       }
@@ -1090,7 +1092,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
           n_superblocks = 1L,
           boundaries = data.frame(
             sb_id = 1L, start_nt = 1L, end_nt = total_content_len,
-            boundary_oh = NA_character_, boundary_score = NA_real_,
+            oh1_sb = NA_character_, oh2_sb = NA_character_,
+            boundary_score = NA_real_,
             stringsAsFactors = FALSE
           ),
           total_score = 0
@@ -1114,13 +1117,19 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
           eff_lookup = eff_lookup,
           max_identity = oogga_max_identity,
           beam_width = oogga_beam_width,
-          cassette_needs_splitting = cass_needs_split
+          cassette_needs_splitting = cass_needs_split,
+          overlap_codons = overlap_codons
           # NO allowed_gene_positions — SBs at any codon position
         )
-        # Extract the actual junction overhangs from the SB result
-        sb_junction_ohs <- sb_result$boundaries$boundary_oh[
-          !is.na(sb_result$boundaries$boundary_oh)
+        # Extract junction overhangs from SB result (both oh1_sb and oh2_sb)
+        sb_oh1s <- sb_result$boundaries$oh1_sb[
+          !is.na(sb_result$boundaries$oh1_sb)
         ]
+        sb_oh2s <- sb_result$boundaries$oh2_sb[
+          !is.na(sb_result$boundaries$oh2_sb) &
+            nchar(sb_result$boundaries$oh2_sb) == 4L
+        ]
+        sb_junction_ohs <- unique(c(sb_oh1s, sb_oh2s))
       }
 
       # ---------------------------------------------------------------
@@ -1182,20 +1191,30 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       partition_result$n_collisions <- 0L
     }
 
-  # Convert partition to legacy all_splits format for downstream consumers
+  # Convert partition to all_splits format for downstream consumers.
+  # For OOGGA paths, pass sb_result for directional junction OH (two-OH model).
   all_splits <- convert_partition_to_splits(
     partition_result = partition_result,
     tiles = tiles,
     gene_len = gene_len,
-    polIII_len = polIII_len
+    polIII_len = polIII_len,
+    sb_result = sb_result,
+    overlap_codons = overlap_codons
   )
 
   # Summary logging (shared by all paths)
   if (partition_result$n_superblocks > 1L) {
     n_boundaries_sb <- partition_result$n_superblocks - 1L
-    n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
-      seq_len(n_boundaries_sb)
-    ]])
+    # Count HF junctions: use sb_result for two-OH model (both oh1_sb and oh2_sb)
+    if ("oh1_sb" %in% names(sb_result$boundaries)) {
+      sb_bnd <- sb_result$boundaries[seq_len(n_boundaries_sb), , drop = FALSE]
+      n_hf <- sum(sb_bnd$oh1_sb %in% hf_set, na.rm = TRUE) +
+        sum(sb_bnd$oh2_sb %in% hf_set, na.rm = TRUE)
+    } else {
+      n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
+        seq_len(n_boundaries_sb)
+      ]])
+    }
     cass_msg <- if (partition_result$cassette_needs_splitting) {
       " Cassette will be split into fragments."
     } else {
