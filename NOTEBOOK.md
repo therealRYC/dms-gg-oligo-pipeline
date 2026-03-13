@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-13 — Entry 37: Two-OH SB DP model ported to main -->
+<!-- Last updated: 2026-03-13 — Entry 38: Deep dive into OOGGA algorithm -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
