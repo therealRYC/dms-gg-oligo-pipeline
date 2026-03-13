@@ -60,6 +60,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-10 | MC refinement not useful for tile boundaries | 0 moves accepted across all genes; DP at mi=3 is locally optimal under mi=2 MC constraints | Entry 30 |
 | 2026-03-09 | Precompute static checks for OOGGA DP (20-76x speedup) | Position-dependent but path-independent checks (self-palindrome, alien compat) computed once before DP loop | Entry 28 |
 | 2026-03-13 | Two-OH SB DP model: score oh1+oh2 at each SB boundary | Multiplicative scoring of both overhangs at SB junctions; 5 static checks per position; forward CDS extension replaces post-hoc SB-boundary-tile extension | Entry 37 |
+| 2026-03-13 | Increase overlap_codons 4→6 + distance-aware assignment (pending) | 6-codon overlap with 3/3 split gives 5 nt clearance from ligation junctions (vs 2 nt at 4-codon); matches DIMPLE's 4 nt buffer without dead zones | Entry 39 |
 
 ## Entries
 
@@ -1335,4 +1336,124 @@ But `end_codon` already included the overlap extension from the inner DP (`searc
 Deep-read of the original OOGGA Python codebase (`OOGGA.py`, Mukundan S, 2025 preprint). Documented the full DP algorithm: 2D state space (fragment count × position), multiplicative probability-chain scoring (efficiency × fidelity products), identity-based overhang compatibility filter (max 2/4 positional matches including reverse complements), and traceback for top-N solutions. Key observations: the overlap check requires full traceback at every DP cell (performance bottleneck), scoring uses Potapov T4 37°C 18h data by default (vs our BsmBI cycling), and only the best predecessor is kept per cell. See [detailed analysis](Brainstorm/260313_oogga-algorithm-deep-dive.md).
 
 **Next steps**: Compare R reimplementation (`R/06b_oogga_dp.R`) against original Python, and explore scoring model differences (BsmBI cycling vs T4).
+
+---
+
+### 2026-03-13 — Entry 39: Tile boundary clearance — ligation fidelity near overhangs
+
+**Type**: brainstorm
+**Status**: actionable (not yet implemented)
+**Tags**: [tiling, overhang, clearance, ligation-fidelity, dimple, overlap, variant-assignment]
+
+**Question**: How close can a mutated codon be to a BsmBI ligation junction (oh1/oh2 overhang) before ligation efficiency drops? And what can we do about it?
+
+#### Background: DIMPLE's approach
+
+DIMPLE (Coyote-Maestas et al., Genome Biology 2023) observed positional bias for variants near sublibrary boundaries. Their fix: shift BsaI cut sites 4 **nucleotides** outward, creating a WT-only buffer between the overhang and the first mutagenized codon. Confirmed via code: `cutsite_overhang = 4` (nt) and `-overlap` argparse parameter defaults to 4 (nt). The paper's "4 non-mutated residues" means nucleotide residues, not amino acid residues.
+
+After BsaI digestion, a DIMPLE fragment looks like:
+```
+[4nt OH]—[4nt WT buffer]—[mutagenized region]—[4nt WT buffer]—[4nt OH]
+                          ↑                                    ↑
+                     4 nt from junction                   4 nt from junction
+```
+
+DIMPLE can do this because each sublibrary assembles into its own independently PCR-amplified backbone — there's no shared boundary between adjacent sublibraries.
+
+#### Our architecture: shared boundaries prevent DIMPLE-style buffers
+
+In our pipeline, oh2 of tile N and oh1 of tile N+1 are the **same gene coordinates**. Adding a WT buffer zone on one side creates dead space that the other side can't cover:
+
+```
+Tile N:    [...mutable...] [buffer] [oh2]
+Tile N+1:                  [oh1] [buffer] [...mutable...]
+                                 ^^^^^^^^
+                                 dead zone — buffer in BOTH tiles,
+                                 never mutagenized anywhere
+```
+
+This is a fundamental constraint of our shared-boundary Golden Gate architecture vs DIMPLE's independent-backbone design.
+
+#### Current clearance: 2 nt (structural)
+
+With 4-codon overlap, the 4-nt overhang (4 mod 3 = 1) always eats 1 nt into a codon, leaving a 2-nt remnant. Example with junction at codon 250:
+
+```
+Tile N:  ...|251|252| 2̲5̲3̲ |████|     oh2 = nt 759-762 (3rd nt of 253 + all of 254)
+                  ↑   ↑↑  oh2
+              last    2nt remnant (codon 253 can't be mutated —
+            mutable   its 3rd nt is locked in oh2)
+
+Clearance: codon 252 end (nt 756) → oh2 start (nt 759) = 2 nt
+```
+
+This 2-nt clearance is **structural** — increasing `overlap_codons` alone doesn't change it (just shifts which codon number is at the boundary).
+
+#### Solution: increase overlap to 6 codons
+
+With 6-codon overlap and a natural 3/3 split:
+
+```
+Tile N:  ...|251|252|253|  254  | 2̲5̲5̲ |████|
+                     ↑     ^^^    ^^  oh2
+                    last   3nt + 2nt = 5 nt clearance
+                   mutable
+
+Tile N+1:          |████| 2̲5̲2̲ |  253  |254|255|256|...
+                    oh1    ^^    ^^^
+                          2nt + 3nt = 5 nt clearance
+                                  ↑
+                                first mutable
+```
+
+- Tile N mutates codons 251-253 (last mutable codon 253: 5 nt from oh2)
+- Tile N+1 mutates codons 254+ (first mutable codon 254: 5 nt from oh1)
+- No dead zones — codon 253 is mutated by tile N, codon 254 by tile N+1
+- 5 nt clearance exceeds DIMPLE's 4 nt buffer
+- Cost: ~6 nt less step per tile (negligible for most genes)
+
+#### Current code problem: assignment doesn't support this
+
+`assign_variants_to_tiles()` (R/05_tiling.R:176-181) uses a **binary** quality check:
+
+```r
+if (local_start >= 5L && local_end <= tile_len - 4L) {
+  quality <- 2L  # interior
+} else {
+  quality <- 1L  # partial oh overlap
+}
+```
+
+With 6-codon overlap, codons 253-254 are quality 2 (interior) in **both** tiles. Ties broken by first-tile-wins → produces a 4/2 split instead of the optimal 3/3 split. This means codon 253 goes to tile N where it's only 2 nt from oh2, instead of being pushed to the middle of the overlap.
+
+#### Implementation plan
+
+Two changes needed:
+
+1. **Increase `overlap_codons` from 4 to 6** (parameter change in config/defaults)
+
+2. **Distance-aware variant assignment** — replace binary quality with clearance scoring:
+   ```r
+   # Score = distance from nearest junction (oh1 or oh2)
+   clearance <- min(local_start - 4L, tile_len - 4L - local_end)
+   ```
+   Pick the tile with the highest clearance score. This naturally produces the 3/3 split for 6-codon overlap.
+
+**Files to modify**:
+- `R/05_tiling.R`: `assign_variants_to_tiles()` — replace binary quality with clearance score
+- `R/00_config.R`: change `overlap_codons` default from 4 to 6
+- `R/06b_oogga_dp.R`: verify tile DP works correctly with 6-codon overlap (should be fine — it already parameterizes `overlap_codons`)
+- Tests: update expected tile counts for test genes
+
+**Impact on tile count** (theoretical, 300 nt oligos, 243 nt mutable):
+- 4-codon overlap: step = 77 codons
+- 6-codon overlap: step = 75 codons
+- For a 1500-codon gene: 20 tiles → 20 tiles (no change)
+- For a 3000-codon gene: 39 tiles → 40 tiles (1 extra tile)
+
+#### References
+
+- DIMPLE: Coyote-Maestas et al. (2023) Genome Biology 24:36. PMID: 36829228
+- DIMPLE source: github.com/coywil26/DIMPLE — `cutsite_overhang=4`, `-overlap` default=4 (both nucleotides)
+- Potapov et al. (2018) ACS Synth Bio 7:2665 — overhang fidelity data
 
