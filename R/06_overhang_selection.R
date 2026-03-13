@@ -799,18 +799,15 @@ sb_dp_to_partition <- function(sb_result, tiles, gene_len, polIII_len,
 }
 
 # =============================================================================
-# MASTER ASSEMBLY PLANNER (Hybrid: Tile-First DP + Constrained SB DP)
+# MASTER ASSEMBLY PLANNER (OOGGA Two-Pass)
 # =============================================================================
 
 #' Plan the complete assembly: tiles, overhangs, and superblock splits
 #'
-#' Hybrid assembly planner combining tile-first DP (natural overhang diversity)
-#' with constrained SB DP (optimal segment sizing + cassette splitting).
+#' OOGGA two-pass assembly planner with collision-aware DP:
 #'
-#'   Pass 1 (Phase 1-3): Tile DP on gene only → tile boundaries with diverse oh2s
 #'   Phase 1: Select fixed overhangs (oh_L, oh3, oh4) — constrained first
-#'   Phase 2: Tile boundary DP (blacklists oh3/oh4), with SB-aware refinement
-#'   Phase 3: SB DP on gene+cassette, constrained to tile boundary positions
+#'   Phase 2+3: OOGGA SB DP → per-segment tile DP (collision-aware)
 #'   Phase 4: Per-reaction pairwise validation
 #'
 #' @param cds Domesticated gene sequence
@@ -1058,7 +1055,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         overlap_codons = overlap_codons
       )
 
-    # Convert SB result to partition format (shared with legacy path)
+    # Convert SB result to partition format
     n_tiles <- nrow(tiles)
     full_seq_for_sb <- paste0(cds, cassette_seq)
     total_content_len <- nchar(full_seq_for_sb)
