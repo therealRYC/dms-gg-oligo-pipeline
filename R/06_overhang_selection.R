@@ -2785,23 +2785,28 @@ sb_dp_to_partition <- function(sb_result, tiles, gene_len, polIII_len,
   )
 
   # --- Extract cassette-region SB boundaries ---
+  # Defense-in-depth: only extract cassette splits when the cassette actually
+  # needs splitting. With the upstream fix in precompute_sb_boundary_candidates(),
+  # the DP shouldn't place cassette-region boundaries when cassette fits in one
+  # block — but this guard catches any edge cases.
+  max_sub_content <- max_block_length - block_overhead
+  cassette_needs_splitting <- polIII_len > max_sub_content
+
   cassette_splits <- data.frame(
     split_pos = integer(0), junction_oh = character(0),
     stringsAsFactors = FALSE
   )
-  for (i in seq_len(n_sb_total - 1L)) {
-    if (sb_df$end_nt[i] > gene_len && !is.na(sb_df$boundary_oh[i])) {
-      cassette_splits <- rbind(cassette_splits, data.frame(
-        split_pos = sb_df$end_nt[i] - gene_len,
-        junction_oh = sb_df$boundary_oh[i],
-        stringsAsFactors = FALSE
-      ))
+  if (cassette_needs_splitting) {
+    for (i in seq_len(n_sb_total - 1L)) {
+      if (sb_df$end_nt[i] > gene_len && !is.na(sb_df$boundary_oh[i])) {
+        cassette_splits <- rbind(cassette_splits, data.frame(
+          split_pos = sb_df$end_nt[i] - gene_len,
+          junction_oh = sb_df$boundary_oh[i],
+          stringsAsFactors = FALSE
+        ))
+      }
     }
   }
-
-  # Determine if cassette needs splitting
-  max_sub_content <- max_block_length - block_overhead
-  cassette_needs_splitting <- polIII_len > max_sub_content
 
   if (nrow(cassette_splits) > 0) {
     cli::cli_alert_info(paste0(
@@ -3062,6 +3067,11 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         cli::cli_alert_info("Gene+cassette fits in 1 block — no SB splits needed.")
       } else {
         cli::cli_alert_info("Pass 1: SB boundary search (OOGGA DP)")
+        # Determine if cassette needs splitting BEFORE DP so we can constrain
+        # the search space. When cassette fits in one block, exclude cassette
+        # positions to prevent unnecessary splitting.
+        max_sub_content <- max_block_length - block_overhead
+        cass_needs_split <- polIII_len > max_sub_content
         sb_result <- search_sb_boundaries_oogga(
           full_seq = full_seq_for_sb,
           gene_len = gene_len,
@@ -3071,7 +3081,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
           oh_fidelity = oh_fidelity,
           eff_lookup = eff_lookup,
           max_identity = oogga_max_identity,
-          beam_width = oogga_beam_width
+          beam_width = oogga_beam_width,
+          cassette_needs_splitting = cass_needs_split
           # NO allowed_gene_positions — SBs at any codon position
         )
         # Extract the actual junction overhangs from the SB result

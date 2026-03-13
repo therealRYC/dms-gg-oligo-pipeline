@@ -159,11 +159,16 @@ count_positional_identity <- function(oh_a, oh_b) {
 #' @param blacklist_ohs Character vector of overhangs to exclude
 #' @param allowed_gene_positions Integer vector of valid gene-region boundary
 #'   positions. NULL = allow all codon-aligned positions.
+#' @param cassette_needs_splitting Logical: if FALSE, positions in the cassette
+#'   region (> gene_len) are excluded as candidates. This prevents the SB DP
+#'   from placing boundaries inside a cassette that fits within a single block.
+#'   Default TRUE (allow cassette-region candidates).
 #' @return List with vectors: oh_seq, score, valid (all length = nchar(full_seq))
 precompute_sb_boundary_candidates <- function(full_seq, gene_len,
                                               oh_fidelity, eff_lookup,
                                               blacklist_ohs = character(0),
-                                              allowed_gene_positions = NULL) {
+                                              allowed_gene_positions = NULL,
+                                              cassette_needs_splitting = TRUE) {
   total_len <- nchar(full_seq)
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
@@ -192,6 +197,11 @@ precompute_sb_boundary_candidates <- function(full_seq, gene_len,
       if ((p %% 3L) != 0L) next # codon boundary
       if (!is.null(allowed_gene_positions) && !(p %in% allowed_gene_positions)) next
     }
+
+    # Cassette-region gate: skip cassette positions when cassette doesn't
+    # need splitting. The DP's max_block constraint ensures the last block
+    # (gene_tail + intact cassette) still fits within synthesis limits.
+    if (p > gene_len && !cassette_needs_splitting) next
 
     scores[p] <- overhang_score(oh, fid_lookup, eff_lookup)
     valid[p] <- TRUE
@@ -513,6 +523,8 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
 #' @param allowed_gene_positions Integer vector of valid gene-region positions
 #' @param cassette_blacklist_ohs Character vector of tile oh1/oh2 values to
 #'   exclude from cassette-region SB boundaries
+#' @param cassette_needs_splitting Logical: if FALSE, cassette-region positions
+#'   are excluded as boundary candidates (default TRUE)
 #' @return List with n_superblocks, boundaries (data frame), total_score
 search_sb_boundaries_oogga <- function(full_seq, gene_len,
                                        max_block_length = 1800L,
@@ -523,7 +535,8 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
                                        max_identity = 2L,
                                        beam_width = 10L,
                                        allowed_gene_positions = NULL,
-                                       cassette_blacklist_ohs = character(0)) {
+                                       cassette_blacklist_ohs = character(0),
+                                       cassette_needs_splitting = TRUE) {
   total_len <- nchar(full_seq)
 
   # Load data if not provided
@@ -549,11 +562,12 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
   # Build blacklist: alien_ohs + homopolymers + cassette blacklist
   blacklist <- unique(c(alien_ohs, HOMOPOLYMER_4NT))
 
-  # Precompute candidates
+  # Precompute candidates (cassette_needs_splitting gates cassette-region positions)
   candidates <- precompute_sb_boundary_candidates(
     full_seq, gene_len, oh_fidelity, eff_lookup,
     blacklist_ohs = blacklist,
-    allowed_gene_positions = allowed_gene_positions
+    allowed_gene_positions = allowed_gene_positions,
+    cassette_needs_splitting = cassette_needs_splitting
   )
 
   # Additionally filter cassette-region positions against tile oh1/oh2
