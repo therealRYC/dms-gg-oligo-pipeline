@@ -1173,8 +1173,14 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
   }
 
   # --- Collect ALL SB junction OHs (alien for tile search) ---
-  # Every tile's Level 1 reaction includes all SB junction OHs
-  sb_junction_ohs <- sb_df$boundary_oh[!is.na(sb_df$boundary_oh)]
+  # Two-OH model: each gene-region SB boundary has oh1_sb + oh2_sb.
+  # Both participate in BsmBI reactions, so both go into the alien set.
+  # The first tile of each segment has oh1 = oh1_sb by construction,
+  # and the last tile has oh2 = oh2_sb by construction. Adding them
+  # to the alien set prevents internal tile boundaries from colliding.
+  sb_oh1_seqs <- sb_df$oh1_sb[!is.na(sb_df$oh1_sb)]
+  sb_oh2_seqs <- sb_df$oh2_sb[!is.na(sb_df$oh2_sb) & nchar(sb_df$oh2_sb) == 4L]
+  sb_junction_ohs <- unique(c(sb_oh1_seqs, sb_oh2_seqs))
   sb_junction_rcs <- vapply(sb_junction_ohs, reverse_complement, character(1),
     USE.NAMES = FALSE
   )
@@ -1182,7 +1188,8 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
 
   cli::cli_alert_info(paste0(
     "Per-segment tile search: ", length(segments), " gene segment(s), ",
-    length(sb_junction_ohs), " SB junction OH(s) added to alien set"
+    length(sb_junction_ohs), " SB junction OH(s) added to alien set ",
+    "(", length(sb_oh1_seqs), " oh1 + ", length(sb_oh2_seqs), " oh2)"
   ))
 
   # Load lookups needed for post-processing
@@ -1206,6 +1213,19 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
       ": nt ", seg_start, "-", seg_end,
       " (", seg_n_codons, " codons)"
     ))
+
+    # --- Forward extension for non-last segments ---
+    # Non-last gene segments get their CDS extended forward by overlap_codons*3 nt
+    # so the last tile's oh2 naturally extends past the SB boundary into the
+    # overlap zone. This is the unified two-OH model: SB boundaries and tile
+    # boundaries use the same 4-codon overlap formula.
+    is_last_gene_seg <- (seg_idx == length(segments))
+    if (!is_last_gene_seg) {
+      seg_end_extended <- min(seg_end + overlap_codons * 3L, gene_len)
+    } else {
+      seg_end_extended <- seg_end
+    }
+    seg_cds_extended <- substring(cds, seg_start, seg_end_extended)
 
     if (seg_n_codons <= max_codons) {
       # --- Single-tile segment: no DP needed ---
@@ -1233,10 +1253,12 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
       cli::cli_alert_info("    Single-tile segment (no DP needed)")
     } else {
       # --- Multi-tile segment: run tile DP or greedy ---
-      seg_cds <- substring(cds, seg_start, seg_end)
-
+      # Pass extended CDS for oh2 computation, but n_codons_tile constrains
+      # tile boundaries to the original segment length. The extended CDS
+      # provides nucleotides for oh2 of the last tile to extend into the
+      # overlap zone (codons past the SB boundary).
       seg_tiles <- search_tile_boundaries_oogga(
-          cds = seg_cds,
+          cds = seg_cds_extended,
           max_mutable_nt = max_mutable_nt,
           min_mutable_nt = min_mutable_nt,
           oh_fidelity = oh_fidelity,
@@ -1246,7 +1268,8 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
           eff_lookup = eff_lookup,
           alien_ohs = tile_alien_ohs,
           max_identity = max_identity,
-          beam_width = beam_width
+          beam_width = beam_width,
+          n_codons_tile = seg_n_codons
         )
 
       # Track worst-case max_identity used across segments
@@ -1272,36 +1295,19 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
   tiles$tile_id <- seq_len(nrow(tiles))
   rownames(tiles) <- NULL
 
-  # --- Recompute oh1/oh2 from full CDS (critical for correctness) ---
-  # The inner DP operates on segment-local CDS, so positions need recomputing
-  # from the full CDS after offset adjustment. Additionally, tiles at SB
-  # boundaries need their end extended past the SB boundary by overlap_codons
-  # so their oh2 doesn't collide with the SB junction overhang (which is in
-  # the alien set for every tile's Level 1 reaction).
-  #
-  # For internal tiles: oh2 = last 4 nt of the tile (end_codon already
-  # includes the overlap extension from the inner DP).
-  # For SB-boundary tiles (last tile of non-final segments): extend end_codon
-  # and end_nt by overlap_codons past the SB boundary into the next segment.
-  sb_boundary_nts <- sb_df$end_nt[!is.na(sb_df$boundary_oh) &
-                                   sb_df$end_nt <= gene_len]
-
+  # --- Populate oh1/oh2 metadata from full gene CDS ---
+  # This loop fills tile metadata (oh sequences, scores, fidelity) that the
+  # tile DP doesn't always populate (e.g., single-tile segments have oh1=NA).
+  # With forward extension, the last tile's oh2 naturally extends past the SB
+  # boundary into the overlap zone (= oh2_sb scored by SB DP). The min() cap
+  # uses total_n_codons (full gene length), correctly handling gene start (ATG)
+  # and gene end (stop codon) boundaries.
   for (i in seq_len(nrow(tiles))) {
     # oh1: first 4 nt of this tile
     tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
-
-    # Check if this tile ends at an SB boundary (needs extension past it)
-    is_sb_boundary_tile <- tiles$end_nt[i] %in% sb_boundary_nts
-    if (is_sb_boundary_tile) {
-      # Extend end_codon/end_nt past the SB boundary by overlap_codons
-      extended_codon <- min(tiles$end_codon[i] + overlap_codons, total_n_codons)
-      tiles$end_codon[i] <- extended_codon
-      tiles$end_nt[i] <- extended_codon * 3L
-      tiles$n_codons[i] <- tiles$end_codon[i] - tiles$start_codon[i] + 1L
-    }
-
-    # oh2: last 4 nt of this tile
-    oh2_pos <- tiles$end_nt[i]
+    # oh2: extends overlap_codons past tile end, capped at full gene length
+    oh2_codon <- min(tiles$end_codon[i] + overlap_codons, total_n_codons)
+    oh2_pos <- oh2_codon * 3L
     tiles$oh2_seq[i] <- substring(cds, oh2_pos - 3L, oh2_pos)
 
     tiles$oh1_score[i] <- overhang_score(tiles$oh1_seq[i], fid_lookup, eff_lookup)
