@@ -1162,15 +1162,35 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
   rownames(tiles) <- NULL
 
   # --- Recompute oh1/oh2 from full CDS (critical for correctness) ---
-  # oh2 of non-final segment tiles may need to extend past the SB boundary
-  # into the next segment (overlap_codons). Post-processing from full CDS
-  # handles this correctly.
+  # The inner DP operates on segment-local CDS, so positions need recomputing
+  # from the full CDS after offset adjustment. Additionally, tiles at SB
+  # boundaries need their end extended past the SB boundary by overlap_codons
+  # so their oh2 doesn't collide with the SB junction overhang (which is in
+  # the alien set for every tile's Level 1 reaction).
+  #
+  # For internal tiles: oh2 = last 4 nt of the tile (end_codon already
+  # includes the overlap extension from the inner DP).
+  # For SB-boundary tiles (last tile of non-final segments): extend end_codon
+  # and end_nt by overlap_codons past the SB boundary into the next segment.
+  sb_boundary_nts <- sb_df$end_nt[!is.na(sb_df$boundary_oh) &
+                                   sb_df$end_nt <= gene_len]
+
   for (i in seq_len(nrow(tiles))) {
     # oh1: first 4 nt of this tile
     tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
-    # oh2: extends overlap_codons past tile end, capped at gene end
-    oh2_codon <- min(tiles$end_codon[i] + overlap_codons, total_n_codons)
-    oh2_pos <- oh2_codon * 3L
+
+    # Check if this tile ends at an SB boundary (needs extension past it)
+    is_sb_boundary_tile <- tiles$end_nt[i] %in% sb_boundary_nts
+    if (is_sb_boundary_tile) {
+      # Extend end_codon/end_nt past the SB boundary by overlap_codons
+      extended_codon <- min(tiles$end_codon[i] + overlap_codons, total_n_codons)
+      tiles$end_codon[i] <- extended_codon
+      tiles$end_nt[i] <- extended_codon * 3L
+      tiles$n_codons[i] <- tiles$end_codon[i] - tiles$start_codon[i] + 1L
+    }
+
+    # oh2: last 4 nt of this tile
+    oh2_pos <- tiles$end_nt[i]
     tiles$oh2_seq[i] <- substring(cds, oh2_pos - 3L, oh2_pos)
 
     tiles$oh1_score[i] <- overhang_score(tiles$oh1_seq[i], fid_lookup, eff_lookup)

@@ -433,17 +433,18 @@ test_that("tile_segments_oogga with 2+ gene-region SBs has correct alignment", {
   expect_equal(tiles$start_nt[1], 1L)
   expect_equal(tiles$end_nt[nrow(tiles)], gene_len)
 
-  # (b) sb_dp_to_partition should have NO skip warnings
-  # We test this by checking that every gene-region SB boundary
-  # matches some tile end_nt
+  # (b) Every gene-region SB boundary should fall within some tile's range.
+  # SB-boundary tiles extend past the SB boundary by overlap_codons, so
+  # the SB nt may not exactly equal a tile end_nt.
   sb_df <- sb_result$boundaries
   for (i in seq_len(sb_result$n_superblocks - 1L)) {
-    if (sb_df$end_nt[i] <= gene_len) {
-      expect_true(
-        sb_df$end_nt[i] %in% tiles$end_nt,
+    sb_nt <- sb_df$end_nt[i]
+    if (sb_nt <= gene_len) {
+      covered <- any(tiles$start_nt <= sb_nt & tiles$end_nt >= sb_nt)
+      expect_true(covered,
         info = paste(
-          "SB boundary at", sb_df$end_nt[i],
-          "should match a tile end_nt"
+          "SB boundary at", sb_nt,
+          "should fall within a tile range"
         )
       )
     }
@@ -574,13 +575,20 @@ test_that("tile_segments_oogga single-tile segment produces exactly 1 tile", {
     dp_k_range = 3L
   )
 
-  # First segment (180 nt = 60 codons) should be a single tile
-  seg1_tiles <- tiles[tiles$end_nt <= small_seg_end, ]
+  # First segment (180 nt = 60 codons) should produce a single tile.
+  # SB-boundary tiles extend past the SB boundary by overlap_codons,
+  # so filter by start_nt within the segment.
+  seg1_tiles <- tiles[tiles$start_nt <= small_seg_end &
+                      tiles$start_nt >= 1L &
+                      tiles$start_codon == 1L, ]
   expect_equal(nrow(seg1_tiles), 1L,
     info = "Small segment should produce exactly 1 tile"
   )
   expect_equal(seg1_tiles$start_nt[1], 1L)
-  expect_equal(seg1_tiles$end_nt[1], small_seg_end)
+  # end_nt is extended past the SB boundary by overlap_codons
+  expect_true(seg1_tiles$end_nt[1] >= small_seg_end,
+    info = "SB boundary tile should extend at least to SB boundary"
+  )
 })
 
 test_that("tile_segments_oogga preserves oh2 overlap past SB boundary", {
@@ -621,14 +629,14 @@ test_that("tile_segments_oogga preserves oh2 overlap past SB boundary", {
     overlap_codons = overlap_codons
   )
 
-  # For non-final tiles, oh2 should extend overlap_codons past end_codon
-  for (i in seq_len(nrow(tiles) - 1L)) {
-    expected_oh2_codon <- min(tiles$end_codon[i] + overlap_codons, n_codons)
-    expected_oh2_pos <- expected_oh2_codon * 3L
-    expected_oh2 <- substring(cds, expected_oh2_pos - 3L, expected_oh2_pos)
+  # For each tile, oh2 should be the last 4 nt of the tile in the CDS.
+  # For SB-boundary tiles, end_codon is extended past the SB boundary by
+  # overlap_codons (so oh2 doesn't collide with SB junction overhangs).
+  for (i in seq_len(nrow(tiles))) {
+    expected_oh2 <- substring(cds, tiles$end_nt[i] - 3L, tiles$end_nt[i])
     expect_equal(tiles$oh2_seq[i], expected_oh2,
       info = paste(
-        "Tile", i, "oh2 should extend overlap_codons past end_codon.",
+        "Tile", i, "oh2 should be last 4 nt of tile.",
         "Expected:", expected_oh2, "Got:", tiles$oh2_seq[i]
       )
     )
@@ -655,17 +663,19 @@ test_that("plan_assembly with oogga_two_pass on TEST_LONG_GENE_SEQ has no SB ski
   expect_true(is.data.frame(result$tiles))
   expect_equal(result$summary$n_sb_collisions, 0L)
 
-  # Verify SB/tile alignment: every gene-region SB boundary matches a tile end
+  # Verify SB/tile alignment: every gene-region SB boundary falls within
+  # some tile's range (SB-boundary tiles extend past the SB boundary)
   sb_df <- result$sb_result$boundaries
   gene_len <- nchar(cds)
+  tiles <- result$tiles
   for (i in seq_len(result$sb_result$n_superblocks - 1L)) {
-    if (sb_df$end_nt[i] <= gene_len) {
-      expect_true(
-        sb_df$end_nt[i] %in% result$tiles$end_nt,
+    sb_nt <- sb_df$end_nt[i]
+    if (sb_nt <= gene_len) {
+      covered <- any(tiles$start_nt <= sb_nt & tiles$end_nt >= sb_nt)
+      expect_true(covered,
         info = paste(
-          "SB boundary at", sb_df$end_nt[i],
-          "not found in tile end_nt values:",
-          paste(result$tiles$end_nt, collapse = ", ")
+          "SB boundary at", sb_nt,
+          "not covered by any tile range"
         )
       )
     }

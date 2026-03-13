@@ -722,14 +722,26 @@ sb_dp_to_partition <- function(sb_result, tiles, gene_len, polIII_len,
     }
   }
 
-  # Map boundary positions to tile indices
+  # Map SB boundary positions to tile indices.
+  # SB-boundary tiles extend past the SB boundary (oh2 overlap avoids
+  # collision with SB junction overhangs), so the SB boundary may fall
+  # within a tile's range rather than at its exact end_nt.
   sb_end_tiles <- integer(0)
   for (bp in gene_sb_boundary_positions) {
+    # First try exact match (non-boundary tiles)
     tile_match <- which(tiles$end_nt == bp)
+    if (length(tile_match) == 0L) {
+      # SB-boundary tile: find the tile whose range covers the SB position
+      tile_match <- which(tiles$start_nt <= bp & tiles$end_nt >= bp)
+      if (length(tile_match) > 1L) {
+        # Multiple tiles overlap this position — take the last one
+        tile_match <- tile_match[length(tile_match)]
+      }
+    }
     if (length(tile_match) == 0L) {
       cli::cli_alert_warning(paste0(
         "SB boundary at position ", bp,
-        " does not match any tile end_nt. Skipping."
+        " not covered by any tile range. Skipping."
       ))
       next
     }
