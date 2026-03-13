@@ -221,9 +221,20 @@ builtin_human_codon_usage <- function() {
 }
 
 #' Find the data directory (works both installed and from source)
+#'
+#' Resolution order:
+#'   1. Option "dmsggoligo.data_dir" (set by test setup.R to project root)
+#'   2. getwd()/data  (works when run from project root)
+#'   3. Relative to the calling R script's source file
+#'   4. Installed package data directory
+#'
 #' @return Path to data directory
 find_data_dir <- function() {
-  # Try relative to R/ directory
+  # Check option first (set by test setup.R or user)
+  opt <- getOption("dmsggoligo.data_dir")
+  if (!is.null(opt) && dir.exists(opt)) return(opt)
+
+  # Try relative to working directory or source file
   candidates <- c(
     file.path(getwd(), "data"),
     file.path(dirname(sys.frame(1)$ofile %||% ""), "..", "data"),

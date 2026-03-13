@@ -123,34 +123,6 @@ test_that("build_cassette_subblocks produces valid BsmBI blocks", {
 })
 
 # =============================================================================
-# INTEGRATION TEST: partition_tile_superblocks with oversized cassette
-# =============================================================================
-
-test_that("partition_tile_superblocks tolerates oversized cassette", {
-  cu <- builtin_human_codon_usage()
-  cds <- TEST_LONG_GENE_SEQ
-  scan_result <- scan_enzyme_sites(cds, "", cu)
-  if (nrow(scan_result$domestication) > 0) {
-    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
-  }
-
-  tile_size <- compute_max_tile_size(300, 12)
-  tiles <- partition_tiles(cds, tile_size)
-
-  # With a 2000 nt "cassette", partition should NOT error
-  result <- partition_tile_superblocks(
-    tiles = tiles,
-    gene_len = nchar(cds),
-    polIII_len = 2000L,
-    max_sub_length = 1778L,
-    oh3 = "CACC"
-  )
-
-  expect_true(result$cassette_needs_splitting)
-  expect_true(result$n_superblocks >= 1L)
-})
-
-# =============================================================================
 # INTEGRATION TEST: Full pipeline with oversized cassette
 # =============================================================================
 

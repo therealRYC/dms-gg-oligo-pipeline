@@ -9,6 +9,10 @@ pipeline_dir <- normalizePath(file.path(
   dirname(testthat::test_path()), "..", ".."
 ), mustWork = TRUE)
 
+# Tell find_data_dir() where the project's data/ directory lives,
+# since testthat changes getwd() to the test directory.
+options(dmsggoligo.data_dir = file.path(pipeline_dir, "data"))
+
 # Source in dependency order
 source(file.path(pipeline_dir, "R", "constants.R"))
 source(file.path(pipeline_dir, "R", "utils.R"))
