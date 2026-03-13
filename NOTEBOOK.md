@@ -1197,3 +1197,67 @@ The SB DP ran on `gene + cassette` and could place boundaries inside the cassett
 - Issue 3 (fixed OH cross-reactivity in DP scoring) — approach TBD
 - Assembly simulation still failing (BUG-010, separate issue)
 
+---
+
+### 2026-03-13 — Entry 36: Codebase simplification (oogga_two_pass only) + oh2 double-extension bug fix
+
+**Type**: refactor + bugfix
+**Status**: completed (pending merge/push)
+**Tags**: [simplification, oogga-two-pass, dead-code, oh2-bug, assembly-simulator]
+**Branch**: `main` (local, 12 commits ahead of origin)
+**Plan**: [swift-knitting-taco.md](Plans/) (8-phase simplification plan)
+
+**Goal**: Delete all boundary methods except `oogga_two_pass` to reduce codebase size (~32% target) and eliminate context-window bloat during Claude sessions.
+
+#### Phase 1-7: Code Deletion (~6,300 lines removed)
+
+| Phase | What | Lines removed |
+|-------|------|--------------|
+| 1 | Delete 5 obsolete test files (Gen 1/2 comparisons) | ~2,681 |
+| 2 | Delete Gen 1/2 functions from `06b_oogga_dp.R` (5 functions) | ~921 |
+| 3 | Delete 16 legacy functions from `06_overhang_selection.R` | ~2,118 |
+| 4 | Simplify `plan_assembly()` routing — single code path | ~400 |
+| 5 | Other module cleanup (`00_config`, `07_barcode`, `09_geneblock`, `12_report`) | ~110 |
+| 6 | Simplify retained test files | ~685 |
+| 7 | Delete benchmark scripts and configs | ~400 |
+
+Key deletions: `builtin_overhang_fidelity()`, `search_tile_boundaries()` (greedy), `search_tile_boundaries_dp()`, `dp_solve_k()`, `partition_tile_superblocks()`, `search_superblock_boundaries_dp()`, `oogga_single_pass_dp()`, `search_boundaries_oogga_single()`, `mc_refine_segment_tiles()`, `search_tile_boundaries_greedy_seq()`, `apply_superblock_splitting()`, and more. Fallback chains in `load_overhang_fidelity()`, `load_high_fidelity_set()`, `load_pairwise_matrix()` now `stop()` instead of falling back to deleted functions.
+
+#### Phase 8: Validation — discovered oh2 double-extension bug
+
+During final test validation, `test-gg-simulator.R:309` failed: tile 1 variant A23E had `has_mut_gene=FALSE`. Root cause investigation:
+
+**Bug**: `tile_segments_oogga()` (lines ~1164-1174) computed oh2 as:
+```r
+oh2_codon <- min(tiles$end_codon[i] + overlap_codons, total_n_codons)
+```
+But `end_codon` already included the overlap extension from the inner DP (`search_tile_boundaries_oogga()` line 936). This **double-extended** oh2 by 4 codons (12 nt) — e.g., tile 1 oh2 was computed at codon 40 (nt 117-120 = "TGAC") instead of codon 36 (nt 105-108 = "GAAA").
+
+**Impact**: Every tile junction in the assembled product had the wrong 4-nt overhang. The assembly simulator (`verify_assembly_product()`) detected this because `grepl(expected_mut_cds, product)` failed — the product had corrupted sequence at every boundary. This bug was **latent** — it existed before the simplification but was masked because the old DP method produced different tile boundaries where the corruption happened to not affect the test gene.
+
+**Fix** (commit `50d4b7a`):
+1. Internal tiles: use `tiles$end_nt[i]` directly for oh2 (no extra extension)
+2. SB-boundary tiles (last tile of non-final segment): selectively extend `end_codon` past the SB boundary by `overlap_codons` so oh2 doesn't collide with the SB junction overhang
+3. Updated `plan_assembly()` SB-to-tile mapping: range-based lookup instead of exact `end_nt` match (SB-boundary tiles now extend past the SB position)
+4. Updated 4 test assertions in `test-oogga-dp.R` to match corrected behavior
+
+**Note**: This is related to but distinct from BUG-010 (Entry 34). BUG-010 tried to fix oh2 recomputation via backward segment extension — that approach was shelved. This fix addresses the root cause (double-extension) with a simpler, correct solution.
+
+**Final validation**: 227 tests pass, 0 failures, 41 warnings (pre-existing), 1 skip.
+
+**Commits** (oldest to newest):
+- `2ea919f` refactor: Delete 5 obsolete test files (Phase 1)
+- `dbc1efa` refactor: Delete Gen 1/2 functions from 06b_oogga_dp.R (Phase 2)
+- `30c31d4` refactor: Delete 16 legacy functions from 06_overhang_selection.R (Phase 3)
+- `bf9ab39` wip: checkpoint
+- `2dd4fe8` wip: checkpoint
+- `a6f555e` refactor: Simplify plan_assembly() routing — oogga_two_pass only (Phase 4)
+- `1625287` refactor: Other module cleanup (Phase 5)
+- `efd00b9` refactor: Simplify retained test files (Phase 6)
+- `92beecf` refactor: Delete benchmark scripts and configs (Phase 7)
+- `c70538b` wip: checkpoint
+- `cc0b33a` fix: Update tests for oogga_two_pass-only codebase
+- `50d4b7a` fix: Correct oh2 double-extension bug in tile_segments_oogga
+
+**Branch cleanup note** (2026-03-13): Multiple local branches exist from parallel sessions. Stale branches with no unique work: `260310-code-review`, `260312-simplify-testing`, `260312-testing-simplify-codebase`. Branches with unique work not in main: `260310-understanding-oogga-vs-legacy-dp` (3 commits — OOGGA vs DP investigation, likely moot post-simplification), `fix/oh2-recomputation-backward-ext` (5 commits — BUG-010 shelved approach, superseded by commit `50d4b7a`). User is cleaning up in a separate session.
+
