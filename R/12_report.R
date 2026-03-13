@@ -727,7 +727,7 @@ report_config <- function(cfg) {
       cfg$min_hamming_distance %||% 3,
       cfg$barcode_prefix_length %||% 8,
       cfg$barcodes_per_variant %||% 1,
-      cfg$boundary_method %||% "dp",
+      cfg$boundary_method %||% "oogga_two_pass",
       cfg$multi_k_search %||% TRUE,
       cfg$auto_domesticate %||% TRUE
     ),
@@ -983,11 +983,4 @@ get_reaction_fidelity <- function(assembly_plan, tile_id, reaction_type) {
   row[1, ]
 }
 
-#' Get reaction overhangs as character vector
-get_reaction_overhangs <- function(assembly_plan, tile_id, reaction_type) {
-  rxn_fid <- get_reaction_fidelity(assembly_plan, tile_id, reaction_type)
-  if (is.null(rxn_fid)) {
-    return(character(0))
-  }
-  strsplit(rxn_fid$overhangs, ";")[[1]]
-}
+

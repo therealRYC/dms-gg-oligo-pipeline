@@ -679,33 +679,6 @@ filter_barcode_junctions <- function(barcodes, left_context = "", right_context 
   barcodes[!bad]
 }
 
-#' Generate all DNA k-mers
-#' @param k Length of k-mer
-#' @return Character vector of all 4^k k-mers
-generate_all_kmers <- function(k) {
-  if (k == 0) return("")
-  bases <- c("A", "C", "G", "T")
-  kmers <- bases
-  if (k == 1) return(kmers)
-  for (i in 2:k) {
-    kmers <- as.vector(outer(kmers, bases, paste0))
-  }
-  kmers
-}
-
-#' Check if a barcode passes all filters
-#' @param bc Barcode sequence
-#' @param gc_range GC content range c(min, max)
-#' @param max_homopolymer Max homopolymer run
-#' @return Logical
-passes_barcode_filters <- function(bc, gc_range, max_homopolymer) {
-  gc <- gc_content(bc)
-  if (gc < gc_range[1] || gc > gc_range[2]) return(FALSE)
-  if (has_homopolymer(bc, max_homopolymer)) return(FALSE)
-  if (has_enzyme_sites(bc)) return(FALSE)
-  TRUE
-}
-
 # ============================================================================
 # Hamming distance helpers
 # ============================================================================
@@ -716,18 +689,6 @@ passes_barcode_filters <- function(bc, gc_range, max_homopolymer) {
 #' @return Integer Hamming distance
 hamming_distance <- function(a, b) {
   sum(utf8ToInt(a) != utf8ToInt(b))
-}
-
-#' Calculate Hamming distances from one string to a vector of strings
-#' @param query Single character string
-#' @param targets Character vector of strings (all same length as query)
-#' @return Integer vector of Hamming distances
-hamming_distance_1_to_many <- function(query, targets) {
-  q_int <- utf8ToInt(query)
-  k <- length(q_int)
-  n <- length(targets)
-  t_int <- matrix(unlist(lapply(targets, utf8ToInt)), nrow = k, ncol = n)
-  as.integer(colSums(t_int != q_int))
 }
 
 # ============================================================================

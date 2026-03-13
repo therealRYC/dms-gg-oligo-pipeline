@@ -39,12 +39,9 @@ load_config <- function(config_path) {
     barcode_max_homopolymer = 4L,
     search_window_K = 15L,
     dp_k_range = 5L,
-    boundary_method = "dp",
+    boundary_method = "oogga_two_pass",
     oogga_max_identity = 2L,
     oogga_beam_width = 10L,
-    mc_iterations = 1000L,
-    mc_temperature = 1.0,
-    mc_cooling_rate = 0.995,
     multi_k_search = TRUE,
     barcodes_per_variant = 10L,
     overlap_codons = 4L,
@@ -81,9 +78,6 @@ load_config <- function(config_path) {
   cfg$boundary_method <- as.character(cfg$boundary_method)
   cfg$oogga_max_identity <- as.integer(cfg$oogga_max_identity %||% 2L)
   cfg$oogga_beam_width <- as.integer(cfg$oogga_beam_width %||% 10L)
-  cfg$mc_iterations <- as.integer(cfg$mc_iterations %||% 1000L)
-  cfg$mc_temperature <- as.numeric(cfg$mc_temperature %||% 1.0)
-  cfg$mc_cooling_rate <- as.numeric(cfg$mc_cooling_rate %||% 0.995)
   cfg$multi_k_search <- as.logical(cfg$multi_k_search)
   cfg$barcodes_per_variant <- as.integer(cfg$barcodes_per_variant)
   cfg$overlap_codons <- as.integer(cfg$overlap_codons)

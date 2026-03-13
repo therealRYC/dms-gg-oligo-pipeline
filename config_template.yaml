@@ -83,8 +83,7 @@ barcodes_per_variant: 10                   # Number of unique barcodes per varia
                                            # set to 1 for single-barcode-per-variant designs.
 
 # --- Tile Boundary Optimization ---
-boundary_method: "dp"                        # "dp" (default): tile-first DP boundary optimizer.
-                                             # "greedy": local forward search (fastest, lower quality).
+boundary_method: "oogga_two_pass"             # OOGGA two-pass: collision-aware SB + tile DP (only supported method).
 multi_k_search: true                         # Try multiple tile counts to find the tiling with best
                                              # average overhang quality. Default true.
 dp_k_range: 5                                # Search K_ideal +/- dp_k_range tile counts (default 5).

@@ -994,17 +994,9 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
   oh_L <- substring(cds, 1, 4) # First 4 nt of gene
   helper <- design_helper_plasmid(oh_L, oh4, paqci_star2, paqci_star1)
 
-  # Check block lengths — only apply legacy splitting if NOT using assembly_plan
+  # Check block lengths
   over_limit <- all_blocks$length > max_block_length
-  if (any(over_limit) && !use_precomputed_splits) {
-    cli::cli_alert_warning(paste0(
-      sum(over_limit), " block(s) exceed ", max_block_length,
-      " nt synthesis limit. Applying superblock splitting..."
-    ))
-    all_blocks <- apply_superblock_splitting(
-      all_blocks, cds, polIII, oh3, max_block_length
-    )
-  } else if (any(over_limit) && use_precomputed_splits) {
+  if (any(over_limit)) {
     cli::cli_alert_warning(paste0(
       sum(over_limit), " block(s) still exceed ", max_block_length,
       " nt after pre-computed splits. May need additional splitting."
@@ -1233,96 +1225,3 @@ recompute_reaction_fidelity <- function(geneblock_result, assembly_plan) {
   result
 }
 
-#' Split oversized gene blocks into superblocks
-#'
-#' @param blocks Data frame of gene blocks
-#' @param cds Domesticated CDS
-#' @param polIII PolIII promoter
-#' @param oh3 Fixed BsmBI overhang
-#' @param max_block_length Max synthesis length
-#' @return Updated blocks data frame with oversized blocks split
-apply_superblock_splitting <- function(blocks, cds, polIII, oh3,
-                                       max_block_length) {
-  new_blocks <- list()
-
-  # Collect all existing overhangs for exclusion
-  existing_ohs <- character(0)
-
-  for (i in seq_len(nrow(blocks))) {
-    block <- blocks[i, ]
-
-    if (block$length <= max_block_length) {
-      new_blocks[[length(new_blocks) + 1]] <- block
-      next
-    }
-
-    # Calculate number of sub-blocks needed
-    enzyme_site_len <- 11L # BsaI or BsmBI site
-    n_subblocks <- ceiling(block$length / (max_block_length - 2 * enzyme_site_len))
-
-    # Select junction overhangs
-    n_junctions <- n_subblocks - 1L
-    junction_ohs <- select_superblock_overhangs(
-      c(existing_ohs, oh3),
-      n_junctions
-    )
-    existing_ohs <- c(existing_ohs, junction_ohs)
-
-    # Split the block
-    seq_content <- block$sequence
-    sub_length <- ceiling(nchar(seq_content) / n_subblocks)
-    sub_length <- (sub_length %/% 3L) * 3L
-
-    enzyme_name <- if (block$enzyme_type == "BsaI") "BsaI" else "BsmBI"
-
-    for (j in seq_len(n_subblocks)) {
-      start <- (j - 1) * sub_length + 1
-      end <- min(j * sub_length, nchar(seq_content))
-      if (j == n_subblocks) end <- nchar(seq_content)
-
-      sub_seq <- substring(seq_content, start, end)
-
-      # Add junction enzyme sites
-      if (j > 1) {
-        sub_seq <- paste0(
-          orient_enzyme_site(enzyme_name, junction_ohs[j - 1], "forward"),
-          sub_seq
-        )
-      }
-      if (j < n_subblocks) {
-        sub_seq <- paste0(
-          sub_seq,
-          orient_enzyme_site(enzyme_name, junction_ohs[j], "reverse")
-        )
-      }
-
-      new_blocks[[length(new_blocks) + 1]] <- data.frame(
-        block_name = paste0(block$block_name, "_sub", j),
-        sequence = sub_seq,
-        length = nchar(sub_seq),
-        enzyme_type = block$enzyme_type,
-        gene_region = paste0(block$gene_region, "_sub", j),
-        stringsAsFactors = FALSE
-      )
-    }
-
-    cli::cli_alert_info(paste0(
-      "Split '", block$block_name, "' (", block$length, " nt) into ",
-      n_subblocks, " superblock fragments."
-    ))
-  }
-
-  result <- do.call(rbind, new_blocks)
-  rownames(result) <- NULL
-
-  # Verify
-  still_over <- result$length > max_block_length
-  if (any(still_over)) {
-    cli::cli_warn(paste0(
-      sum(still_over), " superblock fragment(s) still exceed synthesis limit. ",
-      "Manual review needed."
-    ))
-  }
-
-  result
-}
