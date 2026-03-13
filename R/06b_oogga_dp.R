@@ -922,6 +922,19 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   max_codons <- max_mutable_nt %/% 3L
   min_codons <- min_mutable_nt %/% 3L
 
+  # Reduce max tile size by overlap so that when tiles are extended by
+  # overlap_codons after the DP, the total tile size stays within budget.
+  # This mirrors the legacy DP's effective_max_codons pattern.
+  effective_max_codons <- max_codons - overlap_codons
+  if (effective_max_codons < min_codons) {
+    cli::cli_alert_warning(paste0(
+      "overlap_codons (", overlap_codons, ") too large for tile budget. ",
+      "Falling back to overlap_codons=0."
+    ))
+    overlap_codons <- 0L
+    effective_max_codons <- max_codons
+  }
+
   if (is.null(oh_fidelity)) oh_fidelity <- load_overhang_fidelity("BsmBI")
   if (is.null(eff_lookup)) {
     bsmbi_pw <- load_pairwise_matrix("BsmBI")
@@ -952,8 +965,8 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   # Build compatibility matrix
   compat <- build_oh_compatibility(max_identity)
 
-  # Determine K range
-  K_ideal <- max(1L, ceiling(n_codons / max_codons) - 1L)
+  # Determine K range (use effective_max_codons to account for overlap extension)
+  K_ideal <- max(1L, ceiling(n_codons / effective_max_codons) - 1L)
   if (multi_k) {
     K_lo <- max(1L, K_ideal - dp_k_range)
     K_hi <- min(n_codons %/% min_codons - 1L, K_ideal + dp_k_range)
@@ -975,7 +988,7 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   dp_start <- proc.time()
   for (K in K_lo:K_hi) {
     result <- oogga_tile_dp_solve_k(
-      K, n_codons, min_codons, max_codons,
+      K, n_codons, min_codons, effective_max_codons,
       precomp$oh1_seq, precomp$oh2_seq,
       oh1_scores, oh2_scores,
       precomp$valid,
@@ -1006,7 +1019,7 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
     compat3 <- build_oh_compatibility(3L)
     for (K in K_lo:K_hi) {
       result <- oogga_tile_dp_solve_k(
-        K, n_codons, min_codons, max_codons,
+        K, n_codons, min_codons, effective_max_codons,
         precomp$oh1_seq, precomp$oh2_seq,
         oh1_scores, oh2_scores,
         precomp$valid,
@@ -1042,7 +1055,12 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   n_tiles <- K + 1L
 
   tile_starts_codon <- c(1L, boundaries + 1L)
-  tile_ends_codon <- c(boundaries, n_codons)
+  # Extend each tile's end by overlap_codons (capped at gene end).
+  # Codons in the overlap region appear in BOTH adjacent tiles, so mutations
+  # near tile boundaries are mutable in one tile's interior even if they fall
+
+  # in the other tile's overhang region. Matches legacy DP (line 1076).
+  tile_ends_codon <- pmin(c(boundaries + overlap_codons, n_codons), n_codons)
   tile_starts_nt <- (tile_starts_codon - 1L) * 3L + 1L
   tile_ends_nt <- tile_ends_codon * 3L
 
@@ -1078,9 +1096,8 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   for (i in seq_len(n_tiles)) {
     # oh1: first 4 nt of this tile
     tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
-    # oh2: last 4 nt of this tile's extended region
-    oh2_codon <- min(tiles$end_codon[i] + overlap_codons, n_codons)
-    oh2_pos <- oh2_codon * 3L
+    # oh2: last 4 nt of this tile (tile already includes overlap extension)
+    oh2_pos <- tiles$end_nt[i]
     tiles$oh2_seq[i] <- substring(cds, oh2_pos - 3L, oh2_pos)
 
     tiles$oh1_score[i] <- overhang_score(tiles$oh1_seq[i], fid_lookup, eff_lookup)
@@ -1146,6 +1163,17 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
   max_codons <- max_mutable_nt %/% 3L
   min_codons <- min_mutable_nt %/% 3L
 
+  # Reduce max tile size by overlap (same as OOGGA DP and legacy DP)
+  effective_max_codons <- max_codons - overlap_codons
+  if (effective_max_codons < min_codons) {
+    cli::cli_alert_warning(paste0(
+      "overlap_codons (", overlap_codons, ") too large for tile budget. ",
+      "Falling back to overlap_codons=0."
+    ))
+    overlap_codons <- 0L
+    effective_max_codons <- max_codons
+  }
+
   if (is.null(oh_fidelity)) oh_fidelity <- load_overhang_fidelity("BsmBI")
   if (is.null(eff_lookup)) {
     bsmbi_pw <- load_pairwise_matrix("BsmBI")
@@ -1173,9 +1201,9 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
   greedy_start <- proc.time()
 
   while (current_start + min_codons <= n_codons) {
-    # Search window for next boundary
+    # Search window for next boundary (use effective_max_codons for DP constraint)
     lo_b <- current_start + min_codons - 1L
-    hi_b <- min(current_start + max_codons - 1L, n_codons - 1L)
+    hi_b <- min(current_start + effective_max_codons - 1L, n_codons - 1L)
 
     # Collect candidates: (position, oh1, oh2, score) tuples
     candidates <- list()
@@ -1222,7 +1250,7 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
     if (length(candidates) == 0L) {
       # No valid boundary in this window — check if we can end the gene
       remaining <- n_codons - current_start + 1L
-      if (remaining <= max_codons) {
+      if (remaining <= effective_max_codons) {
         break # Last tile is within bounds
       }
       # Truly stuck — try max_identity=3 as fallback
@@ -1258,7 +1286,8 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
   n_tiles <- K + 1L
 
   tile_starts_codon <- c(1L, boundary_positions + 1L)
-  tile_ends_codon <- c(boundary_positions, n_codons)
+  # Extend each tile's end by overlap_codons (same as OOGGA DP and legacy DP)
+  tile_ends_codon <- pmin(c(boundary_positions + overlap_codons, n_codons), n_codons)
   tile_starts_nt <- (tile_starts_codon - 1L) * 3L + 1L
   tile_ends_nt <- tile_ends_codon * 3L
 
@@ -1286,8 +1315,8 @@ search_tile_boundaries_greedy_seq <- function(cds, max_mutable_nt,
 
   for (i in seq_len(n_tiles)) {
     tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
-    oh2_codon <- min(tiles$end_codon[i] + overlap_codons, n_codons)
-    oh2_pos <- oh2_codon * 3L
+    # oh2: last 4 nt of tile (tile already includes overlap extension)
+    oh2_pos <- tiles$end_nt[i]
     tiles$oh2_seq[i] <- substring(cds, oh2_pos - 3L, oh2_pos)
 
     tiles$oh1_score[i] <- overhang_score(tiles$oh1_seq[i], fid_lookup, eff_lookup)
