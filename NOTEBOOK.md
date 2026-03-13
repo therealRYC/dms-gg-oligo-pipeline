@@ -1324,3 +1324,15 @@ But `end_codon` already included the overlap extension from the inner DP (`searc
 - Fix cassette over-splitting for `cassette_needs_splitting=TRUE` genes (GRIN2A_ext)
 - Investigate low-fidelity reactions in AKAP11/TRIO
 
+---
+
+### 2026-03-13 — Entry 38: Deep dive into OOGGA algorithm
+
+**Type**: research
+**Status**: in progress
+**Tags**: [oogga, algorithm, literature, scoring]
+
+Deep-read of the original OOGGA Python codebase (`OOGGA.py`, Mukundan S, 2025 preprint). Documented the full DP algorithm: 2D state space (fragment count × position), multiplicative probability-chain scoring (efficiency × fidelity products), identity-based overhang compatibility filter (max 2/4 positional matches including reverse complements), and traceback for top-N solutions. Key observations: the overlap check requires full traceback at every DP cell (performance bottleneck), scoring uses Potapov T4 37°C 18h data by default (vs our BsmBI cycling), and only the best predecessor is kept per cell. See [detailed analysis](Brainstorm/260313_oogga-algorithm-deep-dive.md).
+
+**Next steps**: Compare R reimplementation (`R/06b_oogga_dp.R`) against original Python, and explore scoring model differences (BsmBI cycling vs T4).
+
