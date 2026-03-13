@@ -349,7 +349,8 @@ test_that("tile_segments_oogga with 1 SB (no splits) returns valid tiles", {
     n_superblocks = 1L,
     boundaries = data.frame(
       sb_id = 1L, start_nt = 1L, end_nt = gene_len,
-      boundary_oh = NA_character_, boundary_score = NA_real_,
+      oh1_sb = NA_character_, oh2_sb = NA_character_,
+      boundary_score = NA_real_,
       stringsAsFactors = FALSE
     ),
     total_score = 0
@@ -452,7 +453,9 @@ test_that("tile_segments_oogga with 2+ gene-region SBs has correct alignment", {
 
   # (c) No tile oh1/oh2 collides with SB junction OHs at max_identity=2
   compat <- build_oh_compatibility(2L)
-  sb_junction_ohs <- sb_df$boundary_oh[!is.na(sb_df$boundary_oh)]
+  sb_oh1s <- sb_df$oh1_sb[!is.na(sb_df$oh1_sb)]
+  sb_oh2s <- sb_df$oh2_sb[!is.na(sb_df$oh2_sb) & nchar(sb_df$oh2_sb) == 4L]
+  sb_junction_ohs <- unique(c(sb_oh1s, sb_oh2s))
   sb_junction_rcs <- vapply(sb_junction_ohs, reverse_complement, character(1),
     USE.NAMES = FALSE
   )
@@ -545,13 +548,19 @@ test_that("tile_segments_oogga single-tile segment produces exactly 1 tile", {
 
   # Manually construct SB result with a small first segment (60 codons = 180 nt)
   small_seg_end <- 180L # 60 codons, within max_codons (~81)
+  # Two-OH model: oh1_sb = first 4 nt past boundary, oh2_sb = 4 nt at overlap extension
+  oh1_at_boundary <- substring(cds, small_seg_end + 1L, small_seg_end + 4L)
+  overlap_codons_test <- 4L
+  oh2_codon <- min(small_seg_end %/% 3L + overlap_codons_test, gene_len %/% 3L)
+  oh2_at_boundary <- substring(cds, oh2_codon * 3L - 3L, oh2_codon * 3L)
   sb_result <- list(
     n_superblocks = 2L,
     boundaries = data.frame(
       sb_id = c(1L, 2L),
       start_nt = c(1L, small_seg_end + 1L),
       end_nt = c(small_seg_end, gene_len),
-      boundary_oh = c(substring(cds, small_seg_end - 3L, small_seg_end), NA_character_),
+      oh1_sb = c(oh1_at_boundary, NA_character_),
+      oh2_sb = c(oh2_at_boundary, NA_character_),
       boundary_score = c(0.5, NA_real_),
       stringsAsFactors = FALSE
     ),

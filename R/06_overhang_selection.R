@@ -544,18 +544,23 @@ get_tile_reaction_overhangs <- function(partition_result, tile_idx, tiles,
   ohs
 }
 
-#' Convert tile-boundary partition to legacy all_splits format
+#' Convert tile-boundary partition to all_splits format
 #'
 #' Translates the output of partition_tile_superblocks() into the per-tile
 #' split data frame consumed by design_wt_geneblocks() and R/12_report.R.
-#' This is a compatibility shim — downstream consumers expect columns:
+#' Downstream consumers expect columns:
 #' split_nt, junction_oh, junction_in_hf, junction_fidelity, block_type, tile_id.
 #'
-#' For each SB boundary (at tiles$end_nt[boundary_tile]):
-#'   - bsmbi_3wt entries: tiles whose 3'WT region spans past this boundary
-#'     (tile$end_nt < split_nt)
-#'   - bsai_5wt entries: tiles whose 5'WT region spans back past this boundary
-#'     (split_nt < tile$start_nt)
+#' Two-OH model (when sb_result is provided):
+#'   For each gene-region SB boundary, there are TWO overhangs (oh1_sb + oh2_sb):
+#'   - bsmbi_3wt entries (upstream tiles): junction_oh = oh2_sb,
+#'     split_nt = oh2_sb_pos = min(boundary_nt + overlap_codons * 3, gene_len)
+#'   - bsai_5wt entries (downstream tiles): junction_oh = oh1_sb,
+#'     split_nt = oh1_sb_pos = boundary_nt + 4
+#'   This ensures gene blocks are split at the correct directional position.
+#'
+#' Legacy mode (sb_result = NULL):
+#'   Falls back to the old single-OH model using tiles$oh2_seq.
 #'
 #' @param partition_result List from partition_tile_superblocks()
 #' @param tiles Data frame of tiles (must have end_nt, start_nt, oh2_seq,
@@ -563,10 +568,15 @@ get_tile_reaction_overhangs <- function(partition_result, tile_idx, tiles,
 #' @param gene_len Length of the domesticated CDS in nucleotides
 #' @param polIII_len Length of downstream cassette (unused, kept for interface
 #'   consistency)
+#' @param sb_result SB DP result list from search_sb_boundaries_oogga(), or NULL
+#'   for legacy single-OH behavior. Must have boundaries$oh1_sb and oh2_sb.
+#' @param overlap_codons Integer, overlap codons for position computation (default 4)
 #' @return Data frame with columns: split_nt, junction_oh, junction_in_hf,
 #'   junction_fidelity, block_type, tile_id. Empty (0-row) if n_superblocks <= 1.
 convert_partition_to_splits <- function(partition_result, tiles, gene_len,
-                                        polIII_len = 0L) {
+                                        polIII_len = 0L,
+                                        sb_result = NULL,
+                                        overlap_codons = 4L) {
   empty_result <- data.frame(
     split_nt = integer(0), junction_oh = character(0),
     junction_in_hf = logical(0), junction_fidelity = numeric(0),
@@ -582,49 +592,119 @@ convert_partition_to_splits <- function(partition_result, tiles, gene_len,
     return(empty_result)
   }
 
+  # Precompute fidelity lookups for junction OH scoring
+  hf_set <- load_high_fidelity_set()
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+
+  use_two_oh <- !is.null(sb_result) && "oh1_sb" %in% names(sb_result$boundaries)
+
   n_tiles <- nrow(tiles)
   splits_list <- vector("list", 0L)
 
-  # Pre-extract boundary info for each SB boundary (between SB bi and SB bi+1)
   for (bi in seq_len(n_sb - 1L)) {
     boundary_tile <- sbs$end_tile[bi]
-    split_nt <- tiles$end_nt[boundary_tile]
-    junction_oh <- tiles$oh2_seq[boundary_tile]
-    junction_in_hf <- tiles$oh2_in_hf[boundary_tile]
-    junction_fidelity <- tiles$oh2_fidelity[boundary_tile]
+    boundary_nt <- tiles$end_nt[boundary_tile]
 
-    # --- bsmbi_3wt entries ---
-    # Tile t's 3'WT region: [tile_t.end_nt + 1, gene_len]
-    # This boundary is within that region if tile_t.end_nt < split_nt
-    for (t in seq_len(n_tiles)) {
-      if (tiles$end_nt[t] < split_nt) {
-        splits_list[[length(splits_list) + 1L]] <- data.frame(
-          split_nt = split_nt,
-          junction_oh = junction_oh,
-          junction_in_hf = junction_in_hf,
-          junction_fidelity = junction_fidelity,
-          block_type = "bsmbi_3wt",
-          tile_id = tiles$tile_id[t],
-          stringsAsFactors = FALSE
-        )
+    if (use_two_oh) {
+      # --- Two-OH model: directional junction OH and split positions ---
+      # Match partition boundary to sb_result boundary via end_nt position
+      sb_idx <- which(sb_result$boundaries$end_nt == boundary_nt)
+      if (length(sb_idx) == 0L) {
+        cli::cli_alert_warning(paste0(
+          "SB boundary at nt ", boundary_nt,
+          " not found in sb_result. Falling back to single-OH."
+        ))
+        # Fallback to legacy behavior for this boundary
+        oh2_sb <- tiles$oh2_seq[boundary_tile]
+        oh1_sb <- oh2_sb
+        oh2_sb_pos <- boundary_nt
+        oh1_sb_pos <- boundary_nt
+      } else {
+        sb_idx <- sb_idx[1L]
+        oh1_sb <- sb_result$boundaries$oh1_sb[sb_idx]
+        oh2_sb <- sb_result$boundaries$oh2_sb[sb_idx]
+
+        # oh2_sb position: end of overlap zone
+        oh2_sb_pos <- min(boundary_nt + overlap_codons * 3L, gene_len)
+        # oh1_sb position: end of oh1 span (first 4 nt past boundary)
+        oh1_sb_pos <- boundary_nt + 4L
       }
-    }
 
-    # --- bsai_5wt entries ---
-    # Tile t's 5'WT region: [1, tile_t.start_nt - 1]
-    # This boundary is within that region if split_nt < tile_t.start_nt
-    # (and tile must actually have a 5'WT region, i.e., start_nt > 1)
-    for (t in seq_len(n_tiles)) {
-      if (tiles$start_nt[t] > 1L && split_nt < tiles$start_nt[t]) {
-        splits_list[[length(splits_list) + 1L]] <- data.frame(
-          split_nt = split_nt,
-          junction_oh = junction_oh,
-          junction_in_hf = junction_in_hf,
-          junction_fidelity = junction_fidelity,
-          block_type = "bsai_5wt",
-          tile_id = tiles$tile_id[t],
-          stringsAsFactors = FALSE
-        )
+      # Fidelity for each directional OH
+      oh2_sb_in_hf <- oh2_sb %in% hf_set
+      oh1_sb_in_hf <- oh1_sb %in% hf_set
+      oh2_sb_fidelity <- if (oh2_sb %in% names(fid_lookup)) {
+        unname(fid_lookup[oh2_sb])
+      } else {
+        NA_real_
+      }
+      oh1_sb_fidelity <- if (oh1_sb %in% names(fid_lookup)) {
+        unname(fid_lookup[oh1_sb])
+      } else {
+        NA_real_
+      }
+
+      # --- bsmbi_3wt entries ---
+      # Upstream tiles' 3'WT blocks split at oh2_sb position.
+      for (t in seq_len(n_tiles)) {
+        if (tiles$end_nt[t] < oh2_sb_pos) {
+          splits_list[[length(splits_list) + 1L]] <- data.frame(
+            split_nt = oh2_sb_pos,
+            junction_oh = oh2_sb,
+            junction_in_hf = oh2_sb_in_hf,
+            junction_fidelity = oh2_sb_fidelity,
+            block_type = "bsmbi_3wt",
+            tile_id = tiles$tile_id[t],
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+
+      # --- bsai_5wt entries ---
+      # Downstream tiles' 5'WT blocks split at oh1_sb position.
+      for (t in seq_len(n_tiles)) {
+        if (tiles$start_nt[t] > 1L && oh1_sb_pos < tiles$start_nt[t]) {
+          splits_list[[length(splits_list) + 1L]] <- data.frame(
+            split_nt = oh1_sb_pos,
+            junction_oh = oh1_sb,
+            junction_in_hf = oh1_sb_in_hf,
+            junction_fidelity = oh1_sb_fidelity,
+            block_type = "bsai_5wt",
+            tile_id = tiles$tile_id[t],
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+    } else {
+      # --- Legacy single-OH model ---
+      split_nt <- boundary_nt
+      junction_oh <- tiles$oh2_seq[boundary_tile]
+      junction_in_hf <- tiles$oh2_in_hf[boundary_tile]
+      junction_fidelity <- tiles$oh2_fidelity[boundary_tile]
+
+      for (t in seq_len(n_tiles)) {
+        if (tiles$end_nt[t] < split_nt) {
+          splits_list[[length(splits_list) + 1L]] <- data.frame(
+            split_nt = split_nt, junction_oh = junction_oh,
+            junction_in_hf = junction_in_hf,
+            junction_fidelity = junction_fidelity,
+            block_type = "bsmbi_3wt", tile_id = tiles$tile_id[t],
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+      for (t in seq_len(n_tiles)) {
+        if (tiles$start_nt[t] > 1L && split_nt < tiles$start_nt[t]) {
+          splits_list[[length(splits_list) + 1L]] <- data.frame(
+            split_nt = split_nt, junction_oh = junction_oh,
+            junction_in_hf = junction_in_hf,
+            junction_fidelity = junction_fidelity,
+            block_type = "bsai_5wt", tile_id = tiles$tile_id[t],
+            stringsAsFactors = FALSE
+          )
+        }
       }
     }
   }
@@ -783,10 +863,12 @@ sb_dp_to_partition <- function(sb_result, tiles, gene_len, polIII_len,
   )
   if (cassette_needs_splitting) {
     for (i in seq_len(n_sb_total - 1L)) {
-      if (sb_df$end_nt[i] > gene_len && !is.na(sb_df$boundary_oh[i])) {
+      # Cassette-region boundaries use oh1_sb (single-OH model; oh2_sb is "" for cassette)
+      cass_oh <- if ("oh1_sb" %in% names(sb_df)) sb_df$oh1_sb[i] else sb_df$boundary_oh[i]
+      if (sb_df$end_nt[i] > gene_len && !is.na(cass_oh)) {
         cassette_splits <- rbind(cassette_splits, data.frame(
           split_pos = sb_df$end_nt[i] - gene_len,
-          junction_oh = sb_df$boundary_oh[i],
+          junction_oh = cass_oh,
           stringsAsFactors = FALSE
         ))
       }
@@ -1010,7 +1092,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
           n_superblocks = 1L,
           boundaries = data.frame(
             sb_id = 1L, start_nt = 1L, end_nt = total_content_len,
-            boundary_oh = NA_character_, boundary_score = NA_real_,
+            oh1_sb = NA_character_, oh2_sb = NA_character_,
+            boundary_score = NA_real_,
             stringsAsFactors = FALSE
           ),
           total_score = 0
@@ -1034,13 +1117,19 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
           eff_lookup = eff_lookup,
           max_identity = oogga_max_identity,
           beam_width = oogga_beam_width,
-          cassette_needs_splitting = cass_needs_split
+          cassette_needs_splitting = cass_needs_split,
+          overlap_codons = overlap_codons
           # NO allowed_gene_positions — SBs at any codon position
         )
-        # Extract the actual junction overhangs from the SB result
-        sb_junction_ohs <- sb_result$boundaries$boundary_oh[
-          !is.na(sb_result$boundaries$boundary_oh)
+        # Extract junction overhangs from SB result (both oh1_sb and oh2_sb)
+        sb_oh1s <- sb_result$boundaries$oh1_sb[
+          !is.na(sb_result$boundaries$oh1_sb)
         ]
+        sb_oh2s <- sb_result$boundaries$oh2_sb[
+          !is.na(sb_result$boundaries$oh2_sb) &
+            nchar(sb_result$boundaries$oh2_sb) == 4L
+        ]
+        sb_junction_ohs <- unique(c(sb_oh1s, sb_oh2s))
       }
 
       # ---------------------------------------------------------------
@@ -1102,20 +1191,30 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       partition_result$n_collisions <- 0L
     }
 
-  # Convert partition to legacy all_splits format for downstream consumers
+  # Convert partition to all_splits format for downstream consumers.
+  # For OOGGA paths, pass sb_result for directional junction OH (two-OH model).
   all_splits <- convert_partition_to_splits(
     partition_result = partition_result,
     tiles = tiles,
     gene_len = gene_len,
-    polIII_len = polIII_len
+    polIII_len = polIII_len,
+    sb_result = sb_result,
+    overlap_codons = overlap_codons
   )
 
   # Summary logging (shared by all paths)
   if (partition_result$n_superblocks > 1L) {
     n_boundaries_sb <- partition_result$n_superblocks - 1L
-    n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
-      seq_len(n_boundaries_sb)
-    ]])
+    # Count HF junctions: use sb_result for two-OH model (both oh1_sb and oh2_sb)
+    if ("oh1_sb" %in% names(sb_result$boundaries)) {
+      sb_bnd <- sb_result$boundaries[seq_len(n_boundaries_sb), , drop = FALSE]
+      n_hf <- sum(sb_bnd$oh1_sb %in% hf_set, na.rm = TRUE) +
+        sum(sb_bnd$oh2_sb %in% hf_set, na.rm = TRUE)
+    } else {
+      n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
+        seq_len(n_boundaries_sb)
+      ]])
+    }
     cass_msg <- if (partition_result$cassette_needs_splitting) {
       " Cassette will be split into fragments."
     } else {
