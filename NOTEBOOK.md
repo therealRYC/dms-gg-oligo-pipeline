@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-12 — Entry 34: BUG-010 fix attempt (shelved) -->
+<!-- Last updated: 2026-03-12 — Entry 35: Fix tile overlap + cassette over-splitting -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -1144,4 +1144,56 @@ The SB-first architecture places SB boundaries at arbitrary codon positions (Pas
 - The junction OH invariant assertion is useful
 - The core oh2-capping logic (don't extend oh2 past SB boundaries) is correct but should fall out naturally from a properly designed SB DP
 - The investigation in `260310-understanding-oogga-vs-legacy-dp` (Entry 32b) remains relevant: `optimize_split_points()` greedy sub-block splitting is a separate source of low fidelity
+
+---
+
+### 2026-03-12 22:39 — Entry 35: Fix tile overlap + cassette over-splitting in OOGGA DP
+
+**Type**: session
+**Status**: completed
+**Tags**: [oogga, tile-overlap, cassette-splitting, bug-fix, variant-loss]
+
+**Goal**: Implement fixes for Issues 1 and 2 from the two-OH model diagnostic plan (260312).
+
+**Issue 1 — Tile overlap missing (~7% variant loss)**:
+The OOGGA tile DP and greedy functions correctly scored oh2 at the extended position (`boundary + overlap_codons`) but never extended `tile_ends_codon`. Without overlap, codons at tile boundaries appeared in only one tile's oh region → flagged `partial_oh_overlap` → removed. Three coordinated changes matching the legacy DP pattern:
+1. Reduce `max_codons` by `overlap_codons` before DP search (prevents oligo overflow)
+2. Extend `tile_ends_codon` by `overlap_codons` after extracting boundaries
+3. Fix oh2 computation to use tile's extended end directly (prevents double-counting)
+
+Applied to both `search_tile_boundaries_oogga()` and `search_tile_boundaries_greedy_seq()`.
+
+**Issue 2 — Cassette over-splitting (1079 nt cassette split into 3 fragments)**:
+The SB DP ran on `gene + cassette` and could place boundaries inside the cassette when the two-OH model's stricter constraints reduced valid gene-region candidates. Fix at two levels:
+1. `precompute_sb_boundary_candidates()` now accepts `cassette_needs_splitting` — when FALSE, positions > `gene_len` stay `valid=FALSE`
+2. `sb_dp_to_partition()` guards cassette splits extraction behind `cassette_needs_splitting` (defense-in-depth)
+
+**GRIN2A benchmark results (post-fix vs pre-fix)**:
+
+| Metric | Pre-fix OOGGA | Post-fix OOGGA | Legacy DP |
+|--------|--------------|----------------|-----------|
+| Variants | 28,497 | 30,429 | 30,681 |
+| Skipped positions | 106 | 14 | 2 |
+| Cassette fragments | 3 (391+351+400) | 1 (1112 nt) | 1 (1532 nt) |
+| Gene blocks | 59 | 54 | 52 |
+| Tiles | 27 | 26 | 25 |
+
+**Remaining 14 skipped positions**: Position 2 (oh_L overlap), position 1464 (gene edge), plus 3 groups of 4 codons at SB segment boundaries (538-541, 766-769, 1322-1325). This is a fundamental limitation of per-segment tiling — overlap can't cross SB junctions because each segment is tiled independently. The legacy single-pass DP doesn't have this constraint.
+
+**Issue 3 (DP scoring ignores fixed OH cross-reactivity)**: Not fixed — user wants to think more. Noted as known gap.
+
+**Artifacts**:
+- `R/06b_oogga_dp.R` — tile overlap + cassette gating fixes
+- `R/06_overhang_selection.R` — `sb_dp_to_partition()` defense-in-depth guard
+- `benchmarks/260312_overlap_fix/grin2a_oogga/` — verification benchmark
+- `Plans/2026-03-12_two-oh-diagnostic.md` — full diagnostic plan
+
+**Related commits**:
+- `7fbc41d` — fix: Add tile overlap extension to OOGGA DP and greedy tile search
+- `c35c990` — fix: Prevent cassette over-splitting in OOGGA SB DP
+
+**Open questions**:
+- Can the 12 SB-junction skipped positions be recovered? Would require cross-segment overlap or constraining SB boundaries to avoid oh-edge codons
+- Issue 3 (fixed OH cross-reactivity in DP scoring) — approach TBD
+- Assembly simulation still failing (BUG-010, separate issue)
 

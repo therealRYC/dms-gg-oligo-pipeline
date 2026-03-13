@@ -836,7 +836,10 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   manual_oh4 <- config$manual_oh4
   search_window_K <- config$search_window_K %||% 15L
   dp_k_range <- config$dp_k_range %||% 5L
-  boundary_method <- config$boundary_method %||% "dp"
+  boundary_method <- config$boundary_method %||% "oogga_two_pass"
+  if (boundary_method != "oogga_two_pass") {
+    stop("Only boundary_method = 'oogga_two_pass' is supported. Got: '", boundary_method, "'")
+  }
   oogga_max_identity <- config$oogga_max_identity %||% 2L
   oogga_beam_width <- config$oogga_beam_width %||% 10L
   multi_k <- config$multi_k %||% TRUE
@@ -952,12 +955,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   # =========================================================================
   # Phase 2+3: Tile boundaries + Superblock partitioning
   # =========================================================================
-  # OOGGA methods handle collision prevention inside the DP transition,
-  # so they bypass the iterative refinement loop entirely.
-  # Legacy methods (dp, greedy) use the existing iterative blacklisting.
-
-  is_oogga <- boundary_method %in% c("oogga_two_pass", "oogga_greedy", "oogga_single", "oogga_two_pass_mc")
-
   # Build alien overhangs set — fixed overhangs that OOGGA must avoid
   # (oh3, oh4, oh_L, and all their RCs)
   alien_ohs <- unique(c(
@@ -977,48 +974,21 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
 
   block_overhead <- 22L # 2 x 11-nt enzyme sites per block
 
-  if (is_oogga) {
-    # =======================================================================
-    # OOGGA collision-aware path (Phases 2+3 combined)
-    # =======================================================================
-    # Architecture: SB-first → per-segment tile search.
-    # Pass 1: SB DP on full gene+cassette → SB boundaries + junction OHs.
-    # Pass 2: Tile DP/greedy per SB segment, with ALL SB junction OHs as
-    #   alien. Tiles naturally end at SB boundaries → perfect alignment.
-    #
-    # Collision prevention is built into the DP transition — no iterative
-    # blacklisting needed.
-    cli::cli_h3(paste0(
-      "Phase 2+3: OOGGA collision-aware boundary selection (",
-      boundary_method, ")"
-    ))
+  # =======================================================================
+  # OOGGA collision-aware path (Phases 2+3 combined)
+  # =======================================================================
+  # Architecture: SB-first → per-segment tile search.
+  # Pass 1: SB DP on full gene+cassette → SB boundaries + junction OHs.
+  # Pass 2: Tile DP per SB segment, with ALL SB junction OHs as
+  #   alien. Tiles naturally end at SB boundaries → perfect alignment.
+  #
+  # Collision prevention is built into the DP transition — no iterative
+  # blacklisting needed.
+  cli::cli_h3("Phase 2+3: OOGGA collision-aware boundary selection (oogga_two_pass)")
 
-    if (boundary_method == "oogga_single") {
-      # A3: Single-pass OOGGA on entire gene+cassette
-      # (intentionally single collision domain — over-constrains, but simplest)
-      cli::cli_alert_info("Using OOGGA single-pass DP")
-      single_result <- search_boundaries_oogga_single(
-        cds = cds,
-        cassette_seq = cassette_seq,
-        max_mutable_nt = max_mutable_nt,
-        min_mutable_nt = min_mutable_nt,
-        max_block_length = max_block_length,
-        min_block_length = min_geneblock_length,
-        oh_fidelity = oh_fidelity,
-        eff_lookup = eff_lookup,
-        alien_ohs = alien_ohs,
-        max_identity = oogga_max_identity,
-        beam_width = oogga_beam_width,
-        dp_k_range = dp_k_range,
-        overlap_codons = overlap_codons
-      )
-      tiles <- single_result$tiles
-      sb_result <- single_result$sb_result
-    } else {
-      # A1/A2: SB-first OOGGA DP → tile boundary search
-      # ---------------------------------------------------------------
-      # Pass 1: SB boundaries on full gene+cassette
-      # ---------------------------------------------------------------
+  # ---------------------------------------------------------------
+  # Pass 1: SB boundaries on full gene+cassette
+  # ---------------------------------------------------------------
       # SBs at ANY codon position — no tile constraint. SB junction OHs
       # must avoid fixed overhangs (oh3, oh4, oh_L) but know nothing
       # about tile boundaries yet.
@@ -1071,14 +1041,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       # alien to prevent tile OH collisions with SB OHs in the BsmBI
       # reaction pot. This ensures SB boundaries = tile boundaries →
       # perfect alignment, no skipping in sb_dp_to_partition().
-      cli::cli_alert_info(paste0(
-        "Pass 2: Per-segment tile search (",
-        if (boundary_method %in% c("oogga_two_pass", "oogga_two_pass_mc")) {
-          "OOGGA DP"
-        } else {
-          "OOGGA greedy"
-        }, ")"
-      ))
+      cli::cli_alert_info("Pass 2: Per-segment tile search (OOGGA DP)")
       tiles <- tile_segments_oogga(
         cds = cds,
         sb_result = sb_result,
@@ -1090,16 +1053,10 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         base_alien_ohs = alien_ohs, # oh3, oh4, oh_L + RCs
         max_identity = oogga_max_identity,
         beam_width = oogga_beam_width,
-        tile_method = if (boundary_method == "oogga_two_pass_mc") "oogga_two_pass" else boundary_method,
         multi_k = multi_k,
         dp_k_range = dp_k_range,
-        overlap_codons = overlap_codons,
-        mc_refine = (boundary_method == "oogga_two_pass_mc"),
-        mc_iterations = config$mc_iterations %||% 1000L,
-        mc_temperature = config$mc_temperature %||% 1.0,
-        mc_cooling_rate = config$mc_cooling_rate %||% 0.995
+        overlap_codons = overlap_codons
       )
-    }
 
     # Convert SB result to partition format (shared with legacy path)
     n_tiles <- nrow(tiles)
