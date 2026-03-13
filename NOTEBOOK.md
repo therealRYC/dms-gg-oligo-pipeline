@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-13 — Entry 36: Codebase simplification + oh2 double-extension bug fix -->
+<!-- Last updated: 2026-03-13 — Entry 37: Two-OH SB DP model ported to main -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -59,6 +59,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-10 | beam_width=1 as practical default | beam=1 is 1.5-3.7x faster than beam=10 with negligible fidelity difference | Entry 30 |
 | 2026-03-10 | MC refinement not useful for tile boundaries | 0 moves accepted across all genes; DP at mi=3 is locally optimal under mi=2 MC constraints | Entry 30 |
 | 2026-03-09 | Precompute static checks for OOGGA DP (20-76x speedup) | Position-dependent but path-independent checks (self-palindrome, alien compat) computed once before DP loop | Entry 28 |
+| 2026-03-13 | Two-OH SB DP model: score oh1+oh2 at each SB boundary | Multiplicative scoring of both overhangs at SB junctions; 5 static checks per position; forward CDS extension replaces post-hoc SB-boundary-tile extension | Entry 37 |
 
 ## Entries
 
@@ -1260,4 +1261,66 @@ But `end_codon` already included the overlap extension from the inner DP (`searc
 - `50d4b7a` fix: Correct oh2 double-extension bug in tile_segments_oogga
 
 **Branch cleanup note** (2026-03-13): Multiple local branches exist from parallel sessions. Stale branches with no unique work: `260310-code-review`, `260312-simplify-testing`, `260312-testing-simplify-codebase`. Branches with unique work not in main: `260310-understanding-oogga-vs-legacy-dp` (3 commits — OOGGA vs DP investigation, likely moot post-simplification), `fix/oh2-recomputation-backward-ext` (5 commits — BUG-010 shelved approach, superseded by commit `50d4b7a`). User is cleaning up in a separate session.
+
+---
+
+### 2026-03-13 15:30 — Entry 37: Two-OH SB DP Model Ported to Main
+
+**Type**: session
+**Status**: completed
+**Tags**: [oogga, superblock, two-oh, porting, benchmark]
+
+**Goal**: Port the two-overhang (two-OH) SB DP model from the `explore/forward-backward-overlap` worktree onto the clean, refactored main branch.
+
+**Approach**: Surgical function-by-function porting rather than git merge/rebase, since the worktree predated the major codebase simplification (Entry 36). Analyzed the diff between the worktree and main to identify exactly which functions changed, then applied each change manually to the refactored codebase. This avoided merge conflicts entirely.
+
+**Key changes**:
+
+1. **`precompute_sb_boundary_candidates()`** — Two-OH scoring: each gene-region SB boundary now computes oh1 (forward 4 nt past boundary) and oh2 (at overlap extension point). Multiplicative scoring: `overhang_score(oh1) × overhang_score(oh2)`. Cassette-region boundaries remain single-OH.
+
+2. **`oogga_sb_dp_solve_k_v2()`** — Tracks `oh1s`/`oh2s` per-boundary for output, plus combined `ohs` for collision checking. 5 per-position static checks (vs 2 for single-OH): oh1 self-palindrome, oh1 vs aliens, oh2 self-palindrome, oh2 vs aliens, oh1-oh2 mutual compatibility.
+
+3. **`search_sb_boundaries_oogga()`** — New `make_single_sb()` helper for DRY single-boundary format. Output df uses `oh1_sb`/`oh2_sb` instead of `boundary_oh`. DRYed K-loop into `run_dp()` closure.
+
+4. **`tile_segments_oogga()`** — Forward CDS extension: non-last gene segments get CDS extended by `overlap_codons × 3` nt past the SB boundary. Passes `n_codons_tile` to constrain tile boundary placement to the original segment while allowing oh2 to reach into the overlap zone. Replaces the old post-hoc SB-boundary-tile detection/extension.
+
+5. **`convert_partition_to_splits()`** — Directional junction OHs: oh2_sb for bsmbi_3wt (upstream tile), oh1_sb for bsai_5wt (downstream tile), at different split positions.
+
+6. **Downstream consumers** (`sb_dp_to_partition()`, `plan_assembly()`, `10_qc_checks.R`, tests) — Updated to two-OH format with backward-compatible `boundary_oh` fallback.
+
+**Benchmark results (4 genes, two-OH model)**:
+
+| Gene | Variants | Mutable | Skipped | Min Set Fidelity | Gene Blocks |
+|------|----------|---------|---------|-----------------|-------------|
+| GRIN2A | 30,429 | 1,449/1,463 | 14 | 0.933 | 56 |
+| AKAP11 | 39,522 | 1,882/1,900 | 18 | 0.749 | 73 |
+| TRIO | 64,470 | 3,070/3,096 | 26 | 0.735 | 121 |
+| GRIN2A_ext | 30,513 | 1,453/1,463 | 10 | 0.749 | 69 |
+
+**Comparison with pre-fix single-OH (Entry 36 baseline)**:
+- GRIN2A single-OH (pre-tile-overlap-fix): 28,665 variants, 98 skipped
+- GRIN2A two-OH: 30,429 variants, 14 skipped — **+1,764 variants recovered**
+- Skipped positions now ~14 (gene-edge oh effects), down from 98-106
+
+**Known issue**: GRIN2A_ext cassette over-splitting persists — 4 fragments instead of expected 2 (one is 35 nt, below synthesis minimum). Only affects `cassette_needs_splitting=TRUE` cases. The two-OH model's 5 per-position checks leave fewer valid cassette-region candidates. Tracked for follow-up.
+
+**Artifacts**:
+- `benchmarks/260313_two_oh_model/` — Assembly reports for all 4 genes
+- PR #40: https://github.com/therealRYC/dms-gg-oligo-pipeline/pull/40
+
+**Related commits** (branch `260313-two-oh-sb-dp`):
+- `da4421e` wip: checkpoint
+- `f3c93d4` feat: Port two-OH SB DP model to 06b_oogga_dp.R
+- `f08d253` wip: checkpoint
+- `c6f7c5e` feat: Update downstream consumers for two-OH SB DP format
+- `ba1bec6` benchmark: Two-OH SB DP model — 4-gene benchmark results
+
+**Open questions**:
+- How to constrain cassette-region boundary count when `cassette_needs_splitting=TRUE` to prevent over-splitting
+- AKAP11 and TRIO have reactions below 0.90 set fidelity — investigate whether DP scoring that accounts for fixed OH cross-reactivity (Issue 3 from diagnostic plan) would help
+
+**Next steps**:
+- Merge PR #40
+- Fix cassette over-splitting for `cassette_needs_splitting=TRUE` genes (GRIN2A_ext)
+- Investigate low-fidelity reactions in AKAP11/TRIO
 
