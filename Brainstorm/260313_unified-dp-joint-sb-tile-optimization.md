@@ -389,7 +389,47 @@ For each of B SB configurations, run the (now ZCR-based) tile DP, compute exact 
 
 ---
 
-## 8. Open Questions
+## 8. Literature Review Summary
+
+### No existing tool solves this problem
+A comprehensive literature search confirms that **no published tool performs joint optimization of fragment boundaries and overhang selection across multiple assembly levels**. The field has converged on single-level approaches:
+
+| Tool | Approach | Multi-level? | Joint boundary+OH? |
+|------|----------|-------------|-------------------|
+| **OOGGA** (Mukundan 2025, preprint) | DP with multiplicative scoring | No | Yes (single-level) |
+| **NEBridge SplitSet** (NEB) | Stochastic Monte Carlo | No | No (sequential) |
+| **GGAssembler** (Fleishman Lab 2024) | Graph shortest-path with rainbow coloring | No | No (pre-filter then path) |
+| **j5** (Hillson 2012) | Heuristic search | Partial (heuristic) | Unknown |
+| **DIMPLE** (Cowan 2023) | Rule-based tiling | No | No |
+
+### Key theoretical insight: Bellman's optimality breaks
+OOGGA's DP has a subtle issue: the optimal subpath to position j depends on **which overhangs were used** (not just the accumulated score), because collision constraints are path-dependent. This breaks Bellman's principle of optimality. Our beam search extension addresses this. The OOGGA paper doesn't discuss this because single-level paths are short enough that it rarely matters.
+
+### OOGGA's scoring function
+OOGGA uses a weighted sum: `Total = (w_eff × Π_efficiencies) + (w_fid × Π_fidelities)` with tunable w_eff, w_fid. Our implementation uses the product `P_fid × P_eff` per overhang, which is equivalent to w_eff=1, w_fid=1 with multiplicative combining.
+
+### GGAssembler's rainbow path approach
+GGAssembler assigns "colors" to overhangs that cross-ligate and requires paths to use each color at most once. This is solved via randomized color-coding: O(2^k × n^O(1)) where k = number of colors. This is conceptually similar to our compatibility matrix but formalized as a graph coloring problem.
+
+### The bilevel optimization framing
+Our problem maps onto **bilevel combinatorial optimization**:
+- **Upper level (leader):** Choose K superblock boundaries
+- **Lower level (follower):** Given SB boundaries, choose tile boundaries to maximize worst-case tile fidelity
+- **Coupling:** SB overhangs appear as aliens in all tile reactions
+
+Known approaches: nested DP (our two-pass), single-pass DP on full state space (exponential), column generation / Benders decomposition (overkill for our problem size).
+
+### Key references
+- Potapov et al. 2018, ACS Synth Biol — foundational 256×256 fidelity matrix
+- Pryor et al. 2020, PLoS ONE — BsmBI cycling data (our data source)
+- Mukundan & Madhusudhan 2025, bioRxiv — OOGGA DP algorithm
+- Hoch et al. 2024, Protein Sci — GGAssembler graph approach
+- Strzelecki et al. 2024, NAR — thermodynamic overhang strength model
+- Terzi & Tsaparas — sequence segmentation DP theory (k-segmentation)
+
+---
+
+## 9. Open Questions
 
 1. **Threshold tuning for ZCR:** Should we use strict M[A,B]=0 or allow M[A,B] ≤ threshold? If we allow small nonzero values (e.g., M[A,B] ≤ 5), we get more candidate positions at the cost of slightly imperfect set fidelity.
 
