@@ -108,50 +108,42 @@ test_that("partition_tiles covers long gene completely with overlap", {
 })
 
 test_that("clearance scoring produces symmetric N/2 split of overlap codons", {
-  # Create a gene long enough for 2 tiles with 6-codon overlap.
-  # With mutable_size = 30 nt (10 codons) and overlap_codons = 6:
-  #   Tile 1: codons 1-10 (nt 1-30)
-  #   Tile 2: codons 5-14 (nt 13-42)
-  #   Overlap: codons 5-10 (6 codons)
+  # Build a 28-codon gene (84 nt) with 20-codon tiles and 6-codon overlap.
+  # effective_step = 20 - 6 = 14 codons
+  # tile_starts = seq(1, 28, by = 14) = 1, 15 → exactly 2 tiles
+  #   Tile 1: codons 1-20 (nt 1-60, tile_len = 60)
+  #   Tile 2: codons 15-28 (nt 43-84, tile_len = 42)
+  #   Overlap: codons 15-20 (6 codons)
   #
-  # For each overlap codon, clearance in each tile:
-  #   Codon 5: tile1 local_start=13, tile2 local_start=1
-  #     tile1: dist_oh1=13-4=9, dist_oh2=(30-4)-15=11 → clearance=9
-
-  #     tile2: dist_oh1=1-4=-3, dist_oh2=(30-4)-3=23 → clearance=-3
-  #     → tile1 (clearance 9 > -3)
-  #   Codon 6: tile1: oh1=16-4=12, oh2=26-18=8 → 8
-  #     tile2: oh1=4-4=0, oh2=26-6=20 → 0 → tile1
-  #   Codon 7: tile1: oh1=19-4=15, oh2=26-21=5 → 5
-  #     tile2: oh1=7-4=3, oh2=26-9=17 → 3 → tile1
-  #   Codon 8: tile1: oh1=22-4=18, oh2=26-24=2 → 2
-  #     tile2: oh1=10-4=6, oh2=26-12=14 → 6 → tile2
-  #   Codon 9: tile1: oh1=25-4=21, oh2=26-27=-1 → -1
-  #     tile2: oh1=13-4=9, oh2=26-15=11 → 9 → tile2
-  #   Codon 10: tile1: oh1=28-4=24, oh2=26-30=-4 → -4
-  #     tile2: oh1=16-4=12, oh2=26-18=8 → 8 → tile2
+  # Clearance for each overlap codon (nt distances from nearest oh junction):
+  #   Codon 15: tile1 clearance=min(39,11)=11, tile2 clearance=min(-3,35)=-3 → tile1
+  #   Codon 16: tile1 clearance=min(42,8)=8,   tile2 clearance=min(0,32)=0   → tile1
+  #   Codon 17: tile1 clearance=min(45,5)=5,   tile2 clearance=min(3,29)=3   → tile1
+  #   Codon 18: tile1 clearance=min(48,2)=2,   tile2 clearance=min(6,26)=6   → tile2
+  #   Codon 19: tile1 clearance=min(51,-1)=-1,  tile2 clearance=min(9,23)=9  → tile2
+  #   Codon 20: tile1 clearance=min(54,-4)=-4,  tile2 clearance=min(12,20)=12 → tile2
   #
-  # Result: codons 5,6,7 → tile1; codons 8,9,10 → tile2 (3/3 split)
+  # Result: codons 15,16,17 → tile1; codons 18,19,20 → tile2 (3/3 split)
 
-  # Build a 42-nt CDS (14 codons): ATG + 12 Ala + stop
-  cds <- paste0("ATG", paste0(rep("GCT", 12), collapse = ""), "TAA")
-  expect_equal(nchar(cds), 42)
+  # ATG + 26 Ala + stop = 28 codons = 84 nt
+  cds <- paste0("ATG", paste0(rep("GCT", 26), collapse = ""), "TAA")
+  expect_equal(nchar(cds), 84)
 
   cu <- builtin_human_codon_usage()
   variants <- design_mutations(cds, cu)
 
-  # partition with 10-codon tiles and 6-codon overlap
-  tiles <- partition_tiles(cds, 30L, overlap_codons = 6L)
+  # Partition with 20-codon tiles (60 nt mutable) and 6-codon overlap
+  tiles <- partition_tiles(cds, 60L, overlap_codons = 6L)
   expect_equal(nrow(tiles), 2)
 
   # Assign variants to tiles
   variants <- assign_variants_to_tiles(variants, tiles)
 
-  # Check the overlap codons (5-10) — should split 3/3
-  overlap_positions <- 5:10
+  # Check the 6 overlap codons (15-20) — should split 3/3
+  overlap_positions <- 15:20
   for (pos in overlap_positions) {
     assigned_tile <- unique(variants$tile_id[variants$position == pos])
-    if (pos <= 7) {
+    if (pos <= 17) {
       expect_equal(assigned_tile, 1L,
         info = paste("Overlap codon", pos, "should go to tile 1 (higher clearance)")
       )
