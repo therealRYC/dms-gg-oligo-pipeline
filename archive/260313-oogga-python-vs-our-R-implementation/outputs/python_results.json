@@ -1,0 +1,132 @@
+{
+  "source": "Python_OOGGA",
+  "K": 3,
+  "n_segments": 4,
+  "boundaries_0indexed": [
+    1116,
+    2073,
+    3840
+  ],
+  "boundary_ohs": [
+    "GAAA",
+    "AGAA",
+    "AAGA"
+  ],
+  "per_boundary_eff_pct": [
+    93.91304347826087,
+    99.23913043478261,
+    80.97826086956522
+  ],
+  "per_boundary_fid_pct": [
+    87.4493927125506,
+    88.46899224806202,
+    92.08899876390606
+  ],
+  "per_boundary_scores": [
+    0.8212638619961274,
+    0.8779585861139197,
+    0.7457206965120654
+  ],
+  "total_score": 0.5376912139175016,
+  "eff_product": 0.7547051450645189,
+  "fid_product": 0.7124520316759402,
+  "segment_lengths": [
+    1116,
+    957,
+    1767,
+    1650
+  ],
+  "alien_ohs_passed": [],
+  "max_identity": 2,
+  "min_len": 300,
+  "max_len": 1800,
+  "gene_len": 4395,
+  "total_len": 5490,
+  "all_traces": [
+    {
+      "rank": 1,
+      "K": 3,
+      "boundaries_0indexed": [
+        1116,
+        2073,
+        3840
+      ],
+      "overhangs": [
+        "GAAA",
+        "AGAA",
+        "AAGA"
+      ],
+      "total_score": 0.5376912139175016,
+      "eff_product": 0.7547051450645189,
+      "fid_product": 0.7124520316759402
+    },
+    {
+      "rank": 2,
+      "K": 3,
+      "boundaries_0indexed": [
+        1404,
+        2373,
+        4053
+      ],
+      "overhangs": [
+        "AGAA",
+        "GAAA",
+        "AAGA"
+      ],
+      "total_score": 0.5376912139175016,
+      "eff_product": 0.7547051450645189,
+      "fid_product": 0.7124520316759402
+    },
+    {
+      "rank": 3,
+      "K": 3,
+      "boundaries_0indexed": [
+        1404,
+        2631,
+        4302
+      ],
+      "overhangs": [
+        "AGAA",
+        "GAAA",
+        "AAGA"
+      ],
+      "total_score": 0.5376912139175016,
+      "eff_product": 0.7547051450645189,
+      "fid_product": 0.7124520316759402
+    },
+    {
+      "rank": 4,
+      "K": 3,
+      "boundaries_0indexed": [
+        1404,
+        2631,
+        4362
+      ],
+      "overhangs": [
+        "AGAA",
+        "GAAA",
+        "AAGA"
+      ],
+      "total_score": 0.5376912139175016,
+      "eff_product": 0.7547051450645189,
+      "fid_product": 0.7124520316759402
+    },
+    {
+      "rank": 5,
+      "K": 3,
+      "boundaries_0indexed": [
+        1404,
+        2634,
+        4422
+      ],
+      "overhangs": [
+        "AGAA",
+        "AAGA",
+        "GAAA"
+      ],
+      "total_score": 0.5376912139175016,
+      "eff_product": 0.7547051450645188,
+      "fid_product": 0.7124520316759402
+    }
+  ]
+}

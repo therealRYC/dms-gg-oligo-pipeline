@@ -1,0 +1,49 @@
+{
+  "source": "R_OOGGA_single_OH",
+  "K": 3,
+  "n_segments": 4,
+  "boundaries_1indexed": [1116, 2073, 3840],
+  "boundaries_0indexed": [1116, 2073, 3840],
+  "boundary_oh1s": ["GAAA", "AGAA", "AAGA"],
+  "per_boundary_scores": [0.8212639304347826, 0.8779586630434782, 0.7457207065217392],
+  "total_score": 0.5376913130566753,
+  "segment_lengths": [1116, 957, 1767, 1650],
+  "set_fidelity": 1,
+  "per_oh_fidelity": [
+    {
+      "overhang": "ATGG",
+      "correct_fraction": 1
+    },
+    {
+      "overhang": "ACCG",
+      "correct_fraction": 1
+    },
+    {
+      "overhang": "CCAT",
+      "correct_fraction": 1
+    },
+    {
+      "overhang": "CGGT",
+      "correct_fraction": 1
+    },
+    {
+      "overhang": "GAAA",
+      "correct_fraction": 1
+    },
+    {
+      "overhang": "AGAA",
+      "correct_fraction": 1
+    },
+    {
+      "overhang": "AAGA",
+      "correct_fraction": 1
+    }
+  ],
+  "alien_ohs": ["ATGG", "ACCG", "CCAT", "CGGT"],
+  "beam_width": 1,
+  "max_identity": 2,
+  "min_len": 300,
+  "max_len": 1800,
+  "gene_len": 4395,
+  "total_len": 5490
+}
