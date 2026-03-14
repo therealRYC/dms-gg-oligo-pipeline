@@ -491,6 +491,11 @@ oogga_sb_dp_solve_k_v2 <- function(K, total_len, min_len, max_len,
 #' @param cassette_needs_splitting Logical: if FALSE, cassette-region positions
 #'   are excluded as boundary candidates (default TRUE)
 #' @param overlap_codons Integer, overlap codons for two-OH scoring (default 4)
+#' @param k_range_mode Character, "narrow" (K_min to K_min+2, default) or
+#'   "wide" (K_min to K_max_feasible). Wide explores all feasible K values.
+#' @param k_scoring Character, "geo_mean" (default, score^(1/K)) or "raw"
+#'   (raw multiplicative product). Raw embeds soft parsimony — extra
+#'   boundaries must "earn their keep" by improving junction quality.
 #' @return List with n_superblocks, boundaries (data frame with oh1_sb/oh2_sb),
 #'   total_score
 search_sb_boundaries_oogga <- function(full_seq, gene_len,
@@ -504,7 +509,9 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
                                        allowed_gene_positions = NULL,
                                        cassette_blacklist_ohs = character(0),
                                        cassette_needs_splitting = TRUE,
-                                       overlap_codons = 4L) {
+                                       overlap_codons = 4L,
+                                       k_range_mode = c("narrow", "wide"),
+                                       k_scoring = c("geo_mean", "raw")) {
   total_len <- nchar(full_seq)
 
   # Load data if not provided
@@ -574,16 +581,21 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
   compat <- build_oh_compatibility(max_identity)
 
   # Determine K range
+  k_range_mode <- match.arg(k_range_mode)
+  k_scoring <- match.arg(k_scoring)
   K_min <- max(1L, ceiling(total_len / max_block_length) - 1L)
-  K_max <- min(K_min + 2L, floor(total_len / min_block_length) - 1L)
+  K_max_feasible <- floor(total_len / min_block_length) - 1L
+  K_max <- if (k_range_mode == "narrow") min(K_min + 2L, K_max_feasible) else K_max_feasible
   k_range <- seq(K_min, K_max)
 
-  cli::cli_alert_info("OOGGA SB DP: K range [{K_min}, {K_max}]")
+  cli::cli_alert_info(
+    "OOGGA SB DP: K range [{K_min}, {K_max}] ({k_range_mode}), scoring={k_scoring}"
+  )
 
   # Run DP for each K (two-OH model)
-  # Multiplicative scoring: compare via geometric mean (score^(1/K))
+  # Cross-K comparison: geo_mean normalizes by K; raw embeds soft parsimony
   best_result <- NULL
-  best_geo_mean <- -Inf
+  best_comparison <- -Inf
 
   run_dp <- function(compat_mat, mi) {
     for (K in k_range) {
@@ -596,9 +608,9 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
         max_identity = mi
       )
       if (!is.null(result) && result$total_score > 0) {
-        geo_mean <- result$total_score^(1 / K)
-        if (geo_mean > best_geo_mean) {
-          best_geo_mean <<- geo_mean
+        comp <- if (k_scoring == "geo_mean") result$total_score^(1 / K) else result$total_score
+        if (comp > best_comparison) {
+          best_comparison <<- comp
           best_result <<- result
           best_result$K <<- K
         }
