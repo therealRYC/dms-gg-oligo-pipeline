@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-13 — Entry 40: OOGGA Python vs R validation -->
+<!-- Last updated: 2026-03-13 — Entry 41: Remove 0.5 fallback for unknown overhangs -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -61,6 +61,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-09 | Precompute static checks for OOGGA DP (20-76x speedup) | Position-dependent but path-independent checks (self-palindrome, alien compat) computed once before DP loop | Entry 28 |
 | 2026-03-13 | Two-OH SB DP model: score oh1+oh2 at each SB boundary | Multiplicative scoring of both overhangs at SB junctions; 5 static checks per position; forward CDS extension replaces post-hoc SB-boundary-tile extension | Entry 37 |
 | 2026-03-13 | Increase overlap_codons 4→6 + distance-aware assignment (pending) | 6-codon overlap with 3/3 split gives 5 nt clearance from ligation junctions (vs 2 nt at 4-codon); matches DIMPLE's 4 nt buffer without dead zones | Entry 39 |
+| 2026-03-13 | overhang_score() returns NA for unknown overhangs (not 0.5) | Fabricated 0.5 fallback could mislead DP; NA makes unscorable boundaries explicit and excluded | Entry 41 |
 
 ## Entries
 
@@ -1513,3 +1514,35 @@ Two changes needed:
 **Next steps**:
 - Validation complete — R OOGGA core DP is confirmed faithful to the original Python implementation
 - Can proceed with confidence on full pipeline results using the extended features (two-OH model, beam search)
+
+---
+
+### 2026-03-13 23:04 — Entry 41: Remove 0.5 fallback for unknown overhangs — treat as unscorable
+
+**Type**: session
+**Status**: completed
+**Tags**: [overhang-scoring, na-fallback, defensive-coding, report]
+
+**Goal**: Replace the fabricated 0.5 fallback in `overhang_score()` with NA, so unknown overhangs are excluded from optimization rather than silently competing with real scores.
+
+**Approach**: Changed `overhang_score()` to return `NA_real_` instead of `0.5` for overhangs not found in fidelity/efficiency lookups. All downstream consumers (tile precompute, SB precompute, superblock junction loop, cassette split loop) now skip boundaries with NA scores. Added `n_unscorable_boundaries` to the assembly plan summary and a conditional note in the markdown report (Section 5b) that fires when the count is >0.
+
+**Key findings**:
+- With full NEB BsmBI cycling data (all 256 4-mers covered), the change has zero practical effect — no overhangs are unscorable
+- The old `0.5 * 0.5 = 0.25` fallback was problematic: in additive scoring (`oh1_base + oh2_base`), `0.5 + 0.5 = 1.0` was *higher* than many real overhangs, potentially steering the DP toward unknown overhangs
+- The change is a safety net for edge cases (custom/trimmed fidelity data)
+
+**Decisions made**:
+- Return NA instead of 0.5: makes invalid states unrepresentable (over assigning a fabricated score that could mislead optimization)
+
+**Artifacts**:
+- `R/06_overhang_selection.R` — `overhang_score()` + `precompute_boundary_scores()` + superblock junction loop + summary field
+- `R/06b_oogga_dp.R` — SB precompute (gene-region + cassette-region)
+- `R/09_wt_geneblock_design.R` — cassette split point loop
+- `R/12_report.R` — unscorable boundary note in Section 5b
+- `tests/testthat/test-overhang-selection.R` — updated test expects NA
+
+**Related commits**:
+- `2c296f4` — Remove 0.5 fallback for unknown overhangs — treat as unscorable (NA)
+- `1c4d78a` — wip: checkpoint (core source changes)
+- `746b8a7` — wip: checkpoint (precompute + DP changes)
