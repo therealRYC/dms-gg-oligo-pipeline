@@ -688,15 +688,14 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
 #' @param boundary_valid Logical vector of valid positions
 #' @param alien_ohs Character vector of fixed overhangs to avoid
 #' @param compat_matrix Named 256x256 logical compatibility matrix
-#' @param beam_width Integer, max paths to retain per position (default 10)
 #' @param max_identity Integer, for self-palindrome check in overlap_pass
-#' @return List with boundaries, total_score, path_ohs, or NULL
+#' @return List with boundaries, total_score, or NULL
 oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
                                   oh1_seq, oh2_seq,
                                   oh1_scores, oh2_scores,
                                   boundary_valid,
-                                  alien_ohs, compat_matrix,
-                                  beam_width = 10L,
+                                  alien_ohs_oh1, alien_ohs_oh2,
+                                  compat_matrix,
                                   max_identity = 2L) {
   if (K == 0L) {
     return(NULL)
@@ -705,24 +704,27 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
     return(NULL)
   }
 
-  # Each path entry: list(score, positions, ohs)
-  # ohs includes BOTH oh1 and oh2 at each boundary (both participate in
-  # BsmBI reactions and must be collision-free)
-  # Score is multiplicative: product of (oh1_score * oh2_score) per boundary
+  # Standard Bellman DP — no path tracking or beam search needed.
+  # Tile-to-tile collision is unnecessary because each tile's assembly
+
+  # reaction is independent (separate pot). oh1 and oh2 are also in
+  # different enzyme pots (BsaI vs BsmBI), so no mutual compat check.
+  # Score is multiplicative: product of (oh1_score * oh2_score) per boundary.
 
   # ---- Precompute static (path-independent) checks per position ----
-  # Self-palindrome, alien compat, and oh1/oh2 mutual compat are position-
-  # dependent but NOT path-dependent. Computing them once eliminates ~80% of
-  # redundant work inside the DP inner loop.
+  # Self-palindrome and enzyme-specific alien compat are position-dependent
+  # but NOT path-dependent. Computing them once avoids redundant work.
 
-  # Filter alien_ohs to only include valid 4-nt ACGT sequences present in
+  # Filter alien sets to only include valid 4-nt ACGT sequences present in
   # the compat_matrix. Invalid entries (empty strings, NAs) would cause
   # subscript-out-of-bounds errors.
   valid_ohs <- rownames(compat_matrix)
-  alien_ohs <- alien_ohs[alien_ohs %in% valid_ohs]
+  alien_ohs_oh1 <- alien_ohs_oh1[alien_ohs_oh1 %in% valid_ohs]
+  alien_ohs_oh2 <- alien_ohs_oh2[alien_ohs_oh2 %in% valid_ohs]
 
   static_ok <- logical(n_codons)
-  has_aliens <- length(alien_ohs) > 0L
+  has_oh1_aliens <- length(alien_ohs_oh1) > 0L
+  has_oh2_aliens <- length(alien_ohs_oh2) > 0L
   for (b in seq_len(n_codons)) {
     if (!boundary_valid[b]) next
     oh1 <- oh1_seq[b]
@@ -735,113 +737,97 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
     # Self-palindrome for oh2
     rc2 <- reverse_complement(oh2)
     if (count_positional_identity(oh2, rc2) > max_identity) next
-    # Alien compat for both oh1 and oh2
-    if (has_aliens) {
-      if (!all(compat_matrix[oh1, alien_ohs])) next
-      if (!all(compat_matrix[oh2, alien_ohs])) next
-    }
-    # oh1/oh2 mutual compat
-    if (!compat_matrix[oh1, oh2]) next
+    # oh1 checked against BsaI aliens only (same enzyme pot)
+    if (has_oh1_aliens && !all(compat_matrix[oh1, alien_ohs_oh1])) next
+    # oh2 checked against BsmBI aliens only (same enzyme pot)
+    if (has_oh2_aliens && !all(compat_matrix[oh2, alien_ohs_oh2])) next
+    # REMOVED: oh1/oh2 mutual compat — different enzyme pots (BsaI vs BsmBI)
     static_ok[b] <- TRUE
   }
 
-  # Layer k=1
-  dp_paths <- vector("list", n_codons)
+  # Standard Bellman DP: store single best (score, positions) per position.
+  # No path-based overhang tracking needed — tile reactions are independent.
 
+  # dp[[b]] = list(score, positions) for best path ending at position b
+  dp <- vector("list", n_codons)
+
+  # Layer k=1
   lo_b <- min_codons
   hi_b <- min(max_codons, n_codons - 1L)
   if (lo_b <= hi_b) {
     for (b in lo_b:hi_b) {
       if (!static_ok[b]) next
-
-      # Multiplicative: first boundary's score = oh1_score * oh2_score
-      dp_paths[[b]] <- list(list(
+      dp[[b]] <- list(
         score = oh1_scores[b] * oh2_scores[b],
-        positions = b,
-        ohs = c(oh1_seq[b], oh2_seq[b])
-      ))
+        positions = b
+      )
     }
   }
 
   # Layers k=2..K
   if (K >= 2L) {
     for (k in 2L:K) {
-      dp_paths_new <- vector("list", n_codons)
+      dp_new <- vector("list", n_codons)
 
       lo_b <- k * min_codons
       hi_b <- min(n_codons - 1L, n_codons - min_codons)
       if (lo_b > hi_b) {
-        dp_paths <- dp_paths_new
+        dp <- dp_new
         next
       }
 
       for (b in lo_b:hi_b) {
         if (!static_ok[b]) next
-        oh1 <- oh1_seq[b]
-        oh2 <- oh2_seq[b]
 
         lo <- max(1L, b - max_codons)
         hi <- b - min_codons
         if (hi < lo) next
 
-        candidates <- list()
+        best_score <- -Inf
+        best_prev <- NULL
 
         for (bp in lo:hi) {
-          if (is.null(dp_paths[[bp]])) next
-          for (path in dp_paths[[bp]]) {
-            # Vectorized check: oh1 and oh2 vs all prior OHs on the path
-            prior <- path$ohs
-            if (!all(compat_matrix[oh1, prior])) next
-            if (!all(compat_matrix[oh2, prior])) next
-
-            # Multiplicative scoring
-            candidates[[length(candidates) + 1L]] <- list(
-              score = path$score * oh1_scores[b] * oh2_scores[b],
-              positions = c(path$positions, b),
-              ohs = c(prior, oh1, oh2)
-            )
+          if (is.null(dp[[bp]])) next
+          candidate_score <- dp[[bp]]$score * oh1_scores[b] * oh2_scores[b]
+          if (candidate_score > best_score) {
+            best_score <- candidate_score
+            best_prev <- dp[[bp]]
           }
         }
 
-        # Beam pruning: keep top beam_width paths by score
-        if (length(candidates) > 0L) {
-          if (length(candidates) > beam_width) {
-            scores <- vapply(candidates, function(c) c$score, numeric(1))
-            keep_idx <- order(scores, decreasing = TRUE)[seq_len(beam_width)]
-            candidates <- candidates[keep_idx]
-          }
-          dp_paths_new[[b]] <- candidates
+        if (is.finite(best_score) && !is.null(best_prev)) {
+          dp_new[[b]] <- list(
+            score = best_score,
+            positions = c(best_prev$positions, b)
+          )
         }
       }
 
-      dp_paths <- dp_paths_new
+      dp <- dp_new
     }
   }
 
   # Find best final path
   best_total <- -Inf
-  best_path <- NULL
+  best_entry <- NULL
 
   for (b in seq_len(n_codons - 1L)) {
     last_tile <- n_codons - b
     if (last_tile < min_codons || last_tile > max_codons) next
-    if (is.null(dp_paths[[b]])) next
-    for (path in dp_paths[[b]]) {
-      if (path$score > best_total) {
-        best_total <- path$score
-        best_path <- path
-      }
+    if (is.null(dp[[b]])) next
+    if (dp[[b]]$score > best_total) {
+      best_total <- dp[[b]]$score
+      best_entry <- dp[[b]]
     }
   }
 
-  if (!is.finite(best_total) || is.null(best_path)) {
+  if (!is.finite(best_total) || is.null(best_entry)) {
     return(NULL)
   }
 
   list(
-    boundaries = best_path$positions,
-    total_score = best_total,
-    path_ohs = best_path$ohs
+    boundaries = best_entry$positions,
+    total_score = best_total
   )
 }
 
