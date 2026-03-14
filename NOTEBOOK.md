@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-14 — Entry 42: Raw product scoring + narrow K range for OOGGA DP -->
+<!-- Last updated: 2026-03-14 — Entry 43: Reaction-aware tile DP + SB boundary sub-block fix -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -43,6 +43,9 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-04 | SB-first two-pass DP architecture | Decide globals (SBs) first, locals (tiles) second — natural order | Entry 20 |
 | 2026-03-07 | Remove overhang_fidelity_threshold; BsmBI data everywhere | Threshold was T4-calibrated (117 OH >= 0.95); under BsmBI cycling only 1 passes — meaningless | Entry 23 |
 | 2026-03-08 | SB-first MC + within-SB DP as default boundary method | Reaction-aware scoring achieves min set fidelity ≥0.99 vs 0.78-0.89 legacy | Entry 24 |
+| 2026-03-14 | Enzyme-aware alien sets for tile DP (oh1=BsaI, oh2=BsmBI) | oh1 and oh2 are in different enzyme pots; checking both against all aliens was over-constrained | Entry 43 |
+| 2026-03-14 | Remove tile-to-tile collision checking | Each tile's assembly reaction is independent (separate pot); Bellman DP replaces beam search | Entry 43 |
+| 2026-03-14 | Reduce SB DP max by overlap_codons*3 | Prevents oversized sub-blocks at boundary tiles after overlap zone extension | Entry 43 |
 | 2026-03-08 | Drop tile MC from production pipeline | Benchmarking: tile MC = DP v2 on 2/3 genes, degraded TRIO; 500-900s wasted | Entry 24 |
 | 2026-03-08 | Document & shelve convergent U6T7 tornado design | Promising but needs wet-lab validation; current pipeline working; can add as config toggle later | Entry 25 |
 | 2026-03-08 | Re-evaluate DP vs MC tile boundaries with corrected metrics | Previous comparison invalidated by missing cassette OHs + blacklist filters | Entry 26 |
@@ -1612,3 +1615,49 @@ Implemented the clearance-aware overlap handling designed in Entry 39. Three cha
 **Related commits**:
 - `f3811da` — feat: clearance-aware overlap codon handling (overlap_codons 4→6)
 - `d548788` — fix: correct clearance split test geometry
+
+---
+
+### 2026-03-14 13:36 — Entry 43: Reaction-aware tile DP + SB boundary sub-block fix
+
+**Type**: session
+**Status**: completed
+**Tags**: [oogga, tile-dp, collision, enzyme-pots, bellman, superblock, sub-block, alien-sets]
+
+**Goal**: Remove unnecessary collision constraints from the tile DP that don't reflect the physical biochemistry, and fix 3 test failures caused by tiny sub-blocks at SB boundaries.
+
+**Approach**: Three biochemistry-driven simplifications to `oogga_tile_dp_solve_k()`:
+1. **Remove tile-to-tile path collision** — each tile's assembly reaction is a separate pot, so tiles never see each other's overhangs. Replaced beam search with standard Bellman DP (single best per position, no path tracking).
+2. **Remove oh1↔oh2 mutual compat check** — oh1 is BsaI (Level 1), oh2 is BsmBI (Level 1b). Different enzymes, different pots.
+3. **Split alien sets by enzyme** — oh1 checks BsaI-pot aliens only (oh_L, oh4, SB junctions before segment); oh2 checks BsmBI-pot aliens only (oh3, SB junctions at/after segment).
+
+Then fixed 2 bugs exposed by the TRIO gene (9294 nt):
+- **30 nt sub-block**: `convert_partition_to_splits()` was adding a bsmbi_3wt split for the boundary tile's own SB boundary, creating a sub-block of just the 12 nt overlap zone + 18 nt enzyme overhead. Fix: skip `tiles$end_nt[t] == boundary_nt`.
+- **Oversized merged block**: After skipping the tiny split, the merged sub-block exceeded max by 7 nt because the SB DP didn't account for the overlap extension. Fix: reduce SB DP max by `overlap_codons * 3`.
+
+**Key findings**:
+- AKAP11: Before fix, 3/4 multi-tile segments failed at `max_identity=2` (fell back to 3 with score=0). After: all 4 succeed at `max_identity=2` with geo-mean scores 0.25–0.36
+- `split_nt` is the **last nucleotide** of a sub-block, not a tile boundary position. Values are at `boundary_nt + 4` (bsai_5wt) and `boundary_nt + 12` (bsmbi_3wt) — in the overlap zone
+- The old test `all(splits$split_nt %in% plan$tiles$end_nt)` was fundamentally wrong for the two-OH model
+
+**Decisions made**:
+- Enzyme-aware alien sets: physically correct per-reaction modeling (over single combined alien set)
+- Bellman DP over beam search: tile reactions are independent, no path collision needed
+- Reduce SB DP max globally by `overlap_codons*3`: prevents the geometry from ever creating oversized boundary-tile sub-blocks (over post-hoc local re-split)
+
+**Artifacts**:
+- `R/06b_oogga_dp.R` — Bellman DP, split alien sets in `oogga_tile_dp_solve_k()`, `search_tile_boundaries_oogga()`, `tile_segments_oogga()`
+- `R/06_overhang_selection.R` — `sb_max_content` with overlap deduction in `plan_assembly()`, boundary tile skip in `convert_partition_to_splits()`
+- `tests/testthat/test-oogga-dp.R` — Updated signatures, fixed SB DP param names, fixed oh2 overlap test
+- `tests/testthat/test-overhang-selection.R` — Fixed split_nt assertion
+- `benchmarks/260313_post_tile_collision_fix/` — AKAP11 benchmark results
+
+**Related commits**:
+- `9b76035` — refactor: Reaction-aware tile DP — remove unnecessary collision constraints
+- `8d119d0` — benchmark: AKAP11 post tile collision fix
+- `c2aacaf` — wip: checkpoint (SB max fix, boundary tile skip, enzyme-aware aliens)
+
+**Verification**:
+- OOGGA tests: 120/120 pass
+- Full suite: 5271 pass, 1 pre-existing failure (`test-gg-simulator.R:309` — tile 1 K5E on TEST_GENE_SEQ)
+- AKAP11 pipeline: all segments succeed at max_identity=2, blocks 153–1728 nt (within 1800 limit)
