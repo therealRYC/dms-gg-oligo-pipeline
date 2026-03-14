@@ -1195,11 +1195,50 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
     seg_end <- seg$end_nt
     seg_len <- seg_end - seg_start + 1L
     seg_n_codons <- seg_len %/% 3L
+    sb_id <- seg$sb_id
 
     cli::cli_alert_info(paste0(
       "  Segment ", seg_idx, "/", length(segments),
       ": nt ", seg_start, "-", seg_end,
-      " (", seg_n_codons, " codons)"
+      " (", seg_n_codons, " codons, SB ", sb_id, ")"
+    ))
+
+    # --- Per-segment enzyme-aware alien set construction ---
+    # SB boundaries BEFORE this segment → BsaI pot (constrain oh1)
+    bsai_sb_ohs <- character(0)
+    if (sb_id > 1L) {
+      for (b in seq_len(sb_id - 1L)) {
+        oh1_b <- all_sb_oh1s[b]
+        oh2_b <- all_sb_oh2s[b]
+        if (!is.na(oh1_b) && nchar(oh1_b) == 4L) bsai_sb_ohs <- c(bsai_sb_ohs, oh1_b)
+        if (!is.na(oh2_b) && nchar(oh2_b) == 4L) bsai_sb_ohs <- c(bsai_sb_ohs, oh2_b)
+      }
+    }
+    bsai_sb_rcs <- if (length(bsai_sb_ohs) > 0L) {
+      vapply(bsai_sb_ohs, reverse_complement, character(1), USE.NAMES = FALSE)
+    } else {
+      character(0)
+    }
+    oh1_aliens <- unique(c(bsai_base_aliens, bsai_sb_ohs, bsai_sb_rcs))
+
+    # SB boundaries AT/AFTER this segment → BsmBI pot (constrain oh2)
+    bsmbi_sb_ohs <- character(0)
+    for (b in sb_id:n_sb) {
+      oh1_b <- all_sb_oh1s[b]
+      oh2_b <- all_sb_oh2s[b]
+      if (!is.na(oh1_b) && nchar(oh1_b) == 4L) bsmbi_sb_ohs <- c(bsmbi_sb_ohs, oh1_b)
+      if (!is.na(oh2_b) && nchar(oh2_b) == 4L) bsmbi_sb_ohs <- c(bsmbi_sb_ohs, oh2_b)
+    }
+    bsmbi_sb_rcs <- if (length(bsmbi_sb_ohs) > 0L) {
+      vapply(bsmbi_sb_ohs, reverse_complement, character(1), USE.NAMES = FALSE)
+    } else {
+      character(0)
+    }
+    oh2_aliens <- unique(c(bsmbi_base_aliens, bsmbi_sb_ohs, bsmbi_sb_rcs))
+
+    cli::cli_alert_info(paste0(
+      "    oh1 aliens (BsaI pot): ", length(oh1_aliens),
+      ", oh2 aliens (BsmBI pot): ", length(oh2_aliens)
     ))
 
     # --- Forward extension for non-last segments ---
@@ -1240,7 +1279,7 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
       )
       cli::cli_alert_info("    Single-tile segment (no DP needed)")
     } else {
-      # --- Multi-tile segment: run tile DP or greedy ---
+      # --- Multi-tile segment: run tile DP ---
       # Pass extended CDS for oh2 computation, but n_codons_tile constrains
       # tile boundaries to the original segment length. The extended CDS
       # provides nucleotides for oh2 of the last tile to extend into the
@@ -1254,9 +1293,9 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
           dp_k_range = dp_k_range,
           overlap_codons = overlap_codons,
           eff_lookup = eff_lookup,
-          alien_ohs = tile_alien_ohs,
+          alien_ohs_oh1 = oh1_aliens,
+          alien_ohs_oh2 = oh2_aliens,
           max_identity = max_identity,
-          beam_width = beam_width,
           n_codons_tile = seg_n_codons
         )
 
