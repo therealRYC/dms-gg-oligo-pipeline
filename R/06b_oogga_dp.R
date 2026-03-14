@@ -1164,6 +1164,8 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
 #' @param multi_k Logical, try multiple tile counts in DP?
 #' @param dp_k_range Integer, search K_ideal +/- dp_k_range
 #' @param overlap_codons Integer, number of overlap codons between adjacent tiles
+#' @param k_range_mode Character, "narrow" or "wide" — passed to tile DP
+#' @param k_scoring Character, "geo_mean" or "raw" — passed to tile DP
 #' @return Data frame with tile info (same format as search_tile_boundaries_oogga),
 #'   with attribute "max_identity_used" set to the worst max_identity across segments.
 tile_segments_oogga <- function(cds, sb_result, gene_len,
@@ -1173,7 +1175,9 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
                                 bsmbi_base_aliens = character(0),
                                 max_identity = 2L,
                                 multi_k = TRUE, dp_k_range = 5L,
-                                overlap_codons = 4L) {
+                                overlap_codons = 4L,
+                                k_range_mode = "narrow",
+                                k_scoring = "geo_mean") {
   sb_df <- sb_result$boundaries
   n_sb <- sb_result$n_superblocks
 
@@ -1333,7 +1337,9 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
           alien_ohs_oh1 = oh1_aliens,
           alien_ohs_oh2 = oh2_aliens,
           max_identity = max_identity,
-          n_codons_tile = seg_n_codons
+          n_codons_tile = seg_n_codons,
+          k_range_mode = k_range_mode,
+          k_scoring = k_scoring
         )
 
       # Track worst-case max_identity used across segments
