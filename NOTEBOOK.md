@@ -60,7 +60,8 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-10 | MC refinement not useful for tile boundaries | 0 moves accepted across all genes; DP at mi=3 is locally optimal under mi=2 MC constraints | Entry 30 |
 | 2026-03-09 | Precompute static checks for OOGGA DP (20-76x speedup) | Position-dependent but path-independent checks (self-palindrome, alien compat) computed once before DP loop | Entry 28 |
 | 2026-03-13 | Two-OH SB DP model: score oh1+oh2 at each SB boundary | Multiplicative scoring of both overhangs at SB junctions; 5 static checks per position; forward CDS extension replaces post-hoc SB-boundary-tile extension | Entry 37 |
-| 2026-03-13 | Increase overlap_codons 4→6 + distance-aware assignment (pending) | 6-codon overlap with 3/3 split gives 5 nt clearance from ligation junctions (vs 2 nt at 4-codon); matches DIMPLE's 4 nt buffer without dead zones | Entry 39 |
+| 2026-03-13 | Increase overlap_codons 4→6 + distance-aware assignment | 6-codon overlap with 3/3 split gives 5 nt clearance from ligation junctions (vs 2 nt at 4-codon); matches DIMPLE's 4 nt buffer without dead zones | Entry 39 |
+| 2026-03-14 | Implemented clearance-aware overlap codon handling | overlap_codons default 4→6, binary quality→clearance scoring in assign_variants_to_tiles(), config validation (even, >=2). All 5271 tests pass. | Entry 40 |
 | 2026-03-13 | overhang_score() returns NA for unknown overhangs (not 0.5) | Fabricated 0.5 fallback could mislead DP; NA makes unscorable boundaries explicit and excluded | Entry 41 |
 | 2026-03-14 | Raw product scoring + narrow K range hardcoded | 2×2 factorial benchmark: raw picks fewer tiles (31 vs 35) with higher total assembly probability; wide K is 6x slower with zero benefit | Entry 42 |
 
@@ -1582,3 +1583,32 @@ Two changes needed:
 - `730b132` — Hardcode raw product scoring and narrow K range in OOGGA DP
 - `381acf1` — Add historical note to K-handling benchmark script
 - `993ea82` — brainstorm: K-scoring method decision
+
+---
+
+### 2026-03-14 — Entry 40: Implemented clearance-aware overlap codon handling
+
+**Status**: Complete
+**Tags**: [tiling, overhang, clearance, overlap, variant-assignment, config]
+
+Implemented the clearance-aware overlap handling designed in Entry 39. Three changes:
+
+1. **`R/00_config.R`**: Default `overlap_codons` changed from 4 to 6. Added validation requiring the value to be even (asymmetric splits otherwise) and >= 2.
+
+2. **`R/05_tiling.R`**: `assign_variants_to_tiles()` now uses **clearance scoring** — the distance (in nt) from the nearest overhang junction — instead of binary quality (interior=2 / edge=1). The tile with the highest clearance wins. The 4-nt overhang vs 3-nt codon mismatch prevents exact ties, naturally producing a 3/3 split from 6 overlap codons without explicit tie-breaking logic. `partial_oh_overlap` flag triggers on `clearance < 0` (semantically identical to old `quality == 1`).
+
+3. **Tests**: Three new tests in `test-tiling.R`:
+   - Clearance scoring produces symmetric 3/3 split (28-codon gene, 20-codon tiles, 6-codon overlap)
+   - Config rejects odd `overlap_codons`
+   - Config rejects `overlap_codons < 2`
+
+**Result**: 5,271 tests pass. The 1 failure in `test-gg-simulator.R:309` is pre-existing (stochastic assembly simulation issue, fails on different variants each run).
+
+**Artifacts**:
+- `R/00_config.R` — overlap_codons default + validation
+- `R/05_tiling.R` — clearance-based `assign_variants_to_tiles()`
+- `tests/testthat/test-tiling.R` — 3 new tests
+
+**Related commits**:
+- `f3811da` — feat: clearance-aware overlap codon handling (overlap_codons 4→6)
+- `d548788` — fix: correct clearance split test geometry
