@@ -251,9 +251,13 @@ Our R is two-pass:
 
 ### 7. K Selection and Cross-K Comparison
 
-OOGGA either uses a user-specified `n_frag` or searches all possible K values and compares raw scores — which is problematic because multiplicative scores shrink with more fragments (a 3-fragment solution with score 0.5 might be better per-junction than a 2-fragment solution with score 0.6).
+OOGGA either uses a user-specified `n_frag` or searches all possible K values and compares raw scores. Our R searches a focused range around `K_ideal ± dp_k_range` and compares by **geometric mean** (`score^(1/K)`).
 
-Our R searches a focused range around `K_ideal ± dp_k_range` and compares by **geometric mean** (`score^(1/K)`), which normalizes for fragment count and fairly compares per-boundary quality across different K values.
+**Reconsideration**: OOGGA's raw-score comparison may actually be correct here. With multiplicative scoring, adding a boundary always costs — it multiplies the total by some fraction < 1. This is **parsimony by construction**: an extra boundary only survives if its overhang quality offsets the inherent cost of another junction. This models physical reality (every junction is a failure point).
+
+The geometric mean normalization removes this parsimony signal. It asks "what's the average per-junction quality?" but is blind to the fact that fewer high-quality junctions beat more moderate-quality junctions in total assembly success probability. Example: 2 junctions at 0.90 = 0.81 total, 4 junctions at 0.95 = 0.81 total — equal by geo-mean, but the 2-junction solution is simpler and equally successful.
+
+In our pipeline, length constraints impose a hard minimum K, so the question is whether geo-mean vs raw-score differs for K values above that minimum. Investigation in progress (separate session).
 
 ### 8. Infeasibility Handling
 
@@ -275,9 +279,49 @@ OOGGA asserts and crashes (`assert self.sorted_score_li`). Our R gracefully rela
 | Tie-breaking | Implicit leftward | Beam retains multiple options |
 | Unknown overhangs | Skip entirely (KeyError) | ~~0.5 fallback~~ → fixing to skip/NA |
 
+## Feasibility: SB Tiebreaking via Downstream Tile DP Evaluation
+
+### Idea
+
+When multiple SB boundary solutions have similar scores, run the full tile DP on each and pick the one with the best downstream min-fidelity (or fewest max_identity=3 fallbacks).
+
+### Tile DP Timing (from benchmarks)
+
+| Segment size (codons) | Time (s) | Source |
+|----------------------|----------|--------|
+| ~265 | 3.1–3.6 | AKAP11, TRIO |
+| ~297 | 4.0 | AKAP11 |
+| ~390 | 5.9 | AKAP11 |
+| ~469 | 6.5 | TRIO |
+| ~500–548 | 10.5–11.6 | AKAP11, TRIO |
+| ~578–591 | 9.5–12.3 | GRIN2A, TRIO |
+
+Rough rule: ~5–12s per segment, scaling with segment size. Full tile DP for a gene = sum across all segments (AKAP11 4 segments ≈ 30s, TRIO 6 segments ≈ 50s).
+
+### Cost of N-candidate evaluation
+
+| N candidates | AKAP11 (4 seg) | TRIO (6 seg) |
+|-------------|----------------|--------------|
+| 3 | ~1.5 min | ~2.5 min |
+| 5 | ~2.5 min | ~4.5 min |
+| 10 | ~5 min | ~9 min |
+| 100 | ~47 min | ~90 min |
+
+### Feasibility verdict
+
+**3–5 diverse SB candidates is feasible** (~2–5 min overhead, acceptable for a run-once-per-gene pipeline). 100 is not.
+
+### Implementation considerations
+
+- The SB beam search already retains up to `beam_width=10` paths per terminal position. These could be harvested as candidates — but many may be near-identical (same intermediate path, slightly different last boundary).
+- **Diversity filtering** before running tile DPs would help: cluster beam paths by boundary position uniqueness, pick representatives from distinct clusters. No point evaluating two SB solutions that differ only by 3 nt at one boundary.
+- **Selection criterion**: "fewest tile segments requiring max_identity=3 fallback" may be better than raw min-fidelity, since max_identity=3 means weaker collision guarantees. Many tile DPs are currently falling back (the `Total score: 0` entries in benchmark logs are all fallback cases).
+- The SB DP's K range (`K_min` to `K_min + 2`) is tight. Different K values would produce structurally different SB solutions worth evaluating downstream.
+
 ## Open Questions (remaining)
 
 1. **What does the paper add?** — The preprint may discuss the algorithm's theoretical properties, benchmarks, or design rationale not evident from code alone.
 2. **Scoring with BsmBI cycling vs. T4 37°C** — OOGGA defaults to `FileS04_T4_18h_37C.csv`. Our pipeline uses BsmBI cycling conditions. How do these differ in practice? The underlying Potapov data is T4-only; we use Pryor et al. 2020 for BsmBI.
 3. **How does `eval_frags.py` relate?** — Standalone overhang evaluator using the same `load_csv_table_as_di()`. Useful for scoring externally-chosen overhangs (e.g., NEB SplitSet results) without running the DP.
 4. **Beam width sensitivity** — How does beam_width=10 compare to beam_width=1 (OOGGA-equivalent) on our benchmark genes? Are we actually using the beam diversity, or do paths converge?
+5. **Geo-mean vs raw-score K selection** — Do they pick different K values on benchmark genes? Investigation in progress (separate session).
