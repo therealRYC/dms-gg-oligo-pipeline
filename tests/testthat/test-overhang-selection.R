@@ -355,13 +355,13 @@ test_that("overhang_score computes P_fid * P_eff correctly", {
   expect_equal(score3, 0.996 * 1.0, tolerance = 1e-6)
 })
 
-test_that("overhang_score falls back to 0.5 for unknown overhangs", {
+test_that("overhang_score returns NA for unknown overhangs", {
   fid_lookup <- c("AAAA" = 0.996)
   eff_lookup <- c("AAAA" = 1.0)
 
-  # "NNNN" not in lookups -> fid=0.5, eff=0.5
+  # "NNNN" not in lookups -> NA (unscorable, excluded from optimization)
   score <- overhang_score("NNNN", fid_lookup, eff_lookup)
-  expect_equal(score, 0.5 * 0.5, tolerance = 1e-6)
+  expect_true(is.na(score))
 })
 
 test_that("precompute_boundary_scores returns correct structure", {

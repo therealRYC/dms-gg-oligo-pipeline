@@ -338,13 +338,28 @@ report_reaction_fidelity_summary <- function(assembly_plan) {
     )
   }
 
+  # Note about unscorable boundaries (overhangs not in NEB fidelity/efficiency data)
+  n_unscorable <- assembly_plan$summary$n_unscorable_boundaries %||% 0L
+  unscorable_lines <- character(0)
+  if (n_unscorable > 0L) {
+    unscorable_lines <- c(
+      "",
+      paste0(
+        "**Note:** ", n_unscorable,
+        " candidate tile boundary position(s) had overhangs with no NEB",
+        " fidelity/efficiency data and were excluded from optimization."
+      )
+    )
+  }
+
   c(
     "## 5b. Reaction Fidelity Summary", "",
     "Set fidelity for each tile's BsaI and BsmBI reactions,",
     "computed from the actual block overhangs after construction:", "",
     md_table(df), "",
     summary_line, "",
-    warn_lines
+    warn_lines,
+    unscorable_lines
   )
 }
 
