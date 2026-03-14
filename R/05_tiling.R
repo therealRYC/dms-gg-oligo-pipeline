@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-20 — Add tile overlap and smart variant-to-tile assignment (BUG-1)
+# Last updated: 2026-03-14 — Clearance-based variant assignment (distance from junction)
 # 05_tiling.R — Partition gene into tiles for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -140,10 +140,12 @@ partition_tiles <- function(cds, mutable_size_nt, overlap_codons = 4L) {
 #' Assign each variant to the best tile for its mutation
 #'
 #' With overlapping tiles, a codon position may fall in multiple tiles.
-#' This function prefers the tile where the codon is fully in the mutable
-#' interior (not overlapping with oh1 or oh2). For gene-edge codons that
-#' can only be in one tile and partially overlap oh1/oh2, the variant is
-#' still assigned but flagged with an `overhang_note`.
+#' This function assigns each codon to the tile where it has the greatest
+#' clearance (distance in nt) from the nearest overhang junction (oh1/oh2).
+#' Maximizing clearance reduces ligation positional bias (Coyote-Maestas
+#' et al. 2023, DIMPLE). For gene-edge codons that can only be in one tile
+#' and have negative clearance (nucleotides inside an overhang), the variant
+#' is still assigned but flagged with an `overhang_note`.
 #'
 #' @param variants Data frame from design_mutations()
 #' @param tiles Data frame from partition_tiles() or search_tile_boundaries_dp()
@@ -160,7 +162,7 @@ assign_variants_to_tiles <- function(variants, tiles) {
     codon_end_nt <- pos * 3L
 
     best_tile <- NA_integer_
-    best_quality <- -1L  # 2 = fully interior, 1 = partially in oh region
+    best_clearance <- -Inf  # distance (nt) from nearest overhang junction
 
     for (t in seq_len(nrow(tiles))) {
       tile_start <- tiles$start_nt[t]
@@ -168,27 +170,29 @@ assign_variants_to_tiles <- function(variants, tiles) {
 
       # Is this codon within this tile?
       if (codon_start_nt >= tile_start && codon_end_nt <= tile_end) {
-        # Local positions within the tile
+        # Local positions within the tile (1-based)
         local_start <- codon_start_nt - tile_start + 1L
         local_end <- codon_end_nt - tile_start + 1L
         tile_len <- tile_end - tile_start + 1L
 
-        # Fully in mutable interior: past oh1 (4 nt) and before oh2 (last 4 nt)
-        if (local_start >= 5L && local_end <= tile_len - 4L) {
-          quality <- 2L
-        } else {
-          quality <- 1L
-        }
+        # Clearance = distance (nt) from nearest overhang junction.
+        # oh1 occupies positions 1-4; oh2 occupies last 4 positions.
+        # dist_from_oh1: how far past oh1 the codon starts (0 = immediately after)
+        # dist_from_oh2: how far before oh2 the codon ends (0 = immediately before)
+        dist_from_oh1 <- local_start - 4L
+        dist_from_oh2 <- (tile_len - 4L) - local_end
+        clearance <- min(dist_from_oh1, dist_from_oh2)
 
-        if (quality > best_quality) {
-          best_quality <- quality
+        if (clearance > best_clearance) {
+          best_clearance <- clearance
           best_tile <- tiles$tile_id[t]
         }
       }
     }
 
     pos_tile[pos] <- best_tile
-    if (!is.na(best_tile) && best_quality == 1L) {
+    # Negative clearance = codon has nucleotides inside an overhang
+    if (!is.na(best_tile) && best_clearance < 0L) {
       pos_note[pos] <- "partial_oh_overlap"
     }
   }

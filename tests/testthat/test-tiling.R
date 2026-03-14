@@ -32,7 +32,7 @@ test_that("partition_tiles covers entire gene with overlap", {
   expect_equal(tiles$start_nt[1], 1)
   # Last tile ends at gene length
   expect_equal(tiles$end_nt[nrow(tiles)], nchar(cds))
-  # Adjacent tiles overlap (with default overlap_codons=4, tiles share boundary codons)
+  # Adjacent tiles overlap (with default overlap_codons=6, tiles share boundary codons)
   for (i in seq_len(nrow(tiles) - 1)) {
     # Next tile starts before or at current tile's end (overlap region)
     expect_true(tiles$start_nt[i + 1] <= tiles$end_nt[i],
@@ -103,6 +103,95 @@ test_that("partition_tiles covers long gene completely with overlap", {
     covered[tiles$start_nt[i]:tiles$end_nt[i]] <- TRUE
   }
   expect_true(all(covered))
-  # Should have multiple tiles (2100 nt / 77 effective codons per step ~ 9+ tiles)
+  # Should have multiple tiles (2100 nt / 75 effective codons per step ~ 10 tiles)
   expect_true(nrow(tiles) >= 8)
+})
+
+test_that("clearance scoring produces symmetric N/2 split of overlap codons", {
+  # Create a gene long enough for 2 tiles with 6-codon overlap.
+  # With mutable_size = 30 nt (10 codons) and overlap_codons = 6:
+  #   Tile 1: codons 1-10 (nt 1-30)
+  #   Tile 2: codons 5-14 (nt 13-42)
+  #   Overlap: codons 5-10 (6 codons)
+  #
+  # For each overlap codon, clearance in each tile:
+  #   Codon 5: tile1 local_start=13, tile2 local_start=1
+  #     tile1: dist_oh1=13-4=9, dist_oh2=(30-4)-15=11 → clearance=9
+
+  #     tile2: dist_oh1=1-4=-3, dist_oh2=(30-4)-3=23 → clearance=-3
+  #     → tile1 (clearance 9 > -3)
+  #   Codon 6: tile1: oh1=16-4=12, oh2=26-18=8 → 8
+  #     tile2: oh1=4-4=0, oh2=26-6=20 → 0 → tile1
+  #   Codon 7: tile1: oh1=19-4=15, oh2=26-21=5 → 5
+  #     tile2: oh1=7-4=3, oh2=26-9=17 → 3 → tile1
+  #   Codon 8: tile1: oh1=22-4=18, oh2=26-24=2 → 2
+  #     tile2: oh1=10-4=6, oh2=26-12=14 → 6 → tile2
+  #   Codon 9: tile1: oh1=25-4=21, oh2=26-27=-1 → -1
+  #     tile2: oh1=13-4=9, oh2=26-15=11 → 9 → tile2
+  #   Codon 10: tile1: oh1=28-4=24, oh2=26-30=-4 → -4
+  #     tile2: oh1=16-4=12, oh2=26-18=8 → 8 → tile2
+  #
+  # Result: codons 5,6,7 → tile1; codons 8,9,10 → tile2 (3/3 split)
+
+  # Build a 42-nt CDS (14 codons): ATG + 12 Ala + stop
+  cds <- paste0("ATG", paste0(rep("GCT", 12), collapse = ""), "TAA")
+  expect_equal(nchar(cds), 42)
+
+  cu <- builtin_human_codon_usage()
+  variants <- design_mutations(cds, cu)
+
+  # partition with 10-codon tiles and 6-codon overlap
+  tiles <- partition_tiles(cds, 30L, overlap_codons = 6L)
+  expect_equal(nrow(tiles), 2)
+
+  # Assign variants to tiles
+  variants <- assign_variants_to_tiles(variants, tiles)
+
+  # Check the overlap codons (5-10) — should split 3/3
+  overlap_positions <- 5:10
+  for (pos in overlap_positions) {
+    assigned_tile <- unique(variants$tile_id[variants$position == pos])
+    if (pos <= 7) {
+      expect_equal(assigned_tile, 1L,
+        info = paste("Overlap codon", pos, "should go to tile 1 (higher clearance)")
+      )
+    } else {
+      expect_equal(assigned_tile, 2L,
+        info = paste("Overlap codon", pos, "should go to tile 2 (higher clearance)")
+      )
+    }
+  }
+})
+
+test_that("overlap_codons must be even", {
+  tmp_config <- tempfile(fileext = ".yaml")
+  config_lines <- c(
+    'gene_cds: "ATGGCTGAATAA"',
+    paste0("polIII_promoter: \"", TEST_POLIII, "\""),
+    "paqci_star2: AGTC",
+    "paqci_star1: TCGA",
+    "overlap_codons: 5"
+  )
+  writeLines(config_lines, tmp_config)
+
+  expect_error(load_config(tmp_config), "overlap_codons must be even")
+
+  unlink(tmp_config)
+})
+
+test_that("overlap_codons must be >= 2", {
+  tmp_config <- tempfile(fileext = ".yaml")
+  config_lines <- c(
+    'gene_cds: "ATGGCTGAATAA"',
+    paste0("polIII_promoter: \"", TEST_POLIII, "\""),
+    "paqci_star2: AGTC",
+    "paqci_star1: TCGA",
+    "overlap_codons: 1"
+  )
+  writeLines(config_lines, tmp_config)
+
+  # Should fail both checks: < 2 and odd
+  expect_error(load_config(tmp_config), "overlap_codons must be >= 2")
+
+  unlink(tmp_config)
 })

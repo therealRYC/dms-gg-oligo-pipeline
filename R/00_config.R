@@ -44,7 +44,7 @@ load_config <- function(config_path) {
     oogga_beam_width = 10L,
     multi_k_search = TRUE,
     barcodes_per_variant = 10L,
-    overlap_codons = 4L,
+    overlap_codons = 6L,
     codon_table_path = NULL,
     include_synonymous = FALSE,
     auto_domesticate = TRUE,
@@ -299,6 +299,17 @@ validate_config <- function(cfg) {
   }
   if (cfg$barcodes_per_variant < 1L) {
     errors <- c(errors, "barcodes_per_variant must be an integer >= 1")
+  }
+
+  # overlap_codons validation: must be even and >= 2
+  if (cfg$overlap_codons < 2L) {
+    errors <- c(errors, "overlap_codons must be >= 2")
+  }
+  if (cfg$overlap_codons %% 2L != 0L) {
+    errors <- c(errors, paste0(
+      "overlap_codons must be even (got ", cfg$overlap_codons,
+      "). Odd values create asymmetric mutable/immutable splits at tile boundaries."
+    ))
   }
 
   if (length(errors) > 0) {
