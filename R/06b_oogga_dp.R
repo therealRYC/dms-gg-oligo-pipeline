@@ -573,17 +573,21 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
   # Build compatibility matrix
   compat <- build_oh_compatibility(max_identity)
 
-  # Determine K range
+  # Determine K range (narrow: K_min to K_min+2)
+  # Raw product scoring: extra boundaries must earn their keep by improving
+  # junction quality — embeds soft parsimony without needing wide K search.
   K_min <- max(1L, ceiling(total_len / max_block_length) - 1L)
   K_max <- min(K_min + 2L, floor(total_len / min_block_length) - 1L)
   k_range <- seq(K_min, K_max)
 
-  cli::cli_alert_info("OOGGA SB DP: K range [{K_min}, {K_max}]")
+  cli::cli_alert_info(
+    "OOGGA SB DP: K range [{K_min}, {K_max}]"
+  )
 
   # Run DP for each K (two-OH model)
-  # Multiplicative scoring: compare via geometric mean (score^(1/K))
+  # Raw product scoring: higher score = higher total assembly probability
   best_result <- NULL
-  best_geo_mean <- -Inf
+  best_comparison <- -Inf
 
   run_dp <- function(compat_mat, mi) {
     for (K in k_range) {
@@ -596,9 +600,9 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
         max_identity = mi
       )
       if (!is.null(result) && result$total_score > 0) {
-        geo_mean <- result$total_score^(1 / K)
-        if (geo_mean > best_geo_mean) {
-          best_geo_mean <<- geo_mean
+        comp <- result$total_score
+        if (comp > best_comparison) {
+          best_comparison <<- comp
           best_result <<- result
           best_result$K <<- K
         }
@@ -943,7 +947,8 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   # Build compatibility matrix
   compat <- build_oh_compatibility(max_identity)
 
-  # Determine K range (use effective_max_codons to account for overlap extension)
+  # Determine K range (narrow: K_ideal +/- dp_k_range)
+  # Raw product scoring embeds soft parsimony — wide K search adds no benefit.
   K_ideal <- max(1L, ceiling(n_codons / effective_max_codons) - 1L)
   if (multi_k) {
     K_lo <- max(1L, K_ideal - dp_k_range)
@@ -959,9 +964,9 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   )
 
   # Run collision-aware DP for each K
-  # Multiplicative scoring: compare via geometric mean (score^(1/K))
+  # Raw product scoring: higher score = higher total assembly probability
   best_result <- NULL
-  best_geo_mean <- -Inf
+  best_comparison <- -Inf
 
   dp_start <- proc.time()
   for (K in K_lo:K_hi) {
@@ -974,9 +979,9 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
       max_identity = max_identity
     )
     if (!is.null(result) && result$total_score > 0) {
-      geo_mean <- result$total_score^(1 / K)
-      if (geo_mean > best_geo_mean) {
-        best_geo_mean <- geo_mean
+      comp <- result$total_score
+      if (comp > best_comparison) {
+        best_comparison <- comp
         best_result <- result
         best_result$K <- K
       }
@@ -1004,9 +1009,9 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
         max_identity = 3L
       )
       if (!is.null(result) && result$total_score > 0) {
-        geo_mean <- result$total_score^(1 / K)
-        if (geo_mean > best_geo_mean) {
-          best_geo_mean <- geo_mean
+        comp <- result$total_score
+        if (comp > best_comparison) {
+          best_comparison <- comp
           best_result <- result
           best_result$K <- K
         }

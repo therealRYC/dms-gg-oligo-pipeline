@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-13 — Entry 41: Remove 0.5 fallback for unknown overhangs -->
+<!-- Last updated: 2026-03-14 — Entry 42: Raw product scoring + narrow K range for OOGGA DP -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -62,6 +62,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-13 | Two-OH SB DP model: score oh1+oh2 at each SB boundary | Multiplicative scoring of both overhangs at SB junctions; 5 static checks per position; forward CDS extension replaces post-hoc SB-boundary-tile extension | Entry 37 |
 | 2026-03-13 | Increase overlap_codons 4→6 + distance-aware assignment (pending) | 6-codon overlap with 3/3 split gives 5 nt clearance from ligation junctions (vs 2 nt at 4-codon); matches DIMPLE's 4 nt buffer without dead zones | Entry 39 |
 | 2026-03-13 | overhang_score() returns NA for unknown overhangs (not 0.5) | Fabricated 0.5 fallback could mislead DP; NA makes unscorable boundaries explicit and excluded | Entry 41 |
+| 2026-03-14 | Raw product scoring + narrow K range hardcoded | 2×2 factorial benchmark: raw picks fewer tiles (31 vs 35) with higher total assembly probability; wide K is 6x slower with zero benefit | Entry 42 |
 
 ## Entries
 
@@ -1546,3 +1547,38 @@ Two changes needed:
 - `2c296f4` — Remove 0.5 fallback for unknown overhangs — treat as unscorable (NA)
 - `1c4d78a` — wip: checkpoint (core source changes)
 - `746b8a7` — wip: checkpoint (precompute + DP changes)
+
+---
+
+### Entry 42 — 2026-03-14 | decision: Raw product scoring + narrow K range for OOGGA DP
+
+**Context**: The OOGGA DP searches across multiple K values (number of internal boundaries) to find the best tiling. Two open questions: (1) how to compare scores across different K values, and (2) how wide a K range to search.
+
+**What we did**: Ran a 2×2 factorial benchmark on AKAP11 (5706 nt) comparing geometric mean vs raw product scoring × narrow vs wide K range. See [detailed analysis](Brainstorm/2026-03-14_k-scoring-method.md).
+
+**Key findings**:
+- Scoring method is the only variable that matters: A=B (narrow=wide with geo_mean), C=D (narrow=wide with raw), but A≠C (geo_mean≠raw)
+- Raw product: 31 tiles, min fidelity 0.866, total assembly probability 0.038
+- Geometric mean: 35 tiles, min fidelity 0.902, total assembly probability 0.022
+- Wide K range: 6x slower (367s vs 59s) with zero benefit for either scoring method
+- Raw product embeds "soft parsimony" — the product naturally penalizes unnecessary boundaries, so each extra cut must earn its keep
+
+**Decisions made**:
+- Hardcode raw product scoring — remove `k_scoring` parameter
+- Hardcode narrow K range — remove `k_range_mode` parameter
+- Both were experimental infrastructure for the benchmark, not production options
+
+**Verification**:
+- Full pipeline on AKAP11: 31 tiles, 4 SBs (matches benchmark condition C/D)
+- Unit tests: 3 pre-existing failures (not introduced by this change), 5252 pass
+
+**Artifacts**:
+- `R/06b_oogga_dp.R` — Removed k_scoring/k_range_mode from 3 functions, hardcoded raw scoring
+- `R/06_overhang_selection.R` — Removed config unpacking + pass-through
+- `scripts/bench_k_handling.R` — Added historical note
+- `Brainstorm/2026-03-14_k-scoring-method.md` — Full decision rationale
+
+**Related commits**:
+- `730b132` — Hardcode raw product scoring and narrow K range in OOGGA DP
+- `381acf1` — Add historical note to K-handling benchmark script
+- `993ea82` — brainstorm: K-scoring method decision
