@@ -149,9 +149,19 @@ for (cond in conditions) {
   mean_fid <- mean(assembly_plan$reaction_fidelity$set_fidelity)
   sb_raw_score <- assembly_plan$sb_result$total_score
 
-  # Per-tile K: count boundaries per segment
+  # Per-segment tile count: assign tiles to SB segments by start_nt overlap
   tiles_df <- assembly_plan$tiles
-  per_seg_tiles <- tapply(tiles_df$tile_id, tiles_df$sb_segment, length)
+  sb_df <- assembly_plan$sb_result$boundaries
+  gene_len_local <- nchar(gene$cds)
+  per_seg_tiles <- integer(0)
+  for (si in seq_len(nrow(sb_df))) {
+    seg_start <- sb_df$start_nt[si]
+    seg_end <- min(sb_df$end_nt[si], gene_len_local)
+    if (seg_start > gene_len_local) next
+    seg_tile_count <- sum(tiles_df$start_nt >= seg_start & tiles_df$start_nt <= seg_end)
+    per_seg_tiles <- c(per_seg_tiles, seg_tile_count)
+    names(per_seg_tiles)[length(per_seg_tiles)] <- as.character(si)
+  }
   per_seg_k <- per_seg_tiles - 1L  # boundaries = tiles - 1
 
   results[[cond$label]] <- list(
