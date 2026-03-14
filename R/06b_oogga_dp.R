@@ -226,9 +226,13 @@ precompute_sb_boundary_candidates <- function(full_seq, gene_len,
       if (oh1 %in% HOMOPOLYMER_4NT || oh2 %in% HOMOPOLYMER_4NT) next
 
       # Multiplicative score (same as tile DP)
-      scores[p] <- overhang_score(oh1, fid_lookup, eff_lookup) *
+      score <- overhang_score(oh1, fid_lookup, eff_lookup) *
         overhang_score(oh2, fid_lookup, eff_lookup)
-      valid[p] <- TRUE
+      # Skip boundaries with unscorable overhangs
+      if (!is.na(score)) {
+        scores[p] <- score
+        valid[p] <- TRUE
+      }
 
     } else {
       # --- Cassette-region: single-OH model ---
@@ -246,8 +250,12 @@ precompute_sb_boundary_candidates <- function(full_seq, gene_len,
       if (oh %in% PALINDROMIC_4NT) next
       if (oh %in% HOMOPOLYMER_4NT) next
 
-      scores[p] <- overhang_score(oh, fid_lookup, eff_lookup)
-      valid[p] <- TRUE
+      score <- overhang_score(oh, fid_lookup, eff_lookup)
+      # Skip boundaries with unscorable overhangs
+      if (!is.na(score)) {
+        scores[p] <- score
+        valid[p] <- TRUE
+      }
     }
   }
 
@@ -668,11 +676,11 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
 # METHOD A1: oogga_two_pass — SB-first OOGGA DP → per-SB tile OOGGA DP
 # =============================================================================
 
-#' Solve tile boundary placement with OOGGA collision-aware DP for fixed K
+#' Solve tile boundary placement with standard Bellman DP for fixed K
 #'
-#' Like dp_solve_k() but with collision checking. At each transition, checks
-#' both oh1 and oh2 at the candidate boundary against all prior OHs on the
-#' path, plus alien OHs (SB junction OHs, oh3, oh_L, oh4).
+#' Each candidate boundary is checked for self-palindrome and enzyme-specific
+#' alien compat only. No tile-to-tile collision check (reactions are independent)
+#' and no oh1↔oh2 mutual check (different enzyme pots: BsaI vs BsmBI).
 #'
 #' Scoring is multiplicative (OOGGA-faithful): each boundary contributes
 #' overhang_score(oh1) * overhang_score(oh2) to a running product.
@@ -686,7 +694,8 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
 #' @param oh1_scores Numeric vector: overhang_score(oh1) per boundary position
 #' @param oh2_scores Numeric vector: overhang_score(oh2) per boundary position
 #' @param boundary_valid Logical vector of valid positions
-#' @param alien_ohs Character vector of fixed overhangs to avoid
+#' @param alien_ohs_oh1 Character vector of BsaI-pot alien overhangs for oh1
+#' @param alien_ohs_oh2 Character vector of BsmBI-pot alien overhangs for oh2
 #' @param compat_matrix Named 256x256 logical compatibility matrix
 #' @param max_identity Integer, for self-palindrome check in overlap_pass
 #' @return List with boundaries, total_score, or NULL
@@ -1105,9 +1114,13 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
 #' that tile end positions align with SB boundaries — eliminating the skip
 #' warnings from `sb_dp_to_partition()` and the gene block explosion bug.
 #'
-#' ALL SB junction overhangs are treated as alien for tile search because
-#' every tile's Level 1 BsmBI reaction reconstructs the full gene, so all
-#' SB junction OHs appear in every tile's reaction pot.
+#' Enzyme-aware alien sets: oh1 (BsaI) and oh2 (BsmBI) are in different
+#' enzyme pots, so each gets its own alien set. SB junction OHs are split
+#' by which pot they appear in:
+#'   - SB boundaries BEFORE this segment → BsaI pot (constrain oh1)
+#'   - SB boundaries AT/AFTER this segment → BsmBI pot (constrain oh2)
+#' Tile-to-tile collision is not checked because each tile's assembly
+#' reaction is independent (separate pot).
 #'
 #' @param cds Domesticated gene CDS sequence
 #' @param sb_result SB result list from `search_sb_boundaries_oogga()` with

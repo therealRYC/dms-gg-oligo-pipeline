@@ -220,10 +220,10 @@ compute_overhang_efficiency <- function(pairwise_matrix) {
 #' @param eff_lookup Named numeric vector (overhang -> efficiency, i.e. P_eff)
 #' @return Numeric score (higher is better)
 overhang_score <- function(oh, fid_lookup, eff_lookup) {
-  # Falls back to 0.5 for unknown/empty overhangs (conservative default).
-  # This ensures multiplicative scoring never produces exact zeros.
-  fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else 0.5
-  eff <- if (oh %in% names(eff_lookup)) unname(eff_lookup[oh]) else 0.5
+  # Return NA for unknown overhangs — these are unscorable and should
+  # be excluded from optimization, not assigned a fabricated score.
+  fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else NA_real_
+  eff <- if (oh %in% names(eff_lookup)) unname(eff_lookup[oh]) else NA_real_
   fid * eff
 }
 
@@ -276,6 +276,7 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
   valid <- logical(n_codons)
   oh1_hf <- logical(n_codons)
   oh2_hf <- logical(n_codons)
+  n_unscorable <- 0L
 
   cli::cli_alert_info("Precomputing boundary scores for {n_codons - 1L} candidate positions...")
   precomp_start <- proc.time()
@@ -321,16 +322,22 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
       valid[b] <- FALSE
       next
     }
+    # Score = P_fid * P_eff for each overhang (both from BsmBI cycling, BUG-008)
+    oh1_base <- overhang_score(oh1, fid_lookup, eff_lookup)
+    oh2_base <- overhang_score(oh2, fid_lookup, eff_lookup)
+
+    # Skip boundaries with unscorable overhangs (not in NEB fidelity/efficiency data)
+    if (is.na(oh1_base) || is.na(oh2_base)) {
+      n_unscorable <- n_unscorable + 1L
+      next
+    }
+
     valid[b] <- TRUE
 
     oh1_in <- oh1 %in% POTAPOV_TABLE1_SET3_25
     oh2_in <- oh2 %in% POTAPOV_TABLE1_SET3_25
     oh1_hf[b] <- oh1_in
     oh2_hf[b] <- oh2_in
-
-    # Score = P_fid * P_eff for each overhang (both from BsmBI cycling, BUG-008)
-    oh1_base <- overhang_score(oh1, fid_lookup, eff_lookup)
-    oh2_base <- overhang_score(oh2, fid_lookup, eff_lookup)
 
     scores[b] <- oh1_base + oh2_base
   }
@@ -341,7 +348,8 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
   list(
     oh1_seq = oh1_seq, oh2_seq = oh2_seq,
     score = scores, valid = valid,
-    oh1_hf = oh1_hf, oh2_hf = oh2_hf
+    oh1_hf = oh1_hf, oh2_hf = oh2_hf,
+    n_unscorable = n_unscorable
   )
 }
 
@@ -1046,12 +1054,22 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   # =========================================================================
   # Phase 2+3: Tile boundaries + Superblock partitioning
   # =========================================================================
-  # Build alien overhangs set — fixed overhangs that OOGGA must avoid
-  # (oh3, oh4, oh_L, and all their RCs)
+  # Build alien overhangs set — fixed overhangs that OOGGA must avoid.
+  # Combined set for SB DP (conservative — SB splitting is tile-position-independent).
+  # Enzyme-specific sets for tile DP (oh1=BsaI pot, oh2=BsmBI pot).
   alien_ohs <- unique(c(
     oh3, reverse_complement(oh3),
     oh4, reverse_complement(oh4),
     oh_L, reverse_complement(oh_L)
+  ))
+  # BsaI pot: oh_L and oh4 are fixed BsaI overhangs in every Level 1 reaction
+  bsai_base_aliens <- unique(c(
+    oh_L, reverse_complement(oh_L),
+    oh4, reverse_complement(oh4)
+  ))
+  # BsmBI pot: oh3 is the fixed BsmBI overhang in every Level 1b reaction
+  bsmbi_base_aliens <- unique(c(
+    oh3, reverse_complement(oh3)
   ))
 
   # Build the full sequence: gene + cassette (needed for SB DP)
@@ -1139,7 +1157,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       # alien to prevent tile OH collisions with SB OHs in the BsmBI
       # reaction pot. This ensures SB boundaries = tile boundaries →
       # perfect alignment, no skipping in sb_dp_to_partition().
-      cli::cli_alert_info("Pass 2: Per-segment tile search (OOGGA DP)")
+      cli::cli_alert_info("Pass 2: Per-segment tile search (OOGGA DP, enzyme-aware aliens)")
       tiles <- tile_segments_oogga(
         cds = cds,
         sb_result = sb_result,
@@ -1148,9 +1166,9 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         min_mutable_nt = min_mutable_nt,
         oh_fidelity = oh_fidelity,
         eff_lookup = eff_lookup,
-        base_alien_ohs = alien_ohs, # oh3, oh4, oh_L + RCs
+        bsai_base_aliens = bsai_base_aliens,   # oh_L, oh4 + RCs (BsaI pot)
+        bsmbi_base_aliens = bsmbi_base_aliens,  # oh3 + RC (BsmBI pot)
         max_identity = oogga_max_identity,
-        beam_width = oogga_beam_width,
         multi_k = multi_k,
         dp_k_range = dp_k_range,
         overlap_codons = overlap_codons

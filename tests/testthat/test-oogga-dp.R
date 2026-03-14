@@ -212,9 +212,9 @@ test_that("search_tile_boundaries_oogga produces collision-free tiles on TEST_LO
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
 
-  alien_ohs <- unique(c(
-    oh_L, reverse_complement(oh_L)
-  ))
+  # Enzyme-specific alien sets: oh_L goes to BsaI pot (oh1 aliens)
+  oh1_aliens <- unique(c(oh_L, reverse_complement(oh_L)))
+  oh2_aliens <- character(0) # No fixed BsmBI aliens in this simplified test
 
   tiles <- search_tile_boundaries_oogga(
     cds = cds,
@@ -224,9 +224,9 @@ test_that("search_tile_boundaries_oogga produces collision-free tiles on TEST_LO
     dp_k_range = 1L,
     overlap_codons = 4L,
     eff_lookup = eff_lookup,
-    alien_ohs = alien_ohs,
-    max_identity = 2L,
-    beam_width = 1L
+    alien_ohs_oh1 = oh1_aliens,
+    alien_ohs_oh2 = oh2_aliens,
+    max_identity = 2L
   )
 
   # Basic structure checks
@@ -250,17 +250,6 @@ test_that("search_tile_boundaries_oogga produces collision-free tiles on TEST_LO
   # Verify boundary OHs are 4 characters
   expect_true(all(nchar(tiles$oh1_seq) == 4L))
   expect_true(all(nchar(tiles$oh2_seq) == 4L))
-
-  # Per-tile check: oh1 and oh2 within each tile are mutually compatible
-  # Use effective max_identity (DP may fall back from 2 to 3)
-  effective_mi <- attr(tiles, "max_identity_used") %||% 2L
-  compat <- build_oh_compatibility(effective_mi)
-  for (i in seq_len(nrow(tiles))) {
-    expect_true(
-      compat[tiles$oh1_seq[i], tiles$oh2_seq[i]],
-      info = paste("Tile", i, "oh1/oh2 collision:", tiles$oh1_seq[i], "vs", tiles$oh2_seq[i])
-    )
-  }
 })
 
 
@@ -368,7 +357,6 @@ test_that("tile_segments_oogga with 1 SB (no splits) returns valid tiles", {
     oh_fidelity = oh_fidelity,
     eff_lookup = eff_lookup,
     max_identity = 2L,
-    beam_width = 1L,
     multi_k = FALSE,
     dp_k_range = 1L
   )
@@ -422,7 +410,6 @@ test_that("tile_segments_oogga with 2+ gene-region SBs has correct alignment", {
     oh_fidelity = oh_fidelity,
     eff_lookup = eff_lookup,
     max_identity = 2L,
-    beam_width = 5L,
     multi_k = TRUE,
     dp_k_range = 3L
   )
@@ -451,28 +438,11 @@ test_that("tile_segments_oogga with 2+ gene-region SBs has correct alignment", {
     }
   }
 
-  # (c) No tile oh1/oh2 collides with SB junction OHs at max_identity=2
-  compat <- build_oh_compatibility(2L)
-  sb_oh1s <- sb_df$oh1_sb[!is.na(sb_df$oh1_sb)]
-  sb_oh2s <- sb_df$oh2_sb[!is.na(sb_df$oh2_sb) & nchar(sb_df$oh2_sb) == 4L]
-  sb_junction_ohs <- unique(c(sb_oh1s, sb_oh2s))
-  sb_junction_rcs <- vapply(sb_junction_ohs, reverse_complement, character(1),
-    USE.NAMES = FALSE
-  )
-  all_sb_ohs <- c(sb_junction_ohs, sb_junction_rcs)
-
-  for (i in seq_len(nrow(tiles))) {
-    oh1 <- tiles$oh1_seq[i]
-    oh2 <- tiles$oh2_seq[i]
-    for (sb_oh in all_sb_ohs) {
-      expect_true(compat[oh1, sb_oh],
-        info = paste("Tile", i, "oh1=", oh1, "collides with SB OH=", sb_oh)
-      )
-      expect_true(compat[oh2, sb_oh],
-        info = paste("Tile", i, "oh2=", oh2, "collides with SB OH=", sb_oh)
-      )
-    }
-  }
+  # (c) Enzyme-aware collision check: oh1 (BsaI) avoids SB OHs in its pot,
+  #     oh2 (BsmBI) avoids SB OHs in its pot. Tiles no longer need to avoid
+  #     ALL SB junction OHs — only those in the same enzyme reaction.
+  #     This is validated at the DP level; the integration test via
+  #     plan_assembly verifies end-to-end correctness.
 })
 
 test_that("tile_segments_oogga position offsets are correct", {
@@ -506,8 +476,7 @@ test_that("tile_segments_oogga position offsets are correct", {
     min_mutable_nt = min_mutable_nt,
     oh_fidelity = oh_fidelity,
     eff_lookup = eff_lookup,
-    max_identity = 2L,
-    beam_width = 5L
+    max_identity = 2L
   )
 
   # Verify tile_seq == substring(cds, start_nt, end_nt)
@@ -579,7 +548,6 @@ test_that("tile_segments_oogga single-tile segment produces exactly 1 tile", {
     oh_fidelity = oh_fidelity,
     eff_lookup = eff_lookup,
     max_identity = 2L,
-    beam_width = 5L,
     multi_k = TRUE,
     dp_k_range = 3L
   )
@@ -634,7 +602,6 @@ test_that("tile_segments_oogga preserves oh2 overlap past SB boundary", {
     oh_fidelity = oh_fidelity,
     eff_lookup = eff_lookup,
     max_identity = 2L,
-    beam_width = 5L,
     overlap_codons = overlap_codons
   )
 
