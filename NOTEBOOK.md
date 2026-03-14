@@ -1333,7 +1333,15 @@ But `end_codon` already included the overlap extension from the inner DP (`searc
 **Status**: in progress
 **Tags**: [oogga, algorithm, literature, scoring]
 
-Deep-read of the original OOGGA Python codebase (`OOGGA.py`, Mukundan S, 2025 preprint). Documented the full DP algorithm: 2D state space (fragment count × position), multiplicative probability-chain scoring (efficiency × fidelity products), identity-based overhang compatibility filter (max 2/4 positional matches including reverse complements), and traceback for top-N solutions. Key observations: the overlap check requires full traceback at every DP cell (performance bottleneck), scoring uses Potapov T4 37°C 18h data by default (vs our BsmBI cycling), and only the best predecessor is kept per cell. See [detailed analysis](Brainstorm/260313_oogga-algorithm-deep-dive.md).
+Deep-read of the original OOGGA Python codebase (`OOGGA.py`, Mukundan S, 2025 preprint). Documented the full DP algorithm: 2D state space (fragment count × position), multiplicative probability-chain scoring (efficiency × fidelity products), identity-based overhang compatibility filter (max 2/4 positional matches including reverse complements), and traceback for top-N solutions.
+
+Key observations:
+- **Overlap check bottleneck**: `__overlap_pass()` calls `__trace()` at every DP cell to walk the full path back to position 0, checking the candidate overhang against every previously chosen overhang (+ reverse complements + alien overhangs). This is O(K) per candidate, nested inside O(N) candidates per cell.
+- **Single-path storage limitation**: Only one predecessor stored per cell (`trace_di`). If the best path to a cell contains a conflicting overhang, the candidate is rejected — even if a slightly-worse alternative path would have been compatible. The DP cannot explore those alternatives.
+- **Implicit leftward tie-breaking**: `j_` iterated from 0 upward + stable sort = leftmost predecessor wins on tied scores. No secondary tiebreaker.
+- **`n_trace` redundancy**: Multiple top solutions come from different *terminal* cells, not different paths through the matrix. Multiple terminals can trace back through the same intermediate path, producing near-identical solutions that differ only in the last cut position.
+
+See [detailed analysis](Brainstorm/260313_oogga-algorithm-deep-dive.md).
 
 **Next steps**: Compare R reimplementation (`R/06b_oogga_dp.R`) against original Python, and explore scoring model differences (BsmBI cycling vs T4).
 

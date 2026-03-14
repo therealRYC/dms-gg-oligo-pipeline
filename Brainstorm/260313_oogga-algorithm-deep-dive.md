@@ -140,6 +140,59 @@ Output: Ranked fragmentation plans with per-junction scores
 
 5. **Only the best predecessor is kept** — at each cell, only one trace pointer is stored (the best-scoring predecessor). Alternative near-optimal paths are lost. The `n_trace` parameter finds multiple solutions by looking at different *terminal* cells, not by exploring alternative paths through the matrix.
 
+6. **Tie-breaking is implicit (leftward bias)** — `__get_score_list` iterates `j_` from 0 upward, and `sorted(..., key=lambda x:x[0])` is stable, so among candidates with identical scores, the leftmost predecessor wins. There is no secondary tiebreaker on fidelity, efficiency, or fragment length. This creates a subtle bias toward shorter first fragments and longer later fragments when exact ties exist (likely rare with float arithmetic).
+
+7. **`n_trace` solutions can be highly redundant** — Multiple terminal cells can trace back to the *exact same predecessor* in the prior row, sharing their entire path except the final cut. For example, terminal cells at `(3, 800)` and `(3, 850)` may both have `trace_di` pointing to `(2, 500)`, producing two "different" solutions that are really the same fragmentation with a 50 nt shift at the end. The algorithm has no mechanism to enforce diversity among the top-N solutions (no path exclusion, no next-best-path logic like Yen's algorithm). True diversity only occurs when terminal cells happen to trace through genuinely different intermediate paths.
+
+## Detailed Walkthrough: Collision-Checking Call Chain
+
+The collision check involves 4 methods calling each other:
+
+```
+make_matrix()  →  __get_score_list()  →  __overlap_pass()  →  __trace()
+                                                            →  __find_identities()
+```
+
+### How it works step by step
+
+1. **`__get_score_list(i, j, eff, fid)`** — For a candidate cut at `(i, j)`, loops over *every* position `j_` as a potential predecessor from row `i-1`. For each valid `j_` (correct fragment length, has a score), calls `__overlap_pass(i, j, j_)`.
+
+2. **`__overlap_pass(i, j, j_)`** — The heart of the check:
+   - Calls `__trace(i-1, j_)` to get the full path back to position 0
+   - Extracts the 4-nt overhang at every cut position on that path
+   - Adds the terminal overhang (`seq[-4:]`) and any alien overhangs
+   - Builds comparison set: all existing overhangs (forward) + reverse complements of everything (including RC of the candidate overhang itself — because both strands are present in the GG ligation pot)
+   - Calls `__find_identities()` to check each comparison against the candidate
+
+3. **`__trace(i, j)`** — Follows `trace_di` pointers from `(i, j)` back to `(0, start_site)`, collecting all cut positions. Returns list in reverse order (newest cut first).
+
+4. **`__find_identities(overhangs, current_overhang)`** — For each overhang in the comparison set, counts positional matches (0-4) against the candidate. Any match > `max_overhang_identity` (default 2) → rejection.
+
+### Concrete example
+
+Sequence = 1000 nt. DP at cell `(i=3, j=600)`, evaluating predecessor `j_=400`.
+
+**Traceback**: `__trace(2, 400)` → follows pointers: `(2,400) → (1,200) → (0,0)` → returns `[400, 200, 0]`
+
+**Overhang collection**:
+- Path overhangs: `seq[400:404]`, `seq[200:204]`, `seq[0:4]` (say `GCTA`, `TTAG`, `ATGC`)
+- Terminal: `seq[996:1000]` (say `CCGG`)
+- Alien: e.g., `AGTC`
+
+**Candidate**: `seq[600:604]` = `GCTG`
+
+**Comparison set**: `[GCTA, TTAG, ATGC, CCGG, AGTC, RC(GCTA), RC(TTAG), RC(ATGC), RC(CCGG), RC(AGTC), RC(GCTG)]`
+
+**Identity check** — `GCTG` vs `GCTA`: G=G, C=C, T=T, G≠A → **3 matches → FAIL** (exceeds threshold of 2). Position 600 rejected when coming from this path.
+
+### Performance implications
+
+The full traceback at every DP cell is the primary bottleneck. For a 3000 nt sequence with 200-500 nt fragments: ~6-15 rows × 3000 positions × ~300 valid predecessors × traceback length ~6-15 per check. The collision check is O(K) per candidate (where K = path length), nested inside O(N) candidates per cell, inside O(K × N) cells total.
+
+### Suboptimality from single-path storage
+
+Because `trace_di` stores only *one* pointer per cell (the best-scoring predecessor), the overlap check follows the single best path to each candidate. If that path contains a conflicting overhang, the candidate is rejected — even if an alternative, slightly-worse path to the same cell would have had compatible overhangs. The DP has no mechanism to explore these alternatives.
+
 ## Open Questions (for future exploration)
 
 1. **How does our R implementation differ?** — Does `R/06b_oogga_dp.R` use the same multiplicative scoring? Same overlap check? Different optimizations?
