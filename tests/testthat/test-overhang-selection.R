@@ -296,8 +296,12 @@ test_that("convert_partition_to_splits round-trips through plan_assembly correct
     expect_true(all(splits$block_type %in% c("bsmbi_3wt", "bsai_5wt")))
     # All tile_ids should be valid
     expect_true(all(splits$tile_id %in% plan$tiles$tile_id))
-    # split_nt should match a tile end_nt (since boundaries are at tile endpoints)
-    expect_true(all(splits$split_nt %in% plan$tiles$end_nt))
+    # split_nt values are at oh1_sb_pos (boundary+4) and oh2_sb_pos
+    # (boundary+overlap*3) — they live in the overlap zone past tile
+    # end_nt, so they won't equal any tile$end_nt. Verify they are
+    # valid CDS positions instead.
+    gene_len <- nchar(cds)
+    expect_true(all(splits$split_nt >= 1L & splits$split_nt <= gene_len))
   }
 })
 

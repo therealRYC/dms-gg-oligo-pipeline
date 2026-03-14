@@ -658,7 +658,12 @@ convert_partition_to_splits <- function(partition_result, tiles, gene_len,
 
       # --- bsmbi_3wt entries ---
       # Upstream tiles' 3'WT blocks split at oh2_sb position.
+      # Skip the boundary tile itself — its 3'WT starts at boundary_nt+1,
+      # so the split at oh2_sb_pos (boundary_nt + overlap*3) creates a
+      # tiny sub-block of just the overlap zone (~12 nt). The boundary
+      # tile's oh2 already IS this junction; no additional split needed.
       for (t in seq_len(n_tiles)) {
+        if (tiles$end_nt[t] == boundary_nt) next
         if (tiles$end_nt[t] < oh2_sb_pos) {
           splits_list[[length(splits_list) + 1L]] <- data.frame(
             split_nt = oh2_sb_pos,
@@ -1106,7 +1111,14 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       full_seq_for_sb <- paste0(cds, cassette_seq)
       total_content_len <- nchar(full_seq_for_sb)
 
-      if (total_content_len <= (max_block_length - block_overhead)) {
+      # SB max content accounts for enzyme overhead AND the overlap extension.
+      # When a boundary tile's 3'WT is split at the next SB's oh2_sb_pos
+      # (= boundary + overlap_codons*3), the sub-block content includes the
+      # overlap zone. Reducing the SB max by overlap_codons*3 ensures these
+      # sub-blocks always fit within synthesis limits.
+      sb_max_content <- max_block_length - block_overhead - overlap_codons * 3L
+
+      if (total_content_len <= sb_max_content) {
         # Gene+cassette fits in one block — no SB splits needed
         sb_result <- list(
           n_superblocks = 1L,
@@ -1130,7 +1142,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         sb_result <- search_sb_boundaries_oogga(
           full_seq = full_seq_for_sb,
           gene_len = gene_len,
-          max_block_length = max_block_length - block_overhead,
+          max_block_length = sb_max_content,
           min_block_length = min_geneblock_length,
           alien_ohs = alien_ohs, # oh3, oh4, oh_L + RCs
           oh_fidelity = oh_fidelity,
