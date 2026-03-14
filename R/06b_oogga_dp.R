@@ -846,8 +846,11 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
 #' @param dp_k_range Integer: search K_ideal +/- dp_k_range
 #' @param overlap_codons Number of overlap codons between adjacent tiles
 #' @param eff_lookup Named numeric vector (overhang -> efficiency)
-#' @param alien_ohs Character vector of fixed overhangs to avoid (SB junction
-#'   OHs + oh3 + oh_L + oh4 and their RCs)
+#' @param alien_ohs_oh1 Character vector of BsaI-pot alien overhangs for oh1
+#'   (oh_L, oh4 + their RCs, plus SB junction OHs from superblocks before
+#'   this segment)
+#' @param alien_ohs_oh2 Character vector of BsmBI-pot alien overhangs for oh2
+#'   (oh3 + RC, plus SB junction OHs from superblocks at/after this segment)
 #' @param max_identity Integer, max positional identity (default 2)
 #' @param n_codons_tile Integer or NULL. If provided, overrides the CDS-derived
 #'   codon count for tile boundary placement. Used when CDS is forward-extended
@@ -862,9 +865,9 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
                                          dp_k_range = 5L,
                                          overlap_codons = 4L,
                                          eff_lookup = NULL,
-                                         alien_ohs = character(0),
+                                         alien_ohs_oh1 = character(0),
+                                         alien_ohs_oh2 = character(0),
                                          max_identity = 2L,
-                                         beam_width = 10L,
                                          n_codons_tile = NULL) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
@@ -958,8 +961,7 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
       precomp$oh1_seq, precomp$oh2_seq,
       oh1_scores, oh2_scores,
       precomp$valid,
-      alien_ohs, compat,
-      beam_width = beam_width,
+      alien_ohs_oh1, alien_ohs_oh2, compat,
       max_identity = max_identity
     )
     if (!is.null(result) && result$total_score > 0) {
@@ -989,8 +991,7 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
         precomp$oh1_seq, precomp$oh2_seq,
         oh1_scores, oh2_scores,
         precomp$valid,
-        alien_ohs, compat3,
-        beam_width = beam_width,
+        alien_ohs_oh1, alien_ohs_oh2, compat3,
         max_identity = 3L
       )
       if (!is.null(result) && result$total_score > 0) {
@@ -1117,9 +1118,12 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
 #' @param min_mutable_nt Integer, min mutable region in nt
 #' @param oh_fidelity Data frame with overhang + fidelity columns
 #' @param eff_lookup Named numeric vector (overhang -> efficiency)
-#' @param base_alien_ohs Character vector of fixed overhangs (oh3, oh4, oh_L + RCs)
+#' @param bsai_base_aliens Character vector of BsaI-pot base aliens (oh_L, oh4
+#'   + their RCs). SB junction OHs from superblocks before each segment are
+#'   added per-segment.
+#' @param bsmbi_base_aliens Character vector of BsmBI-pot base aliens (oh3 + RC).
+#'   SB junction OHs from superblocks at/after each segment are added per-segment.
 #' @param max_identity Integer, max positional identity (default 2)
-#' @param beam_width Integer, beam search width (default 10)
 #' @param multi_k Logical, try multiple tile counts in DP?
 #' @param dp_k_range Integer, search K_ideal +/- dp_k_range
 #' @param overlap_codons Integer, number of overlap codons between adjacent tiles
@@ -1128,8 +1132,9 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
 tile_segments_oogga <- function(cds, sb_result, gene_len,
                                 max_mutable_nt, min_mutable_nt,
                                 oh_fidelity, eff_lookup,
-                                base_alien_ohs = character(0),
-                                max_identity = 2L, beam_width = 10L,
+                                bsai_base_aliens = character(0),
+                                bsmbi_base_aliens = character(0),
+                                max_identity = 2L,
                                 multi_k = TRUE, dp_k_range = 5L,
                                 overlap_codons = 4L) {
   sb_df <- sb_result$boundaries
@@ -1158,24 +1163,21 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
     stop("No gene-region SB segments found. Check SB result.")
   }
 
-  # --- Collect ALL SB junction OHs (alien for tile search) ---
-  # Two-OH model: each gene-region SB boundary has oh1_sb + oh2_sb.
-  # Both participate in BsmBI reactions, so both go into the alien set.
-  # The first tile of each segment has oh1 = oh1_sb by construction,
-  # and the last tile has oh2 = oh2_sb by construction. Adding them
-  # to the alien set prevents internal tile boundaries from colliding.
-  sb_oh1_seqs <- sb_df$oh1_sb[!is.na(sb_df$oh1_sb)]
-  sb_oh2_seqs <- sb_df$oh2_sb[!is.na(sb_df$oh2_sb) & nchar(sb_df$oh2_sb) == 4L]
-  sb_junction_ohs <- unique(c(sb_oh1_seqs, sb_oh2_seqs))
-  sb_junction_rcs <- vapply(sb_junction_ohs, reverse_complement, character(1),
-    USE.NAMES = FALSE
-  )
-  tile_alien_ohs <- unique(c(base_alien_ohs, sb_junction_ohs, sb_junction_rcs))
+  # --- Enzyme-aware alien set construction ---
+  # oh1 (BsaI overhang) and oh2 (BsmBI overhang) are in different enzyme
+  # pots, so they get separate alien sets. SB junction OHs are split by
+  # which pot they appear in:
+  #   - SB boundaries BEFORE this segment → BsaI pot (constrain oh1)
+  #   - SB boundaries AT/AFTER this segment → BsmBI pot (constrain oh2)
+  # Base aliens (oh_L, oh4 for BsaI; oh3 for BsmBI) are provided by caller.
+
+  # Collect all SB junction OHs for per-segment splitting
+  all_sb_oh1s <- sb_df$oh1_sb  # indexed by sb_id
+  all_sb_oh2s <- sb_df$oh2_sb  # indexed by sb_id
 
   cli::cli_alert_info(paste0(
     "Per-segment tile search: ", length(segments), " gene segment(s), ",
-    length(sb_junction_ohs), " SB junction OH(s) added to alien set ",
-    "(", length(sb_oh1_seqs), " oh1 + ", length(sb_oh2_seqs), " oh2)"
+    "enzyme-aware alien sets (BsaI/BsmBI pots separated)"
   ))
 
   # Load lookups needed for post-processing
