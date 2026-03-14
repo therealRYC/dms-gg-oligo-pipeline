@@ -878,6 +878,10 @@ oogga_tile_dp_solve_k <- function(K, n_codons, min_codons, max_codons,
 #'   past a SB boundary: the DP places boundaries within n_codons_tile codons,
 #'   but precompute_boundary_scores() sees the full extended CDS for oh2
 #'   computation at the last boundary.
+#' @param k_range_mode Character, "narrow" (K_ideal +/- dp_k_range, default) or
+#'   "wide" (1 to K_max_feasible). Wide explores all feasible K values.
+#' @param k_scoring Character, "geo_mean" (default, score^(1/K)) or "raw"
+#'   (raw multiplicative product). Raw embeds soft parsimony.
 #' @return Data frame with tile info (same format as search_tile_boundaries_dp)
 search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
                                          min_mutable_nt = NULL,
@@ -889,7 +893,9 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
                                          alien_ohs_oh1 = character(0),
                                          alien_ohs_oh2 = character(0),
                                          max_identity = 2L,
-                                         n_codons_tile = NULL) {
+                                         n_codons_tile = NULL,
+                                         k_range_mode = c("narrow", "wide"),
+                                         k_scoring = c("geo_mean", "raw")) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
 
@@ -956,8 +962,14 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   compat <- build_oh_compatibility(max_identity)
 
   # Determine K range (use effective_max_codons to account for overlap extension)
+  k_range_mode <- match.arg(k_range_mode)
+  k_scoring <- match.arg(k_scoring)
   K_ideal <- max(1L, ceiling(n_codons / effective_max_codons) - 1L)
-  if (multi_k) {
+  if (k_range_mode == "wide") {
+    # Explore all feasible K values (OOGGA-style exhaustive search)
+    K_lo <- 1L
+    K_hi <- n_codons %/% min_codons - 1L
+  } else if (multi_k) {
     K_lo <- max(1L, K_ideal - dp_k_range)
     K_hi <- min(n_codons %/% min_codons - 1L, K_ideal + dp_k_range)
     K_hi <- max(K_hi, K_lo)
@@ -967,13 +979,13 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   }
 
   cli::cli_alert_info(
-    "OOGGA tile DP: {n_codons} codons, K range [{K_lo}, {K_hi}], max_identity={max_identity}"
+    "OOGGA tile DP: {n_codons} codons, K range [{K_lo}, {K_hi}] ({k_range_mode}), scoring={k_scoring}, max_identity={max_identity}"
   )
 
   # Run collision-aware DP for each K
-  # Multiplicative scoring: compare via geometric mean (score^(1/K))
+  # Cross-K comparison: geo_mean normalizes by K; raw embeds soft parsimony
   best_result <- NULL
-  best_geo_mean <- -Inf
+  best_comparison <- -Inf
 
   dp_start <- proc.time()
   for (K in K_lo:K_hi) {
@@ -986,9 +998,9 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
       max_identity = max_identity
     )
     if (!is.null(result) && result$total_score > 0) {
-      geo_mean <- result$total_score^(1 / K)
-      if (geo_mean > best_geo_mean) {
-        best_geo_mean <- geo_mean
+      comp <- if (k_scoring == "geo_mean") result$total_score^(1 / K) else result$total_score
+      if (comp > best_comparison) {
+        best_comparison <- comp
         best_result <- result
         best_result$K <- K
       }
@@ -1016,9 +1028,9 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
         max_identity = 3L
       )
       if (!is.null(result) && result$total_score > 0) {
-        geo_mean <- result$total_score^(1 / K)
-        if (geo_mean > best_geo_mean) {
-          best_geo_mean <- geo_mean
+        comp <- if (k_scoring == "geo_mean") result$total_score^(1 / K) else result$total_score
+        if (comp > best_comparison) {
+          best_comparison <- comp
           best_result <- result
           best_result$K <- K
         }
