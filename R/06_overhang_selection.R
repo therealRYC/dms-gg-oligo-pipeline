@@ -425,7 +425,7 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
       lo_codon <- max((block_start_nt %/% 3L) + 5L, center_codon - search_window)
       hi_codon <- min((block_end_nt %/% 3L) - 5L, center_codon + search_window)
 
-      best <- list(pos = center_codon * 3L, oh = "NNNN", in_hf = FALSE, fid = 0, score = -1)
+      best <- list(pos = center_codon * 3L, oh = "NNNN", in_hf = FALSE, fid = NA_real_, score = -1)
 
       for (C in lo_codon:hi_codon) {
         split_nt <- C * 3L
@@ -434,8 +434,10 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
         if (junction_oh %in% local_existing) next # collision
 
         in_hf <- junction_oh %in% POTAPOV_TABLE1_SET3_25
-        fid <- if (junction_oh %in% names(fid_lookup)) unname(fid_lookup[junction_oh]) else 0.5
         score <- overhang_score(junction_oh, fid_lookup, eff_lookup)
+        if (is.na(score)) next # unscorable — skip
+
+        fid <- if (junction_oh %in% names(fid_lookup)) unname(fid_lookup[junction_oh]) else NA_real_
 
         if (score > best$score) {
           best <- list(pos = split_nt, oh = junction_oh, in_hf = in_hf, fid = fid, score = score)
@@ -1383,7 +1385,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       n_superblock_splits = nrow(all_splits),
       n_sb_collisions = partition_result$n_collisions,
       cassette_needs_splitting = partition_result$cassette_needs_splitting,
-      overall_min_fidelity = min(reaction_fidelity_df$set_fidelity)
+      overall_min_fidelity = min(reaction_fidelity_df$set_fidelity),
+      n_unscorable_boundaries = 0L  # populated by precompute; 0 with full NEB data
     )
   )
 

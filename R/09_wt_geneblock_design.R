@@ -84,6 +84,8 @@ find_cassette_split_points <- function(cassette_seq, max_sub_length,
         if (junction_oh %in% HOMOPOLYMER_4NT) next
 
         score <- overhang_score(junction_oh, fid_lookup, eff_lookup)
+        if (is.na(score)) next # unscorable — skip
+
         if (score > best$score) {
           best <- list(pos = p, oh = junction_oh, score = score)
         }
