@@ -2,10 +2,17 @@
 # scripts/bench_k_handling.R
 # 2×2 factorial benchmark: K range × K scoring for OOGGA DP
 #
-# Conditions:
-#   A: narrow + geo_mean (current baseline)
+# HISTORICAL NOTE: This benchmark was run on pre-decision code where
+# k_range_mode and k_scoring were configurable parameters. Based on these
+# results (raw product + narrow K range was the clear winner), those params
+# were hardcoded. The k_range_mode and k_scoring config keys are now ignored
+# — all 4 conditions produce identical results (raw + narrow).
+# See Brainstorm/2026-03-14_k-scoring-method.md for the decision rationale.
+#
+# Original conditions:
+#   A: narrow + geo_mean (former baseline)
 #   B: wide   + geo_mean
-#   C: narrow + raw
+#   C: narrow + raw      ← winner, now hardcoded
 #   D: wide   + raw      (OOGGA-style)
 #
 # Test gene: AKAP11 (5706 nt / 1902 codons, with WPRE+spacer+bGH polyA cassette)
