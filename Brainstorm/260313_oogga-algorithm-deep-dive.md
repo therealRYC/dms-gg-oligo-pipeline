@@ -193,9 +193,91 @@ The full traceback at every DP cell is the primary bottleneck. For a 3000 nt seq
 
 Because `trace_di` stores only *one* pointer per cell (the best-scoring predecessor), the overlap check follows the single best path to each candidate. If that path contains a conflicting overhang, the candidate is rejected — even if an alternative, slightly-worse path to the same cell would have had compatible overhangs. The DP has no mechanism to explore these alternatives.
 
-## Open Questions (for future exploration)
+## R Implementation Comparison (`R/06b_oogga_dp.R` vs. `OOGGA.py`)
 
-1. **How does our R implementation differ?** — Does `R/06b_oogga_dp.R` use the same multiplicative scoring? Same overlap check? Different optimizations?
-2. **What does the paper add?** — The preprint may discuss the algorithm's theoretical properties, benchmarks, or design rationale not evident from code alone.
-3. **Scoring with BsmBI cycling vs. T4 37°C** — OOGGA defaults to `FileS04_T4_18h_37C.csv`. Our pipeline uses BsmBI cycling conditions. How do these differ in practice?
-4. **How does `eval_frags.py` relate?** — It's a standalone tool that scores a given set of overhangs using the same `load_csv_table_as_di()` function, but without the DP. Useful for evaluating externally-chosen overhangs (e.g., NEB SplitSet results).
+### 1. Path Storage: Single-predecessor vs. Beam Search
+
+OOGGA stores **one** predecessor pointer per DP cell (`trace_di[make_key(i,j)] = make_key(i-1, j_)`). Our R stores up to `beam_width` (default 10) complete path entries per position (`dp_paths[[p]] = list of path entries`).
+
+This directly addresses OOGGA's single-path limitation: when one path's overhang set conflicts with a candidate, another path at the same position might pass. The tradeoff is heavier memory (each path carries growing `ohs`, `positions`, `oh1s`, `oh2s` vectors) and more work per DP transition.
+
+### 2. Collision Check: Full Traceback vs. Pre-computed Matrix
+
+OOGGA traces the entire path at every DP cell and does character-by-character identity comparison (`__trace()` → `__find_identities()`). Our R pre-computes a 256×256 boolean compatibility matrix (`build_oh_compatibility()`) once before the DP, then does O(1) matrix lookups per (candidate, prior_oh) pair.
+
+Additionally, our R doesn't need traceback at all because each beam path entry carries its full `ohs` vector forward. OOGGA must reconstruct the path because it only stores single-predecessor pointers.
+
+### 3. Static Pre-filtering
+
+OOGGA has no pre-filtering — self-palindrome and alien checks happen inside the DP inner loop, repeated for every predecessor evaluation. Our R precomputes a `static_ok[]` vector before the DP (lines 310-345 in `oogga_sb_dp_solve_k_v2()`, lines 713-746 in `oogga_tile_dp_solve_k()`), checking self-palindrome for oh1/oh2, alien compatibility, and oh1-oh2 mutual compatibility once per position. Positions that fail are skipped immediately in the inner loop (`if (!static_ok[b]) next`).
+
+For a position visited from 100 different predecessors, our R does 1 static check; OOGGA does 100.
+
+### 4. Scoring Model — Mathematically Equivalent (with caveats)
+
+Both compute the same two metrics from the NEB pairwise matrix:
+
+| Metric | OOGGA Python | Our R |
+|--------|-------------|-------|
+| Efficiency | `(diagonal / max_diagonal) × 100` | `diagonal / max_diagonal` |
+| Fidelity | `(diagonal / row_total) × 100` | `diagonal / row_total` |
+| Scale | Percentages (0–100) | Fractions (0–1) |
+
+OOGGA divides by 100 at each DP step to convert back to fractions; our R is already in fractions.
+
+**Key structural difference**: OOGGA tracks efficiency and fidelity as **separate running products** (`split_mat` stores `(eff_tally, fid_tally)` tuples), then combines at the end with configurable exponents: `score = (eff_product ^ eff_w) * (fid_product ^ fid_w)`. Our R combines them **upfront** into `overhang_score(oh) = fid * eff` before the DP starts.
+
+With defaults (`eff_w = fid_w = 1`), the math is equivalent: OOGGA's `product(eff_i) × product(fid_i)` = our `product(fid_i × eff_i)` by commutativity. But if non-default weighting were ever desired (e.g., `fid_w=2` to prioritize fidelity), our R would need to separate the scores in the DP.
+
+**Unknown-overhang handling**: OOGGA skips unknown overhangs entirely (catches `KeyError`, position stays `False` in matrix). Our R previously used a 0.5 fallback for unknown overhangs — this was identified during this analysis as incorrect (should skip/mark NA instead, matching OOGGA's behavior). Fix in progress in a parallel session.
+
+### 5. Two-Overhang Model (domain-specific extension)
+
+OOGGA uses one overhang per cut (`seq[j:j+4]`). Our R uses two overhangs per tile boundary: oh1 (first 4 nt of the next tile) and oh2 (4 nt at the overlap extension point, `overlap_codons` past the boundary). Both participate in the same BsmBI ligation reaction and must be collision-free.
+
+This means our collision set grows at 2× the rate per boundary, making the constraint stricter. Both oh1 and oh2 are checked against all prior overhangs on the path:
+```r
+if (!all(compat_matrix[oh1, prior])) next
+if (!all(compat_matrix[oh2, prior])) next
+```
+
+### 6. Two-Pass Architecture
+
+OOGGA is single-pass: one DP over the entire sequence.
+
+Our R is two-pass:
+1. **Pass 1** (`search_sb_boundaries_oogga()`): DP for superblock boundaries across the full gene + cassette. Gene-region boundaries use two-OH scoring; cassette-region boundaries use single-OH.
+2. **Pass 2** (`tile_segments_oogga()` → `search_tile_boundaries_oogga()`): Independent tile DP within each superblock segment. SB junction overhangs from Pass 1 become `alien_ohs`, preventing tile boundaries from colliding with superblock boundaries.
+
+### 7. K Selection and Cross-K Comparison
+
+OOGGA either uses a user-specified `n_frag` or searches all possible K values and compares raw scores — which is problematic because multiplicative scores shrink with more fragments (a 3-fragment solution with score 0.5 might be better per-junction than a 2-fragment solution with score 0.6).
+
+Our R searches a focused range around `K_ideal ± dp_k_range` and compares by **geometric mean** (`score^(1/K)`), which normalizes for fragment count and fairly compares per-boundary quality across different K values.
+
+### 8. Infeasibility Handling
+
+OOGGA asserts and crashes (`assert self.sorted_score_li`). Our R gracefully relaxes the constraint from `max_identity=2` to `max_identity=3`, rebuilding the compatibility matrix and re-running the DP. This handles genes with constrained overhang landscapes that can't satisfy the stricter threshold.
+
+### Summary Table
+
+| Aspect | OOGGA Python | Our R (`06b_oogga_dp.R`) |
+|--------|-------------|--------------------------|
+| Paths per cell | 1 (single best) | Up to `beam_width` (default 10) |
+| Collision check | Full traceback + char comparison | Pre-computed 256×256 matrix |
+| Path state | Reconstructed via trace pointers | Carried forward in each path entry |
+| Static pre-filter | None | Self-palindrome, alien, oh1/oh2 mutual |
+| Overhangs per boundary | 1 (oh at cut) | 2 (oh1 + oh2) |
+| Architecture | Single-pass | Two-pass (SB → tile) |
+| K comparison | Raw score | Geometric mean normalization |
+| Infeasibility handling | Assert/crash | Relax max_identity 2→3 |
+| Scoring data | T4 37°C 18h (default) | BsmBI cycling |
+| Tie-breaking | Implicit leftward | Beam retains multiple options |
+| Unknown overhangs | Skip entirely (KeyError) | ~~0.5 fallback~~ → fixing to skip/NA |
+
+## Open Questions (remaining)
+
+1. **What does the paper add?** — The preprint may discuss the algorithm's theoretical properties, benchmarks, or design rationale not evident from code alone.
+2. **Scoring with BsmBI cycling vs. T4 37°C** — OOGGA defaults to `FileS04_T4_18h_37C.csv`. Our pipeline uses BsmBI cycling conditions. How do these differ in practice? The underlying Potapov data is T4-only; we use Pryor et al. 2020 for BsmBI.
+3. **How does `eval_frags.py` relate?** — Standalone overhang evaluator using the same `load_csv_table_as_di()`. Useful for scoring externally-chosen overhangs (e.g., NEB SplitSet results) without running the DP.
+4. **Beam width sensitivity** — How does beam_width=10 compare to beam_width=1 (OOGGA-equivalent) on our benchmark genes? Are we actually using the beam diversity, or do paths converge?

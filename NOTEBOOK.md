@@ -1330,20 +1330,30 @@ But `end_codon` already included the overlap extension from the inner DP (`searc
 ### 2026-03-13 — Entry 38: Deep dive into OOGGA algorithm
 
 **Type**: research
-**Status**: in progress
-**Tags**: [oogga, algorithm, literature, scoring]
+**Status**: completed
+**Tags**: [oogga, algorithm, literature, scoring, comparison]
 
-Deep-read of the original OOGGA Python codebase (`OOGGA.py`, Mukundan S, 2025 preprint). Documented the full DP algorithm: 2D state space (fragment count × position), multiplicative probability-chain scoring (efficiency × fidelity products), identity-based overhang compatibility filter (max 2/4 positional matches including reverse complements), and traceback for top-N solutions.
+Deep-read of the original OOGGA Python codebase (`OOGGA.py`, Mukundan S, 2025 preprint) followed by systematic comparison with our R reimplementation (`R/06b_oogga_dp.R`).
 
-Key observations:
-- **Overlap check bottleneck**: `__overlap_pass()` calls `__trace()` at every DP cell to walk the full path back to position 0, checking the candidate overhang against every previously chosen overhang (+ reverse complements + alien overhangs). This is O(K) per candidate, nested inside O(N) candidates per cell.
-- **Single-path storage limitation**: Only one predecessor stored per cell (`trace_di`). If the best path to a cell contains a conflicting overhang, the candidate is rejected — even if a slightly-worse alternative path would have been compatible. The DP cannot explore those alternatives.
-- **Implicit leftward tie-breaking**: `j_` iterated from 0 upward + stable sort = leftmost predecessor wins on tied scores. No secondary tiebreaker.
-- **`n_trace` redundancy**: Multiple top solutions come from different *terminal* cells, not different paths through the matrix. Multiple terminals can trace back through the same intermediate path, producing near-identical solutions that differ only in the last cut position.
+**OOGGA algorithm** — 2D DP (fragment count × position), multiplicative probability-chain scoring (efficiency × fidelity products), identity-based overhang compatibility filter (max 2/4 positional matches including reverse complements), traceback for top-N solutions. Key limitations: single-path storage per cell (alternative paths lost), implicit leftward tie-breaking, `n_trace` solutions can be highly redundant (different terminals tracing through same intermediate path).
+
+**R implementation differences** — Our reimplementation addresses several OOGGA limitations:
+- **Beam search** (default width 10) vs single-predecessor: retains multiple paths per position, so collision-compatible alternatives aren't lost
+- **Pre-computed 256×256 compatibility matrix** vs full traceback: O(1) per-pair lookup instead of O(K) character comparison
+- **Carried-forward path state** vs reconstructed: each beam path stores its full overhang set, eliminating traceback entirely
+- **Static pre-filtering**: self-palindrome, alien compat, oh1/oh2 mutual compat computed once per position (not per-predecessor)
+- **Two-overhang model**: oh1 + oh2 per boundary (DMS tile overlap architecture) vs single overhang per cut
+- **Two-pass architecture**: SB boundaries → tile boundaries, with SB overhangs as alien constraints for tiles
+- **Geometric mean K comparison**: normalizes multiplicative scores across different fragment counts
+- **Graceful fallback**: max_identity 2→3 on infeasibility instead of assertion crash
+
+**Scoring formulas**: Mathematically identical at default settings — both compute `efficiency = diagonal/max_diagonal`, `fidelity = diagonal/row_total`, combined multiplicatively. OOGGA stores as percentages and tracks eff/fid separately (configurable exponent weighting); our R stores as fractions and combines upfront (`overhang_score = fid × eff`).
+
+**Bug found**: `overhang_score()` used a 0.5 fallback for unknown overhangs instead of skipping (OOGGA skips via KeyError). Fix in progress in parallel session.
 
 See [detailed analysis](Brainstorm/260313_oogga-algorithm-deep-dive.md).
 
-**Next steps**: Compare R reimplementation (`R/06b_oogga_dp.R`) against original Python, and explore scoring model differences (BsmBI cycling vs T4).
+**Open questions**: BsmBI cycling vs T4 scoring differences in practice; beam width sensitivity (does beam=10 actually find different paths vs beam=1?); what the preprint adds beyond the code.
 
 ---
 
