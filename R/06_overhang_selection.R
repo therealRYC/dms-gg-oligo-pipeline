@@ -945,8 +945,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   oogga_beam_width <- config$oogga_beam_width %||% 10L
   multi_k <- config$multi_k %||% TRUE
   overlap_codons <- config$overlap_codons %||% 4L
-  k_range_mode <- config$k_range_mode %||% "narrow"
-  k_scoring <- config$k_scoring %||% "geo_mean"
   min_geneblock_length <- config$min_geneblock_length %||% MIN_GENEBLOCK_LENGTH
   min_mutable_nt <- config$min_mutable_nt
   if (is.null(min_mutable_nt)) {
@@ -1140,9 +1138,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
           max_identity = oogga_max_identity,
           beam_width = oogga_beam_width,
           cassette_needs_splitting = cass_needs_split,
-          overlap_codons = overlap_codons,
-          k_range_mode = k_range_mode,
-          k_scoring = k_scoring
+          overlap_codons = overlap_codons
           # NO allowed_gene_positions — SBs at any codon position
         )
         # Extract junction overhangs from SB result (both oh1_sb and oh2_sb)
@@ -1177,9 +1173,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         max_identity = oogga_max_identity,
         multi_k = multi_k,
         dp_k_range = dp_k_range,
-        overlap_codons = overlap_codons,
-        k_range_mode = k_range_mode,
-        k_scoring = k_scoring
+        overlap_codons = overlap_codons
       )
 
     # Convert SB result to partition format
