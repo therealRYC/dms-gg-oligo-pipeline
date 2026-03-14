@@ -164,7 +164,8 @@ test_that("oogga_sb_dp_solve_k_v2 returns NULL for K=0", {
   expect_null(oogga_sb_dp_solve_k_v2(
     K = 0L, total_len = 1000L, min_len = 100L, max_len = 500L,
     boundary_scores = rep(0, 1000), boundary_valid = rep(TRUE, 1000),
-    oh_seq = rep("AAAA", 1000), alien_ohs = character(0),
+    oh1_seq = rep("AAAA", 1000), oh2_seq = rep("AAAA", 1000),
+    alien_ohs = character(0),
     compat_matrix = build_oh_compatibility(2L)
   ))
 })
@@ -174,7 +175,8 @@ test_that("oogga_sb_dp_solve_k_v2 returns NULL for infeasible K", {
   expect_null(oogga_sb_dp_solve_k_v2(
     K = 5L, total_len = 500L, min_len = 100L, max_len = 200L,
     boundary_scores = rep(0, 500), boundary_valid = rep(TRUE, 500),
-    oh_seq = rep("AAAA", 500), alien_ohs = character(0),
+    oh1_seq = rep("AAAA", 500), oh2_seq = rep("AAAA", 500),
+    alien_ohs = character(0),
     compat_matrix = build_oh_compatibility(2L)
   ))
 })
@@ -605,14 +607,17 @@ test_that("tile_segments_oogga preserves oh2 overlap past SB boundary", {
     overlap_codons = overlap_codons
   )
 
-  # For each tile, oh2 should be the last 4 nt of the tile in the CDS.
-  # For SB-boundary tiles, end_codon is extended past the SB boundary by
-  # overlap_codons (so oh2 doesn't collide with SB junction overhangs).
+  # oh2 extends overlap_codons past end_codon (not the last 4 nt of the tile).
+  # This is by design: end_codon already includes overlap extension from the DP,
+  # and oh2 extends another overlap_codons to serve as the BsmBI junction point.
+  n_codons_gene <- gene_len %/% 3L
   for (i in seq_len(nrow(tiles))) {
-    expected_oh2 <- substring(cds, tiles$end_nt[i] - 3L, tiles$end_nt[i])
+    oh2_codon <- min(tiles$end_codon[i] + overlap_codons, n_codons_gene)
+    oh2_pos <- oh2_codon * 3L
+    expected_oh2 <- substring(cds, oh2_pos - 3L, oh2_pos)
     expect_equal(tiles$oh2_seq[i], expected_oh2,
       info = paste(
-        "Tile", i, "oh2 should be last 4 nt of tile.",
+        "Tile", i, "oh2 should extend overlap_codons past end_codon.",
         "Expected:", expected_oh2, "Got:", tiles$oh2_seq[i]
       )
     )
