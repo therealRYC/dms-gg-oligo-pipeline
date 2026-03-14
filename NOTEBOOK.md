@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-13 — Entry 39: Tile boundary clearance brainstorm -->
+<!-- Last updated: 2026-03-13 — Entry 40: OOGGA Python vs R validation -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -1465,3 +1465,41 @@ Two changes needed:
 - DIMPLE source: github.com/coywil26/DIMPLE — `cutsite_overhang=4`, `-overlap` default=4 (both nucleotides)
 - Potapov et al. (2018) ACS Synth Bio 7:2665 — overhang fidelity data
 
+
+---
+
+### 2026-03-13 21:52 — Entry 40: OOGGA Python vs R Implementation Validation
+
+**Type**: session
+**Status**: completed
+**Tags**: [oogga, validation, superblock, dp, overhang-selection]
+
+**Goal**: Validate that our R OOGGA DP (`R/06b_oogga_dp.R`) produces equivalent results to the original Python OOGGA (`Dyna_frag` class) when configured identically (single-OH, beam_width=1).
+
+**Approach**: Created a standalone comparison folder (`260313-oogga-python-vs-our-R-implementation/`) with 5 scripts that: (1) export our BsmBI NEB data to OOGGA's CSV format, (2) build a domesticated GRIN2A+cassette test sequence with aligned parameters, (3) run R OOGGA in single-OH mode, (4) run Python OOGGA on the same sequence, and (5) compare outputs systematically. Also wrote 8 testthat assertions covering CSV roundtrip, scoring equivalence, position/overhang/score match, collision checks, and set fidelity.
+
+**Key findings**:
+- R and Python produce **identical** results: K=3, boundaries at positions 1116/2073/3840, overhangs GAAA/AGAA/AAGA
+- Total scores differ by ~1.8e-7 (relative), explained by P_fid floating-point difference when R uses RDS doubles vs Python uses CSV integers for row sums (~5e-7 per overhang)
+- All 86 testthat assertions pass
+- Set fidelity = 1.0 for both (perfect under BsmBI cycling conditions with only 7 overhangs)
+- Multiple optimal solutions exist (Python found 5 traces with identical scores but different boundary positions)
+
+**Artifacts**:
+- `260313-oogga-python-vs-our-R-implementation/scripts/01_export_neb_data.R` — RDS→CSV export with roundtrip verification
+- `260313-oogga-python-vs-our-R-implementation/scripts/02_prepare_inputs.R` — Domesticated GRIN2A + params.json
+- `260313-oogga-python-vs-our-R-implementation/scripts/03_run_r_single_oh.R` — R single-OH mode runner
+- `260313-oogga-python-vs-our-R-implementation/scripts/04_run_python_oogga.py` — Python OOGGA wrapper
+- `260313-oogga-python-vs-our-R-implementation/scripts/05_compare.R` — Comparison with markdown report
+- `260313-oogga-python-vs-our-R-implementation/tests/test-oogga-validation.R` — 8 testthat tests (86 assertions)
+- `260313-oogga-python-vs-our-R-implementation/outputs/comparison_report.md` — Final report
+
+**Key alignment details**:
+- R boundary `p` = OOGGA boundary `j = p` (same numeric value, same overhang `seq[p+1:p+4]` in 1-indexed)
+- OOGGA automatically includes `seq[0:4]` (via trace) and `seq[-4:]` (explicitly) in collision checks; R passes both as `alien_ohs`
+- An overhang and its own RC are the same physical junction — not a real collision
+- Score formula: R `product(P_fid * P_eff)` = Python `product(eff/100) * product(fid/100)` (mathematically identical)
+
+**Next steps**:
+- Validation complete — R OOGGA core DP is confirmed faithful to the original Python implementation
+- Can proceed with confidence on full pipeline results using the extended features (two-OH model, beam search)
