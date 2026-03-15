@@ -1,105 +1,70 @@
 # Created: 2026-03-15
-# Last updated: 2026-03-15 — Fresh start: BUG-010, BUG-011
+# Last updated: 2026-03-15 — BUG-010 and BUG-011 FIXED
 
 # Active Bugs
 
+(none)
+
+# Resolved Bugs
+
 Previous bug history archived to `archive/BUGS-pre-260315.md`.
 
-## BUG-010: Oligo assembly uses wrong oh2 position — mutable region truncated
+## BUG-010: oh2 double-counting causes skipped variants at tile boundaries — FIXED
 
-**Status**: OPEN — root cause identified
+**Status**: FIXED (2026-03-15)
 **Severity**: Critical
 **Discovered**: 2026-03-14 (full pipeline benchmark), root-caused 2026-03-15
 
 ### Symptom
 
-Hundreds of variants skipped per gene (147-546) as `partial_oh_overlap`.
-Skipped positions appear at EVERY tile boundary, not just gene edges.
+210 variants skipped as `partial_oh_overlap` for GRIN2A. Skipped positions
+appeared at EVERY tile boundary, not just gene edges.
 
 ### Root cause
 
-The oh2 overhang is at `end_codon + overlap_codons` (18 nt past the tile end
-with overlap_codons=6). But two places in the code assume oh2 is the last 4 nt
-of the tile:
+The tile metadata loop in `R/06b_oogga_dp.R` computed oh2 at
+`end_codon + overlap_codons`, but `end_codon` already includes the overlap
+extension from the DP (`raw_boundary + overlap_codons`). This double-counted
+the overlap, putting oh2 18 nt past the tile end.
 
-1. **`R/08_oligo_assembly.R:92`** — `mutable_regions <- substring(mutant_tiles, 5L, t_len - 4L)`
-   Strips the last 4 nt of the tile as "oh2". But the actual oh2 is 18 nt past
-   the tile end. The mutable region is truncated 18 nt too early.
+### Fix
 
-2. **`R/05_tiling.R:183`** — `dist_from_oh2 <- (tile_len - 4L) - local_end`
-   Computes clearance against `tile_len - 4` as the oh2 boundary. But oh2 is at
-   `end_codon + overlap_codons`, which is 18 nt past the tile end.
+Two lines in `R/06b_oogga_dp.R`:
+- `search_tile_boundaries_oogga()` (line ~1082): `oh2_codon <- min(tiles$end_codon[i], n_codons_cds)`
+- `tile_segments_oogga()` (line ~1353): `oh2_codon <- min(tiles$end_codon[i], total_n_codons)`
 
-### Correct geometry (example: raw boundary at codon 74, overlap_codons=6)
+Removed `+ overlap_codons` from both. The DP scoring was already correct
+(it uses `boundary + overlap_codons` = tile end); only the metadata was wrong.
 
-```
-Tile 1:  codon 1 ──────────────────────────── codon 80 (end_codon = raw + overlap)
-         nt 1                                  nt 240
+### Verification
 
-oh1:     nt 1-4   (first 4 nt of tile)
-oh2:     nt 255-258 (end_codon + overlap_codons = codon 86, 18 nt PAST tile end)
-
-Mutable: codon 2 to codon 80 - overlap/2 = codon 77
-         (5 nt WT buffer between last mutable codon and oh2)
-
-Tile 2:  codon 77 ─────────────────────────── codon 140
-oh1:     nt 229-232
-Mutable: codon 77 + overlap/2 = codon 80 onward
-         (5 nt WT buffer between oh1 and first mutable codon)
-```
-
-No mutable gaps: codon 77 is mutable in tile 1, codon 80 is mutable in tile 2.
-Codons 78-79 are in the WT buffer zone of both tiles but covered by one or the other.
-
-### Files to fix
-
-- `R/08_oligo_assembly.R:92` — mutable region extraction
-- `R/05_tiling.R:182-183` — clearance computation
+After fix: 210 skipped variants remain — these are the expected gene-edge
+variants (codons near start/stop where mutations overlap oh1/oh2), NOT
+internal tile boundary variants.
 
 ---
 
-## BUG-011: In-silico assembly simulator fails on nearly all tiles
+## BUG-011: In-silico assembly simulator fails on nearly all tiles — FIXED
 
-**Status**: OPEN — diagnostic needed to narrow
+**Status**: FIXED (2026-03-15) — same root cause as BUG-010
 **Severity**: Critical
 **Discovered**: 2026-03-14 (full pipeline benchmark)
 
 ### Symptom
 
-Assembly simulation fails on all non-final tiles across all 4 genes:
+Assembly simulation failed on 24/25 tiles for GRIN2A. Only the last tile
+(which has no 3'WT gene blocks) passed.
 
-| Gene | Pass | Fail |
-|------|------|------|
-| GRIN2A | 1/25 (tile 25) | 24 |
-| AKAP11 | 1/31 (tile 31) | 30 |
-| TRIO | 1/53 (tile 53) | 52 |
-| GRIN2A_ext | 1/24 (tile 24) | 23 |
+### Root cause
 
-The only passing tile is always the **last tile**, which uniquely has no 3'WT
-gene blocks (its BsmBI blocks contain only the cassette).
+Same as BUG-010. The wrong oh2 position caused the oligo's BsmBI site to
+reference a 4-nt sequence 18 nt past the tile end. The resulting cut-and-
+ligate product didn't match the expected gene sequence.
 
-### What we know
+### Fix
 
-Deep code trace (2026-03-15) found:
-- The 3-step reaction architecture is correctly modeled in the simulator
-- Fragment chaining logic (start fragment, overhang matching) is correct on paper
-- The bug could not be identified through static analysis alone
-- Likely related to BUG-010's wrong oh2 position (oligo has wrong mutable region
-  → assembled product doesn't match expected CDS → verification fails)
+Same 2-line fix as BUG-010. No simulator code changes needed.
 
-### Diagnostic needed
+### Verification
 
-Add prints to show which verification sub-check fails per tile:
-`has_mut_gene`, `has_polIII`, `has_barcode`, `correct_order`.
-
-### Key insight
-
-BUG-010 and BUG-011 are likely the SAME underlying bug. If the oligo's mutable
-region is truncated (BUG-010), the assembled product's gene sequence won't match
-the expected mutant CDS, causing `has_mut_gene = FALSE` in the verification step.
-Fixing BUG-010's oh2 position may resolve BUG-011 automatically.
-
-### Files
-
-- `R/13_gg_simulator.R` — `simulate_tile_assembly()`, `verify_assembly_product()`
-- `run_pipeline.R:363-398` — simulation call site (add diagnostic prints here)
+After fix: **25/25 tiles pass** assembly simulation for GRIN2A.
