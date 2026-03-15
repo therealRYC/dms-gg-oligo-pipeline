@@ -607,17 +607,17 @@ test_that("tile_segments_oogga preserves oh2 overlap past SB boundary", {
     overlap_codons = overlap_codons
   )
 
-  # oh2 extends overlap_codons past end_codon (not the last 4 nt of the tile).
-  # This is by design: end_codon already includes overlap extension from the DP,
-  # and oh2 extends another overlap_codons to serve as the BsmBI junction point.
+  # oh2 = last 4 nt of tile (at end_codon, NOT end_codon + overlap_codons).
+  # end_codon already includes the overlap extension from the DP, so no
+  # further offset is needed. The old code double-counted overlap_codons.
   n_codons_gene <- gene_len %/% 3L
   for (i in seq_len(nrow(tiles))) {
-    oh2_codon <- min(tiles$end_codon[i] + overlap_codons, n_codons_gene)
+    oh2_codon <- min(tiles$end_codon[i], n_codons_gene)
     oh2_pos <- oh2_codon * 3L
     expected_oh2 <- substring(cds, oh2_pos - 3L, oh2_pos)
     expect_equal(tiles$oh2_seq[i], expected_oh2,
       info = paste(
-        "Tile", i, "oh2 should extend overlap_codons past end_codon.",
+        "Tile", i, "oh2 should be last 4 nt of tile (at end_codon).",
         "Expected:", expected_oh2, "Got:", tiles$oh2_seq[i]
       )
     )
