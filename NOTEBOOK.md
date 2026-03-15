@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-14 — Entry 43: Reaction-aware tile DP + SB boundary sub-block fix -->
+<!-- Last updated: 2026-03-14 — Entry 44: Full pipeline benchmark exposes 2 critical bugs -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -1661,3 +1661,46 @@ Then fixed 2 bugs exposed by the TRIO gene (9294 nt):
 - OOGGA tests: 120/120 pass
 - Full suite: 5271 pass, 1 pre-existing failure (`test-gg-simulator.R:309` — tile 1 K5E on TEST_GENE_SEQ)
 - AKAP11 pipeline: all segments succeed at max_identity=2, blocks 153–1728 nt (within 1800 limit)
+
+---
+
+### 2026-03-14 14:15 — Entry 44: Full pipeline benchmark — 2 critical bugs exposed
+
+**Type**: session
+**Status**: completed
+**Tags**: [benchmark, bugs, assembly-simulation, skipped-variants, production-readiness]
+
+**Goal**: Run the full pipeline on all 4 test genes (GRIN2A, AKAP11, TRIO, GRIN2A_ext) with current settings (overlap_codons=6, barcodes_per_variant=10) and assess production readiness.
+
+**Results**:
+
+| Gene | Length | SBs | Tiles | Oligos | Blocks | Runtime |
+|------|--------|-----|-------|--------|--------|---------|
+| GRIN2A | 4,395 nt | 4 | 25 | 305K | 52 | 7.9m |
+| AKAP11 | 5,706 nt | 4 | 31 | 397K | 64 | 10.6m |
+| TRIO | 9,294 nt | 7 | 53 | 646K | 111 | 17.7m |
+| GRIN2A_ext | 4,395 nt | 4 | 24 | 306K | 59 | 9.2m |
+
+Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, oligos, blocks, 2.2x runtime).
+
+**Two critical bugs discovered**:
+
+1. **BUG-010: Hundreds of variants skipped per gene** (147–546 per gene, 0.5–0.8%). Variants near ATG and stop codon are flagged as `partial_oh_overlap` and silently excluded. There should be zero skipped variants.
+
+2. **BUG-011: Assembly simulator fails on nearly all tiles** (1/25 to 1/53 pass rate). Most tiles return NA (fragments don't ligate). If the simulator is correct, the designed assemblies are broken. Must determine whether the design or the simulator is at fault.
+
+**Decisions made**:
+- These are blockers for production use — must be resolved before ordering oligos
+- Opened BUG-010 and BUG-011 in BUGS.md with full diagnostic data
+
+**Artifacts**:
+- `benchmarks/260314_full_pipeline_run/` — full outputs for all 4 genes
+- `benchmarks/260314_full_pipeline_run/cross_gene_summary.csv` — metrics table
+- `BUGS.md` — BUG-010 and BUG-011 documented
+
+**Related commits**:
+- `6ef9ed0` — benchmark: Full pipeline run on 4 genes
+
+**Next steps**:
+- Investigate BUG-011 first: trace a single failing tile to determine design vs simulator fault
+- Then tackle BUG-010: architectural fix for gene-edge overhangs (DIMPLE-style 4 nt buffer)

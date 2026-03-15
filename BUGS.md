@@ -1,5 +1,5 @@
 # Created: 2026-02-20
-# Last updated: 2026-03-09 — BUG-009 FIXED: OOGGA collision-aware boundary selection rewrite
+# Last updated: 2026-03-14 — BUG-010, BUG-011: Critical assembly failures exposed by full pipeline benchmark
 
 # Bug Inventory — DMS GG Oligo Pipeline
 
@@ -129,6 +129,59 @@
 - **Cross-language equivalence**: `identity(A, RC(B)) ≡ identity(RC(A), B)` proven mathematically (substitution j=3-i). The "extra" 3rd condition was redundant, not wrong — 2-condition and 3-condition compat matrices are identical.
 
 ## Open Bugs
+
+### BUG-010: Hundreds of variants skipped per gene — zero should be skipped
+- **File:** `R/05_tiling.R` (`assign_variants_to_tiles()`), `R/08_oligo_assembly.R`
+- **Status:** OPEN — critical, blocks production use
+- **Severity:** Critical — pipeline silently drops mutational coverage at gene edges
+- **Discovered:** 2026-03-14 (full pipeline benchmark on 4 genes)
+- **What:** Every gene run skips hundreds of variants with "partial oh1/oh2 overlap":
+
+  | Gene | Variants skipped | % of total |
+  |------|-----------------|------------|
+  | GRIN2A | 210 | 0.7% |
+  | AKAP11 | 273 | 0.7% |
+  | TRIO | 546 | 0.8% |
+  | GRIN2A_ext | 147 | 0.5% |
+
+  These are variants near the gene start (ATG) and gene end (stop codon) where the
+  tile's oh1/oh2 overhang overlaps with the mutable region. The pipeline flags them
+  as `partial_oh_overlap` and excludes them from the oligo pool.
+- **Expected behavior:** Zero skipped variants. Every position in the gene (except
+  Met1 and the stop codon itself) should be mutable. The DIMPLE paper recommends a
+  4 nt buffer past ATG and stop to avoid library biasing at gene edges.
+- **Related:** BUG-003 (boundary codon mutations) describes the same root cause but
+  proposed a partial rescue approach. The real fix may require architectural changes
+  to how gene-edge overhangs are handled (see OPT-001 and OPT-002 for ideas).
+- **Benchmark data:** `benchmarks/260314_full_pipeline_run/*/pipeline_log.txt`
+
+### BUG-011: In-silico assembly simulator fails on nearly all tiles
+- **File:** `R/10b_gg_simulator.R` (`simulate_pipeline_assembly()`, `digest_sequence()`, `ligate_fragments()`)
+- **Status:** OPEN — critical, indicates assemblies are broken OR simulator is broken
+- **Severity:** Critical — if the simulator is correct, the designed assemblies do not work
+- **Discovered:** 2026-03-14 (full pipeline benchmark on 4 genes)
+- **What:** The assembly simulation fails on the vast majority of tiles:
+
+  | Gene | Pass | Fail | Rate |
+  |------|------|------|------|
+  | GRIN2A | 1/25 | 24 | 4% |
+  | AKAP11 | 1/31 | 30 | 3% |
+  | TRIO | 1/53 | 52 | 2% |
+  | GRIN2A_ext | 1/24 | 23 | 4% |
+
+  Failure modes:
+  - Most tiles return `NA` for assembled product (fragments don't ligate)
+  - A few tiles report "ambiguous ligation" (2 fragments match same oh_5)
+  - Only 1 tile passes per gene (always tile with specific geometry)
+- **Expected behavior:** All tiles should pass. The simulator digests oligo + WT gene
+  blocks with BsmBI/BsaI, identifies matching overhangs, and ligates in order. If
+  this fails, either (a) the designed overhangs/enzyme sites are incorrect, or
+  (b) the simulator has a bug. Either way, this must be resolved before production.
+- **Investigation needed:** Trace a single failing tile end-to-end: extract the oligo +
+  gene blocks, manually simulate digestion, check if overhangs match. This will
+  determine whether the design or the simulator is at fault.
+- **Benchmark data:** `benchmarks/260314_full_pipeline_run/*/pipeline_log.txt`
+- **Pre-existing test failure:** `tests/testthat/test-gg-simulator.R:309`
 
 ### BUG-003: Boundary codon mutations blanket-skipped (partial fix possible)
 - **File:** `run_pipeline.R:177-188`, `R/04_mutation_design.R`, `R/05_tiling.R:176-180`
