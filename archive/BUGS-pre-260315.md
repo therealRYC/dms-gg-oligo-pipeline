@@ -1,7 +1,12 @@
 # Created: 2026-02-20
 # Last updated: 2026-03-14 — BUG-010, BUG-011: Critical assembly failures exposed by full pipeline benchmark
+#
+# ⚠️  ARCHIVED 2026-03-15 — This file is historical reference only.
+# Active bugs are tracked in /BUGS.md (fresh file created 2026-03-15).
+# Do NOT use this file for current bug status — many entries are outdated
+# or superseded by later fixes. Kept for audit trail only.
 
-# Bug Inventory — DMS GG Oligo Pipeline
+# Bug Inventory — DMS GG Oligo Pipeline (ARCHIVED)
 
 ## Fixed Bugs
 
