@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-14 — Entry 44: Full pipeline benchmark exposes 2 critical bugs -->
+<!-- Last updated: 2026-03-15 — Entry 45: BUG-010 + BUG-011 fixed (oh2 double-counting) -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -67,6 +67,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-14 | Implemented clearance-aware overlap codon handling | overlap_codons default 4→6, binary quality→clearance scoring in assign_variants_to_tiles(), config validation (even, >=2). All 5271 tests pass. | Entry 40 |
 | 2026-03-13 | overhang_score() returns NA for unknown overhangs (not 0.5) | Fabricated 0.5 fallback could mislead DP; NA makes unscorable boundaries explicit and excluded | Entry 41 |
 | 2026-03-14 | Raw product scoring + narrow K range hardcoded | 2×2 factorial benchmark: raw picks fewer tiles (31 vs 35) with higher total assembly probability; wide K is 6x slower with zero benefit | Entry 42 |
+| 2026-03-15 | oh2 = last 4 nt of tile (not end_codon + overlap_codons) | end_codon already includes overlap extension from DP; adding overlap again double-counted, placing oh2 18 nt past tile end | Entry 45 |
 
 ## Entries
 
@@ -1704,3 +1705,46 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 **Next steps**:
 - Investigate BUG-011 first: trace a single failing tile to determine design vs simulator fault
 - Then tackle BUG-010: architectural fix for gene-edge overhangs (DIMPLE-style 4 nt buffer)
+
+---
+
+### 2026-03-15 15:38 — Fix: BUG-010 + BUG-011 resolved (oh2 double-counting)
+
+**Type**: session
+**Status**: completed
+**Tags**: [bugfix, oh2, tile-geometry, assembly-simulation, oogga-dp]
+
+**Goal**: Fix the oh2 double-counting bug that caused 210 skipped variants and 24/25 assembly simulation failures on GRIN2A.
+
+**Approach**: Root cause analysis with user's geometry spreadsheet (`Brainstorm/260315-theoretical-tile-overhang-geometry.xlsx`) revealed that `end_codon` already includes the overlap extension from the DP (raw_boundary + overlap_codons = tile end). The tile metadata loop was adding `+ overlap_codons` again, putting oh2 18 nt past the actual tile end. This is a 2-line fix in `R/06b_oogga_dp.R` — the DP scoring was already correct; only the metadata was wrong.
+
+**Key findings**:
+- BUG-010 and BUG-011 were the same underlying bug, as hypothesized in Entry 44
+- The DP correctly scores oh2 at `boundary + overlap_codons` (= tile end codon), but the tile metadata loop added another `+ overlap_codons`
+- The mutable region (`tile[5:t_len-4]`), clearance scoring (`tile_len - 4`), and 3'WT block start (`end_nt + 1`) were all already correct — they assumed oh2 was at the tile end
+- After fix: GRIN2A passes 25/25 assembly simulation, 210 skipped variants are expected gene-edge variants only
+
+**Decisions made**:
+- oh2 = last 4 nt of tile (at `end_codon`, not `end_codon + overlap_codons`): the overlap is already baked into `end_codon` by the DP (over previous assumption that oh2 extended past tile end)
+
+**Artifacts**:
+- `R/06b_oogga_dp.R` — 2-line fix (lines ~1082 and ~1353)
+- `tests/testthat/test-oogga-dp.R` — test expectations updated to match correct geometry
+- `BUGS.md` — BUG-010 and BUG-011 marked FIXED
+- `benchmarks/260315_oh2_fix/grin2a_run.log` — verification pipeline run log
+
+**Related commits**:
+- `1369cf4` — fix: Remove oh2 double-counting of overlap_codons (BUG-010 + BUG-011)
+- `5dba5d2` — test: Update oh2 test expectations to match corrected geometry
+- `c3d024e` — bugs: Mark BUG-010 and BUG-011 as FIXED
+
+**Verification (GRIN2A)**:
+- Skipped variants: 210 (gene-edge only — was 210 including boundary variants before)
+- Assembly simulation: 25/25 tiles pass (was 1/25)
+- All oligos: 152-290 nt (within 300 nt limit)
+- All gene blocks: 213-1769 nt (within 1800 nt limit)
+- All 5264 unit tests pass, 0 failures
+
+**Next steps**:
+- Gene-edge codon 2 clearance = 0 (touching oh1) — fix by moving oh_L into Kozak sequence (separate session)
+- Run AKAP11 and TRIO verification to confirm fix generalizes
