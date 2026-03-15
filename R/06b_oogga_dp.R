@@ -1077,11 +1077,9 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   for (i in seq_len(n_tiles)) {
     # oh1: first 4 nt of this tile
     tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
-    # oh2: extends overlap_codons past tile end, capped at full CDS length
-    # (not n_codons which may be overridden by n_codons_tile).
-    # With forward extension, the last tile's oh2 reaches into the overlap zone
-    # past the SB boundary — this is correct and matches oh2_sb from SB DP.
-    oh2_codon <- min(tiles$end_codon[i] + overlap_codons, n_codons_cds)
+    # oh2: last 4 nt of this tile (end_codon already includes overlap extension
+    # from the DP, so no further offset needed). Capped at full CDS length.
+    oh2_codon <- min(tiles$end_codon[i], n_codons_cds)
     oh2_pos <- oh2_codon * 3L
     tiles$oh2_seq[i] <- substring(cds, oh2_pos - 3L, oh2_pos)
 
@@ -1343,15 +1341,16 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
   # --- Populate oh1/oh2 metadata from full gene CDS ---
   # This loop fills tile metadata (oh sequences, scores, fidelity) that the
   # tile DP doesn't always populate (e.g., single-tile segments have oh1=NA).
-  # With forward extension, the last tile's oh2 naturally extends past the SB
-  # boundary into the overlap zone (= oh2_sb scored by SB DP). The min() cap
-  # uses total_n_codons (full gene length), correctly handling gene start (ATG)
-  # and gene end (stop codon) boundaries.
+  # oh2 = last 4 nt of each tile. end_codon already includes the overlap
+  # extension from the DP, so no further offset is needed. The min() cap
+  # uses total_n_codons (full gene length), correctly handling gene-end
+  # boundaries.
   for (i in seq_len(nrow(tiles))) {
     # oh1: first 4 nt of this tile
     tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
-    # oh2: extends overlap_codons past tile end, capped at full gene length
-    oh2_codon <- min(tiles$end_codon[i] + overlap_codons, total_n_codons)
+    # oh2: last 4 nt of this tile (end_codon already includes overlap extension
+    # from the DP, so no further offset needed). Capped at full gene length.
+    oh2_codon <- min(tiles$end_codon[i], total_n_codons)
     oh2_pos <- oh2_codon * 3L
     tiles$oh2_seq[i] <- substring(cds, oh2_pos - 3L, oh2_pos)
 
