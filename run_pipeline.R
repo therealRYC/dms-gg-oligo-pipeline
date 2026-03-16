@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-03-17 — Wire PCR handle support through pipeline
+# Last updated: 2026-03-18 — PCR handles + oh_L/upstream_cassette through pipeline
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -187,7 +187,8 @@ cli::cli_h2(paste0(
 ))
 step_start <- proc.time()
 tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length,
-                                   handle_overhead = cfg$handle_overhead %||% 0L)
+                                   handle_overhead = cfg$handle_overhead %||% 0L,
+                                   upstream_cassette_len = nchar(cfg$upstream_cassette))
 assembly_plan <- plan_assembly(
   cds = gene$cds,
   polIII = cfg$polIII_promoter,
@@ -196,6 +197,8 @@ assembly_plan <- plan_assembly(
   config = list(
     manual_oh3 = cfg$oh3,
     manual_oh4 = cfg$oh4,
+    oh_L = cfg$oh_L,
+    upstream_cassette = cfg$upstream_cassette,
     multi_k = cfg$multi_k_search,
     overlap_codons = cfg$overlap_codons,
     min_geneblock_length = cfg$min_geneblock_length,
@@ -326,7 +329,8 @@ oligos <- assemble_oligos(
   oh4 = oh4,
   max_oligo_length = cfg$max_oligo_length,
   full_seq = assembly_plan$full_seq,
-  pcr_handles = cfg$pcr_handles
+  pcr_handles = cfg$pcr_handles,
+  upstream_cassette = cfg$upstream_cassette
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["8_oligo_assembly"]] <- step_elapsed
@@ -544,7 +548,10 @@ cli::cli_alert_success(paste0(
 ))
 cli::cli_alert_success(paste0("Gene blocks: ", nrow(geneblock_result$blocks)))
 cli::cli_alert_success(paste0("Tiles: ", nrow(tiles)))
-cli::cli_alert_success(paste0("Fixed overhangs: oh3=", oh3, ", oh4=", oh4))
+cli::cli_alert_success(paste0(
+  "Fixed overhangs: oh_L=", assembly_plan$oh_L, ", oh3=", oh3, ", oh4=", oh4,
+  if (nzchar(cfg$upstream_cassette)) paste0(", upstream_cassette='", cfg$upstream_cassette, "'") else ""
+))
 if (!is.null(cfg$pcr_handles)) {
   cli::cli_alert_success(paste0(
     "PCR handles: ", length(cfg$pcr_handles), " pair(s), ",
