@@ -208,7 +208,7 @@ test_that("search_tile_boundaries_oogga produces collision-free tiles on TEST_LO
   cds <- TEST_LONG_GENE_SEQ
 
   max_mutable_nt <- 243L
-  oh_L <- substring(cds, 1, 4)
+  oh_L <- "TGAA"  # External overhang (upstream of CDS, not CDS-derived)
 
   # Derive oh3 and oh4 (simplified — just use score-based for test)
   fid_lookup <- oh_fidelity$fidelity
@@ -271,7 +271,8 @@ test_that("plan_assembly works with boundary_method='oogga_two_pass'", {
       boundary_method = "oogga_two_pass",
       oogga_max_identity = 2L,
       oogga_beam_width = 1L,
-      dp_k_range = 1L
+      dp_k_range = 1L,
+      oh_L = "TGAA"
     )
   )
 
@@ -298,7 +299,8 @@ test_that("plan_assembly with oogga_two_pass produces expected output format", {
       boundary_method = "oogga_two_pass",
       oogga_max_identity = 2L,
       oogga_beam_width = 1L,
-      dp_k_range = 1L
+      dp_k_range = 1L,
+      oh_L = "TGAA"
     )
   )
 
@@ -360,7 +362,8 @@ test_that("tile_segments_oogga with 1 SB (no splits) returns valid tiles", {
     eff_lookup = eff_lookup,
     max_identity = 2L,
     multi_k = FALSE,
-    dp_k_range = 1L
+    dp_k_range = 1L,
+    oh_L = "TGAA"
   )
 
   expect_true(is.data.frame(tiles))
@@ -413,7 +416,8 @@ test_that("tile_segments_oogga with 2+ gene-region SBs has correct alignment", {
     eff_lookup = eff_lookup,
     max_identity = 2L,
     multi_k = TRUE,
-    dp_k_range = 3L
+    dp_k_range = 3L,
+    oh_L = "TGAA"
   )
 
   expect_true(is.data.frame(tiles))
@@ -478,7 +482,8 @@ test_that("tile_segments_oogga position offsets are correct", {
     min_mutable_nt = min_mutable_nt,
     oh_fidelity = oh_fidelity,
     eff_lookup = eff_lookup,
-    max_identity = 2L
+    max_identity = 2L,
+    oh_L = "TGAA"
   )
 
   # Verify tile_seq == substring(cds, start_nt, end_nt)
@@ -551,7 +556,8 @@ test_that("tile_segments_oogga single-tile segment produces exactly 1 tile", {
     eff_lookup = eff_lookup,
     max_identity = 2L,
     multi_k = TRUE,
-    dp_k_range = 3L
+    dp_k_range = 3L,
+    oh_L = "TGAA"
   )
 
   # First segment (180 nt = 60 codons) should produce a single tile.
@@ -604,7 +610,8 @@ test_that("tile_segments_oogga preserves oh2 overlap past SB boundary", {
     oh_fidelity = oh_fidelity,
     eff_lookup = eff_lookup,
     max_identity = 2L,
-    overlap_codons = overlap_codons
+    overlap_codons = overlap_codons,
+    oh_L = "TGAA"
   )
 
   # oh2 = last 4 nt of tile (at end_codon, NOT end_codon + overlap_codons).
@@ -636,7 +643,8 @@ test_that("plan_assembly with oogga_two_pass on TEST_LONG_GENE_SEQ has no SB ski
       boundary_method = "oogga_two_pass",
       oogga_max_identity = 2L,
       oogga_beam_width = 5L,
-      dp_k_range = 3L
+      dp_k_range = 3L,
+      oh_L = "TGAA"
     )
   )
 

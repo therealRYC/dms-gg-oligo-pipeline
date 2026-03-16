@@ -243,7 +243,8 @@ test_that("TEST_GENE_SEQ full assembly simulation succeeds", {
   cds <- domesticate_test_gene(polIII = TEST_POLIII)
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
   tiles <- plan$tiles
   oh3 <- plan$oh3
   oh4 <- plan$oh4
@@ -317,7 +318,8 @@ test_that("TEST_LONG_GENE_SEQ assembly simulation runs with collision-aware boun
   cds <- TEST_LONG_GENE_SEQ
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
   tiles <- plan$tiles
   oh3 <- plan$oh3
   oh4 <- plan$oh4

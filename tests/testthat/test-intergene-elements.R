@@ -161,7 +161,8 @@ test_that("plan_assembly accepts downstream_cassette for block length calculatio
   tile_size <- compute_max_tile_size(300, 12)
   # Without downstream_cassette (backward compat)
   plan_no_intergene <- plan_assembly(
-    cds = cds, polIII = TEST_POLIII, max_mutable_nt = tile_size
+    cds = cds, polIII = TEST_POLIII, max_mutable_nt = tile_size,
+    config = list(oh_L = "TGAA")
   )
   expect_null(plan_no_intergene$core_downstream_cassette)
 
@@ -170,6 +171,7 @@ test_that("plan_assembly accepts downstream_cassette for block length calculatio
   downstream_cassette <- paste0(intergene_seq, TEST_POLIII)
   plan_with_intergene <- plan_assembly(
     cds = cds, polIII = TEST_POLIII, max_mutable_nt = tile_size,
+    config = list(oh_L = "TGAA"),
     downstream_cassette = downstream_cassette
   )
 
@@ -192,6 +194,7 @@ test_that("load_config with intergene_elements builds downstream_cassette", {
     paste0("polIII_promoter: \"", TEST_POLIII, "\""),
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",
+    "oh_L: TGAA",
     "intergene_elements:",
     "  - name: \"T2A_GFP\"",
     "    sequence: \"ATGGCTGAACTTAAAGCTGCC\"",
@@ -218,7 +221,8 @@ test_that("load_config without intergene_elements sets downstream_cassette = pol
     paste0("gene_fasta: \"", gsub("\\\\", "/", tmp_fasta), "\""),
     paste0("polIII_promoter: \"", TEST_POLIII, "\""),
     "paqci_star2: AGTC",
-    "paqci_star1: TCGA"
+    "paqci_star1: TCGA",
+    "oh_L: TGAA"
   )
   writeLines(config_lines, tmp_config)
 
