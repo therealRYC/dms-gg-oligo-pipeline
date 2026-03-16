@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-17 — Add optional PCR handle support (pcr_handles parameter)
+# Last updated: 2026-03-18 — PCR handles + upstream_cassette (oh_L architecture)
 # 08_oligo_assembly.R — Assemble universal oligo sequences for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 #
@@ -7,10 +7,15 @@
 #
 #   5'—[fwd_handle]—BsaI_fwd(7)—oh1(4)—[mutable region]—BsmBI_rev_oh2(11)—BsmBI_fwd_oh3(11)—barcode(12)—BsaI_rev_oh4(11)—[rev_handle]—3'
 #
+# For tile 1 (gene start), oh1 = oh_L (external, upstream of ATG):
+#   mutable region = upstream_cassette + ATG + [codons 2+] ... oh2_boundary
+# For other tiles, oh1 = gene-derived 4 nt at tile boundary:
+#   mutable region = tile interior (strip oh1=4nt front, oh2=4nt back)
+#
 # Where:
 #   fwd_handle = optional PCR handle for tile-specific amplification (0 nt if not used)
 #   BsaI_fwd = GGTCTC + A (recognition + 1nt spacer) = 7 nt
-#   oh1      = 4 nt WT gene sequence at tile's 5' boundary (BsaI overhang)
+#   oh1      = 4 nt overhang (BsaI): oh_L for tile 1, gene-derived for others
 #   mutable  = tile interior where mutation occurs
 #   BsmBI_rev_oh2 = RC(CGTCTC + A + oh2) = 11 nt (BsmBI reads on complement)
 #   BsmBI_fwd_oh3 = CGTCTC + A + oh3 = 11 nt
@@ -43,12 +48,14 @@
 #'   has $fwd and $rev character fields. Handles are prepended/appended outside
 #'   the BsaI sites for tile-specific amplification from pooled oligos. When
 #'   NULL, no handles are added (backward compatible).
+#' @param upstream_cassette Sequence between oh_L and ATG (default "")
 #' @return Data frame with oligo_name, sequence, length, variant_id, tile_id
 assemble_oligos <- function(variants, cds, barcodes, tiles,
                             oh3, oh4,
                             max_oligo_length = MAX_OLIGO_LENGTH,
                             full_seq = NULL,
-                            pcr_handles = NULL) {
+                            pcr_handles = NULL,
+                            upstream_cassette = "") {
   n <- nrow(variants)
 
   # --- (B) Pre-compute invariant enzyme site strings ---
@@ -112,8 +119,15 @@ assemble_oligos <- function(variants, cds, barcodes, tiles,
       substring(wt_tile, cs + 3L)
     )
 
-    # Extract mutable regions (strip oh1=4nt front, oh2=4nt back)
-    mutable_regions <- substring(mutant_tiles, 5L, t_len - 4L)
+    # Extract mutable regions.
+    # Tile 1 (start_nt == 1): oh1 is external (oh_L, upstream of CDS), so the
+    # entire CDS tile from position 1 is mutable. Prepend upstream_cassette.
+    # Other tiles: strip oh1=4nt front, oh2=4nt back.
+    if (tile_start_nt[tid] == 1L) {
+      mutable_regions <- paste0(upstream_cassette, substring(mutant_tiles, 1L, t_len - 4L))
+    } else {
+      mutable_regions <- substring(mutant_tiles, 5L, t_len - 4L)
+    }
 
     # (C) Vectorized oligo assembly — single paste0 for all variants in tile
     # fwd/rev handles are "" when pcr_handles is NULL (zero-cost backward compat)
