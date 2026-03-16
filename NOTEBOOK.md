@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-17 — Entries 51-53: Enhanced barcode filters, gene block flanking pads, strict GG verifier -->
+<!-- Last updated: 2026-03-18 — Entries 46-53: oh_L/upstream_cassette, barcode filters, flanking pads, strict GG verifier -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -57,6 +57,8 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-08 | Document & shelve convergent U6T7 tornado design | Promising but needs wet-lab validation; current pipeline working; can add as config toggle later | Entry 25 |
 | 2026-03-08 | Re-evaluate DP vs MC tile boundaries with corrected metrics | Previous comparison invalidated by missing cassette OHs + blacklist filters | Entry 26 |
 | 2026-03-08 | Keep DP (dp_v2) for tile boundaries, discard tile MC | MC never improved beyond dp_v2 initial solution, 1.8-2.8x slower, failed on TRIO | Entry 26 |
+| 2026-03-15 | User-specified oh_L (required), no default | oh_L depends on helper plasmid; CACC collides with oh3; user must choose | Entry 46 |
+| 2026-03-15 | Move oh_L upstream of ATG to free codon 2 | Previously oh1=CDS[1:4] locked codon 2's first nt inside the overhang | Entry 46 |
 | 2026-03-09 | BUG-009: All DPs missing OOGGA collision prevention | Our DPs pre-compute scores independently per position — no inter-boundary collision check. OOGGA's `__overlap_pass()` rejects OHs sharing >2/4 bases with any prior OH. Root cause of repeated-overhang failures. | Entry 27 |
 | 2026-03-09 | Switch to two-pass OOGGA (SB junctions + tile boundaries) | Replace SB MC + dp_v2 architecture entirely. Both passes use proper OOGGA DP with collision checking and BsmBI cycling data. | Entry 27 |
 | 2026-03-09 | oogga_greedy not suitable as default | Fails on TRIO (3098 codons); can't find valid boundaries at max_identity=3 for long genes | Entry 29 |
@@ -1753,7 +1755,7 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 - All 5264 unit tests pass, 0 failures
 
 **Next steps**:
-- Gene-edge codon 2 clearance = 0 (touching oh1) — fix by moving oh_L into Kozak sequence (separate session)
+- ~~Gene-edge codon 2 clearance = 0 (touching oh1) — fix by moving oh_L into Kozak sequence~~ → Fixed in Entry 46
 - Run AKAP11 and TRIO verification to confirm fix generalizes
 
 ---
@@ -2025,3 +2027,65 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 **Related commits**:
 - `bdb2250` — feat: Add targeted junctional sampling + strict nucleotide-level GG verification
 - `c5704e1` — fix: Handle partial oh1/oh2 overlap in strict GG verifier
+
+---
+
+### 2026-03-15 — Entry 46: User-specified oh_L + upstream_cassette (codon 2 fix)
+
+**Type**: feature
+**Status**: completed
+**Tags**: [oh_L, upstream_cassette, codon-2, config, tiling, oligo-assembly, gene-block, pipeline]
+**Branch**: `260315-5prime-upstream-start`
+**Plan**: [Plans/2026-03-15_upstream-cassette-oh_L.md](Plans/2026-03-15_upstream-cassette-oh_L.md)
+
+**Problem**: `oh_L = CDS[1:4]` (always ATGX) locked codon 2's first nucleotide inside the BsaI overhang — making codon 2 effectively non-mutable. Moving oh_L upstream (into the backbone/Kozak region) frees codon 2 for full mutagenesis. CACC (the obvious Kozak overhang) collides with oh3 (derived from U6 promoter ending `...CACCG`), so oh_L must be user-specified.
+
+**Design**: Two new config parameters:
+- `oh_L` (required, 4-nt ACGT): BsaI overhang at 5' gene junction, upstream of ATG
+- `upstream_cassette` (default `""`): DNA between oh_L and ATG (e.g., "CC" for partial Kozak)
+
+Tile 1 oligo structure changes from:
+```
+BsaI—ATGX—[codons 2+]—oh2—BsmBI—oh3—bc—BsaI—oh4
+```
+to:
+```
+BsaI—oh_L—[upstream_cassette]—ATG—[codons 2+]—oh2—BsmBI—oh3—bc—BsaI—oh4
+```
+
+**Changes** (9 atomic commits):
+
+1. **Config** (`00_config.R`, `config_template.yaml`, `configs/*.yaml`): oh_L required with validation (4 ACGT, not palindromic/homopolymer, no collision with oh3/oh4). upstream_cassette default "".
+
+2. **Tiling** (`05_tiling.R`): `compute_max_tile_size()` subtracts upstream_cassette_len from mutable space (conservative: all tiles). `assign_variants_to_tiles()` gives tile 1 full clearance from oh1 (no 4-nt offset since oh1 is external).
+
+3. **Overhang selection** (`06_overhang_selection.R`): `plan_assembly()` reads oh_L from config instead of `substring(cds, 1, 4)`. `precompute_boundary_scores()` accepts oh_L param. Assembly plan stores upstream_cassette.
+
+4. **OOGGA DP** (`06b_oogga_dp.R`): 3 locations updated — `search_tile_boundaries_oogga()`, `tile_segments_oogga()`, and post-DP oh1 assignment. Tile 1 (start_nt==1) gets oh_L instead of gene-derived oh1.
+
+5. **Oligo assembly** (`08_oligo_assembly.R`): Tile 1 mutable region = `upstream_cassette + CDS[1..oh2]` (entire CDS from position 1, no 4-nt strip). Other tiles unchanged.
+
+6. **Gene block design** (`09_wt_geneblock_design.R`): 5'WT blocks (tiles 2+) = `oh_L + upstream_cassette + CDS[1..tile_boundary]`. Both single-block and superblock cases. Helper plasmid uses assembly_plan$oh_L.
+
+7. **Pipeline** (`run_pipeline.R`): Threads oh_L and upstream_cassette to all steps. Summary includes oh_L.
+
+8. **Report + Simulator** (`12_report.R`, `13_gg_simulator.R`): oh_L described as "user-specified". Simulator verifies upstream_cassette in product.
+
+9. **Tests**: 8 test files updated with `oh_L = "TGAA"` (non-CDS-derived).
+
+**Verification**: 5,265 tests pass, 0 failures, 1 skip (TRIO slow test), 41 warnings (pre-existing).
+
+**Commits**:
+- `4644fbc` — config: Add oh_L (required) and upstream_cassette parameters
+- `03144a0` — tiling: Add upstream_cassette_len to tile budget, fix tile 1 clearance
+- `f2aaf1a` — overhang: Accept oh_L from config, store upstream_cassette in plan
+- `2256c25` — oogga: Thread oh_L through DP; tile 1 oh1 = external oh_L
+- `1e28273` — oligo: Tile 1 uses external oh_L, prepends upstream_cassette
+- `47de1f6` — geneblock: 5'WT blocks prepend oh_L + upstream_cassette before CDS
+- `50c6c10` — pipeline: Thread oh_L + upstream_cassette through all pipeline steps
+- `776521e` — report+simulator: Update oh_L description, verify upstream_cassette
+- `ad90aa7` — test: Update all test fixtures with oh_L = TGAA
+
+**Next steps**:
+- Run full pipeline on GRIN2A/AKAP11/TRIO with a real oh_L value to verify end-to-end
+- Merge branch to main after verification

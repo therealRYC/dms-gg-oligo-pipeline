@@ -15,16 +15,17 @@ The pipeline generates all 19 missense substitutions + 1 nonsense (stop) + 1 wil
 
 The final construct in the plasmid:
 ```
-[Backbone]--PaqCI**--[Gene w/ mutation]--[Intergene elements]--[PolIII]--[Barcode]--PaqCI*--[Backbone]
+[Backbone]--PaqCI**--oh_L--[upstream_cassette]--[Gene w/ mutation]--[Intergene elements]--[PolIII]--[Barcode]--PaqCI*--[Backbone]
 ```
-Intergene elements (e.g., WPRE, bGH polyA) are optional and configured per experiment.
+Intergene elements (e.g., WPRE, bGH polyA) are optional and configured per experiment. The `upstream_cassette` (e.g., partial Kozak "CC") sits between the user-specified `oh_L` overhang and the ATG start codon.
 
 Every oligo in the pool has the same universal structure regardless of tile position:
 ```
-5'--[BsaI>>]--oh1--[mutable region]--[<<BsmBI]--[BsmBI>>]--barcode--[<<BsaI]--3'
-     7 nt     4 nt    variable          11 nt      11 nt    20 nt    11 nt
-                                                          (= 64 nt overhead)
+5'--[BsaI>>]--oh_L--[upstream_cassette]--[mutable region]--[<<BsmBI]--[BsmBI>>]--barcode--[<<BsaI]--3'
+     7 nt     4 nt     0-6 nt               variable          11 nt      11 nt    20 nt    11 nt
 ```
+For tile 1: `oh_L` is user-specified (upstream of ATG), mutable region starts at codon 1 (ATG).
+For other tiles: `oh_L` position is filled by the gene-derived oh1; no upstream_cassette.
 
 ## Quick Start (Command Line)
 
@@ -71,6 +72,8 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `oh_L` | *(required)* | 4-nt BsaI overhang at the 5' gene junction (upstream of ATG). **Must match your helper plasmid.** |
+| `upstream_cassette` | `""` | DNA sequence between oh_L and ATG (e.g., `"CC"` for partial Kozak). Leave empty if oh_L directly abuts ATG. |
 | `max_oligo_length` | 300 | Twist oligo pool maximum (nt) |
 | `max_geneblock_length` | 1800 | Gene fragment synthesis maximum (nt) |
 | `geneblock_flanking_pad` | `"TGCATG"` | Flanking bases beyond enzyme sites on gene blocks for efficient Type IIs cleavage. Set to `""` to disable. |
@@ -95,6 +98,8 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 | `simulate_assembly` | `true` | Run in-silico GG assembly simulation after design. Uses targeted junctional sampling (boundary-vulnerable variants) + strict nucleotide-level verification. |
 | `simulation_samples_per_tile` | 1 | Additional random variants per tile beyond the targeted junctional samples (overlap_codons/2 variants from each boundary) |
 | `include_synonymous` | `false` | Add synonymous codon controls per position |
+
+**oh_L overhang**: The `oh_L` parameter has no meaningful default — it is the BsaI overhang at the 5' gene junction, determined by your helper plasmid design. Placing oh_L upstream of the start codon (ATG) frees codon 2 for full mutagenesis. The pipeline will error if left as `"NNNN"`. Note: `CACC` (a natural Kozak choice) collides with oh3 derived from the U6 promoter ending `...CACCG` — choose oh_L based on your specific plasmid.
 
 **PaqCI overhangs**: The `paqci_star2` and `paqci_star1` parameters have no meaningful default — they are determined by the PaqCI sites flanking the cloning site in your destination backbone. The pipeline will error if these are left as the placeholder `"NNNN"`. The values in the example configs (`AATG`/`GCTA`) are arbitrary and should be replaced with the overhangs from your specific vector.
 
@@ -123,7 +128,7 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 3. **Enzyme site scan** (`02_enzyme_site_scan.R`) -- Find endogenous BsaI/BsmBI/PaqCI sites, suggest silent mutations for domestication
 4. **Codon table** (`03_codon_table.R`) -- Human codon usage table, preferred codon lookup
 5. **Mutation design** (`04_mutation_design.R`) -- Generate 19 missense + 1 nonsense + 1 WT control per position (+ optional synonymous) using preferred human codons
-6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- Reaction-aware boundary optimization: SB boundaries placed first via simulated annealing MC (maximizing min set fidelity across all reactions), then tile boundaries within SB segments via max-min DP + joint refinement; oh3/oh4 auto-selection by score ranking; oh_R cassette search extends last tile into downstream cassette for stop codon mutability
+6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- Reaction-aware boundary optimization: SB boundaries placed first via simulated annealing MC (maximizing min set fidelity across all reactions), then tile boundaries within SB segments via max-min DP + joint refinement; oh3/oh4 auto-selection by score ranking; user-specified oh_L + upstream_cassette; oh_R cassette search extends last tile into downstream cassette for stop codon mutability
 7. **Barcode design** (`07_barcode_design.R`) -- Unified hierarchical prefix-suffix barcodes with Hamming distance guarantee on prefixes; optional enhanced filters (GGC motif, hairpin, dinucleotide repeats, poly-G, Tm uniformity)
 8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles; last tile includes invariant cassette prefix from oh_R extension; optional per-tile PCR handles for pooled amplification)
 9. **Gene block design** (`09_wt_geneblock_design.R`) -- WT gene blocks with flanking pads for efficient Type IIs cleavage; superblock splitting for fragments >1800 bp
@@ -135,6 +140,8 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 ## Key Design Decisions
 
 **Mutation strategy**: Fully specified codons (no degenerate NNK/NNS). Each oligo encodes exactly one mutation using the most-preferred human codon.
+
+**5' gene junction**: The `oh_L` overhang sits upstream of ATG in the helper plasmid, with an optional `upstream_cassette` (e.g., partial Kozak "CC") between oh_L and the start codon. This architecture frees codon 2 for full mutagenesis — previously, oh1 = CDS[1:4] locked codon 2's first nucleotide inside the overhang.
 
 **Boundary optimization**: OOGGA-style collision-aware two-pass DP. Pass 1 places superblock boundaries on the full gene+cassette sequence with beam search to maintain collision-free overhang paths. Pass 2 runs per-segment tile DP with enzyme-aware alien sets (BsaI and BsmBI pots separated). Scoring: P_fid × P_eff from BsmBI cycling data (Pryor et al. 2020). Multi-K search explores different tile counts. Phase 3.5 extends the last tile into the cassette (oh_R search) for stop codon mutability.
 
@@ -168,7 +175,8 @@ dms-gg-oligo-pipeline/
 │   ├── 03_codon_table.R        # Human codon usage table
 │   ├── 04_mutation_design.R    # Single-AA substitution + stop codon generation
 │   ├── 05_tiling.R             # Gene partitioning into tiles
-│   ├── 06_overhang_selection.R # Boundary optimizer (MC fidelity + DP) + overhang selection
+│   ├── 06_overhang_selection.R # Assembly planner (OOGGA two-pass boundary optimizer)
+│   ├── 06b_oogga_dp.R         # OOGGA collision-aware DP (SB + tile boundaries)
 │   ├── 07_barcode_design.R     # Programmed barcode generation (unified hierarchical)
 │   ├── 07b_linear_codes.R      # GF(4) Hamming code prefix generation (d <= 3)
 │   ├── 08_oligo_assembly.R     # Full oligo sequence construction (universal structure)
@@ -184,9 +192,9 @@ dms-gg-oligo-pipeline/
 │   ├── AKAP11_NM_016248_CDS.fasta
 │   ├── TRIO_NM_007118_CDS.fasta
 │   └── SLC6A1_NM_003042_CDS.fasta
-├── tests/testthat/             # Unit + integration tests (~6100 tests)
+├── tests/testthat/             # Unit + integration tests (~5300 tests)
 ├── archive/                    # Superseded plans, old configs, helper scripts
-├── NOTEBOOK.md                 # Lab notebook (22 entries, Jan 29 - Mar 7)
+├── NOTEBOOK.md                 # Lab notebook (46 entries, Jan 29 - Mar 15)
 ├── BUGS.md                     # Known bugs and status tracking
 ├── DESCRIPTION                 # R package metadata
 ├── CLAUDE.md                   # Detailed project context and design rationale
