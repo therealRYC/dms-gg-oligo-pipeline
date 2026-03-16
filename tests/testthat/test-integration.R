@@ -136,7 +136,8 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   oligos <- assemble_oligos(
     variants = variants, cds = gene$cds, barcodes = barcodes,
     tiles = tiles, oh3 = oh3, oh4 = oh4,
-    max_oligo_length = cfg$max_oligo_length
+    max_oligo_length = cfg$max_oligo_length,
+    full_seq = assembly_plan$full_seq
   )
   expect_equal(nrow(oligos), nrow(variants))
   expect_true(all(oligos$length <= cfg$max_oligo_length))
@@ -352,7 +353,8 @@ test_that("full pipeline runs on long test gene with superblocking", {
   oligos <- assemble_oligos(
     variants = variants, cds = gene$cds, barcodes = barcodes,
     tiles = tiles, oh3 = oh3, oh4 = oh4,
-    max_oligo_length = cfg$max_oligo_length
+    max_oligo_length = cfg$max_oligo_length,
+    full_seq = assembly_plan$full_seq
   )
   expect_equal(nrow(oligos), nrow(variants))
   expect_true(all(oligos$length <= cfg$max_oligo_length))
@@ -553,7 +555,8 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   oligos <- assemble_oligos(
     variants = variants, cds = gene$cds, barcodes = barcodes,
     tiles = tiles, oh3 = oh3, oh4 = oh4,
-    max_oligo_length = cfg$max_oligo_length
+    max_oligo_length = cfg$max_oligo_length,
+    full_seq = assembly_plan$full_seq
   )
   expect_equal(nrow(oligos), nrow(variants))
   expect_true(all(oligos$length <= cfg$max_oligo_length))

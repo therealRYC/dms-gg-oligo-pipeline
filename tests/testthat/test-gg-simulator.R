@@ -267,8 +267,9 @@ test_that("TEST_GENE_SEQ full assembly simulation succeeds", {
   )
   barcodes <- barcode_result$barcodes
 
-  # Assemble oligos
-  oligos <- assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4)
+  # Assemble oligos (pass full_seq for oh_R cassette extension on last tile)
+  oligos <- assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4,
+    full_seq = plan$full_seq)
 
   # Design gene blocks
   gb_result <- design_wt_geneblocks(
@@ -337,7 +338,8 @@ test_that("TEST_LONG_GENE_SEQ assembly simulation runs with collision-aware boun
   )
   barcodes <- barcode_result$barcodes
 
-  oligos <- assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4)
+  oligos <- assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4,
+    full_seq = plan$full_seq)
 
   gb_result <- design_wt_geneblocks(
     cds = cds, polIII = TEST_POLIII, tiles = tiles,
