@@ -1296,7 +1296,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         max_identity = oogga_max_identity,
         multi_k = multi_k,
         dp_k_range = dp_k_range,
-        overlap_codons = overlap_codons
+        overlap_codons = overlap_codons,
+        oh_L = oh_L
       )
 
     # ---------------------------------------------------------------
