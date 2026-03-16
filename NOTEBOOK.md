@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-15 — Entry 46: Claude Code configuration (hooks, effort, cache) -->
+<!-- Last updated: 2026-03-16 — Entry 47: oh_R cassette search implemented -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -45,6 +45,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-08 | SB-first MC + within-SB DP as default boundary method | Reaction-aware scoring achieves min set fidelity ≥0.99 vs 0.78-0.89 legacy | Entry 24 |
 | 2026-03-14 | Enzyme-aware alien sets for tile DP (oh1=BsaI, oh2=BsmBI) | oh1 and oh2 are in different enzyme pots; checking both against all aliens was over-constrained | Entry 43 |
 | 2026-03-14 | Remove tile-to-tile collision checking | Each tile's assembly reaction is independent (separate pot); Bellman DP replaces beam search | Entry 43 |
+| 2026-03-16 | oh_R cassette search for last tile | Scan cassette at 1-nt resolution to push stop codon from oh2 zone to tile interior | Entry 47 |
 | 2026-03-14 | Reduce SB DP max by overlap_codons*3 | Prevents oversized sub-blocks at boundary tiles after overlap zone extension | Entry 43 |
 | 2026-03-08 | Drop tile MC from production pipeline | Benchmarking: tile MC = DP v2 on 2/3 genes, degraded TRIO; 500-900s wasted | Entry 24 |
 | 2026-03-08 | Document & shelve convergent U6T7 tornado design | Promising but needs wet-lab validation; current pipeline working; can add as config toggle later | Entry 25 |
@@ -1785,3 +1786,40 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 - Clean duplicate plugin cache dirs (start of next session, before CLAUDE_PLUGIN_ROOT is bound)
 - Run `sync-config` to push settings to other devices
 - Add bashrc env var on other devices manually
+
+---
+
+### 2026-03-16 09:11 — oh_R cassette search implemented
+
+**Type**: session
+**Status**: completed
+**Tags**: [overhang, last-tile, oh_R, cassette, stop-codon, assembly-planning]
+
+**Goal**: Extend the last tile into the downstream cassette so the stop codon is no longer trapped in the oh2 zone (making it mutable).
+
+**Approach**: Implemented a new Phase 3.5 in `plan_assembly()` that runs after the tile DP. `search_oh_R()` slides a 4-nt window through the cassette at 1-nt resolution (not codon-locked), scoring each candidate by P_fid × P_eff under BsmBI cycling. Filters: palindromes, homopolymers, OOGGA identity vs alien OHs (oh3, SB junction OHs). The best candidate extends the last tile into the cassette — invariant nt appear on every oligo, and the remaining cassette goes in the gene block.
+
+**Key findings**:
+- Test gene (300 nt): oh_R search extended last tile 13 nt into cassette, selected oh_R=TTTC (score=0.784, fid=0.835)
+- GG assembly simulator confirms full cassette reconstruction after BsmBI ligation
+- SB precompute `n_codons_gene` clamp fix gives each near-end boundary a unique oh2
+
+**Decisions made**:
+- oh_R search at 1-nt resolution (over codon-only): cassette is invariant sequence, no codon boundary constraint needed — gives 10-100x more candidates
+- min_clearance_nt=5 default: ensures stop codon has ≥1 nt clearance from oh2 zone
+
+**Artifacts**:
+- `R/06_overhang_selection.R` — `search_oh_R()` + Phase 3.5 in `plan_assembly()`
+- `R/06b_oogga_dp.R` — SB precompute clamp fix
+- `R/08_oligo_assembly.R` — `full_seq` parameter for cassette extraction
+- `R/09_wt_geneblock_design.R` — Trim cassette prefix for oh_R extended tile
+- `Plans/2026-03-16_oh-R-cassette-search.md` — Full plan
+
+**Related commits**:
+- `ea6860b` — feat: oh_R search — extend last tile into cassette for stop codon mutability
+- `32514d0` — fix: Pass full_seq to assemble_oligos in tests for oh_R cassette extension
+- `8b1db50` — fix: Guard skip_reason assignment for 0-row skipped_variants
+
+**Next steps**:
+- Implement oh_L fix (first tile, separate session — mirror of this work)
+- Full pipeline integration test on a real gene (e.g., BRCA1 exon)
