@@ -44,6 +44,26 @@ intergene_elements:
     # 225 nt — bGH polyA signal from pcDNA3.1 (Thermo Fisher). GenBank J00008.1, EF550208.1.
     # No BsmBI, BsaI, or PaqCI sites. Verified against Goodwin & Rottman 1992 JBC 267:16330.
 
+# --- 5' Gene Junction (REQUIRED — determined by your helper plasmid) ---
+# oh_L: 4-nt BsaI overhang at the 5' gene junction. This overhang sits
+# UPSTREAM of the start codon (ATG) in the helper plasmid, so the assembled
+# product is: ...oh_L + upstream_cassette + ATG + [gene CDS] + ...
+#
+# oh_L is determined by your helper plasmid design — there is NO meaningful
+# default. The pipeline will error if left as NNNN. Moving oh_L upstream
+# of ATG frees codon 2 for full mutagenesis (previously locked inside the
+# overhang when oh_L = CDS[1:4] = ATGX).
+#
+# NOTE: CACC (the obvious Kozak overhang) collides with oh3 derived from
+# the U6 promoter ending ...CACCG. Choose based on your plasmid design.
+oh_L: "NNNN"                                # 4-nt BsaI overhang (REQUIRED)
+
+# upstream_cassette: DNA sequence between oh_L and the ATG start codon.
+# Typically a partial Kozak sequence (e.g., "CC" for a ...CACC-oh_L-CC-ATG
+# context). Leave empty ("") if oh_L directly abuts ATG.
+# upstream_cassette: "CC"
+upstream_cassette: ""
+
 # --- Codon Usage Table (optional) ---
 # By default, the pipeline uses the built-in CoCoPUTs human codon usage table
 # (Alexaki et al. 2019, 119K CDS, GRCh38.p13). To use a custom table, provide

@@ -26,6 +26,11 @@ intergene_elements:
     # 225 nt — bGH polyA signal from pcDNA3.1 (Thermo Fisher). GenBank J00008.1, EF550208.1, U55762.1.
     # No BsmBI or PaqCI sites. Verified against Goodwin & Rottman 1992 JBC 267:16330.
 
+# 5' gene junction — MUST match your helper plasmid's BsaI overhang.
+# Replace "NNNN" with the actual overhang from your plasmid.
+oh_L: "NNNN"
+# upstream_cassette: "CC"                    # Sequence between oh_L and ATG (e.g., Kozak tail)
+
 # PaqCI overhangs — MUST match your destination vector's PaqCI sites.
 # These are arbitrary placeholders; replace with your actual vector overhangs.
 paqci_star2: "AATG"
