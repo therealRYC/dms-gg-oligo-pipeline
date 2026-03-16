@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-15 — Entry 45: BUG-010 + BUG-011 fixed (oh2 double-counting) -->
+<!-- Last updated: 2026-03-15 — Entry 46: Claude Code configuration (hooks, effort, cache) -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -1748,3 +1748,40 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 **Next steps**:
 - Gene-edge codon 2 clearance = 0 (touching oh1) — fix by moving oh_L into Kozak sequence (separate session)
 - Run AKAP11 and TRIO verification to confirm fix generalizes
+
+---
+
+### 2026-03-15 19:16 — Claude Code configuration: hooks, effort level, cache cleanup
+
+**Type**: session
+**Status**: completed
+**Tags**: [claude-code, hooks, configuration, devtools]
+
+**Goal**: Set up PostToolUse hook to enforce plan saving on ExitPlanMode, configure max effort level, and clean stale plugin cache.
+
+**Approach**: Investigated Claude Code hook system to find the best way to enforce plan-saving after ExitPlanMode. Hookify plugin events (`bash`, `file`, `stop`, `prompt`) can't target specific tools like ExitPlanMode, so we used a native `PostToolUse` hook in `~/.claude/settings.json` with `"matcher": "ExitPlanMode"` and a prompt-based hook that blocks until the plan is saved.
+
+**Key findings**:
+- Hookify events don't map to specific tool names — only `bash`, `file`, `stop`, `prompt`, `all`
+- Native Claude Code hooks support `PostToolUse` with a `matcher` regex on tool name — this is the right approach for tool-specific hooks
+- `effortLevel: "max"` may not persist across sessions (Opus 4.6 only); env var `CLAUDE_CODE_EFFORT_LEVEL=max` is more reliable
+- Subagents do NOT inherit effort level from parent — env var is the only way to force it globally
+- Plugin cache dirs are bound to `CLAUDE_PLUGIN_ROOT` at session start — cleaning mid-session breaks hooks
+
+**Decisions made**:
+- Use native PostToolUse hook (not hookify) for ExitPlanMode enforcement: hookify can't target specific tools (over hookify `stop` event which would fire on every response)
+- Put hook in `~/.claude/settings.json` (global, syncs via sync-config): plan saving is a personal workflow preference, not project-specific (over project-level `.claude/settings.json`)
+- Belt-and-suspenders for effort: both `settings.json` and `~/.bashrc` env var (over settings.json alone which may not persist `max`)
+
+**Artifacts**:
+- `~/.claude/settings.json` — PostToolUse hook on ExitPlanMode + effortLevel: max
+- `~/.bashrc` — `export CLAUDE_CODE_EFFORT_LEVEL=max`
+
+**Open questions**:
+- Plugin cache still has duplicate `d5c15b861cd2` dirs (restored after mid-session cleanup broke hooks) — clean next session
+- Need to add `CLAUDE_CODE_EFFORT_LEVEL=max` to `~/.bashrc` on other devices (not covered by sync-config)
+
+**Next steps**:
+- Clean duplicate plugin cache dirs (start of next session, before CLAUDE_PLUGIN_ROOT is bound)
+- Run `sync-config` to push settings to other devices
+- Add bashrc env var on other devices manually
