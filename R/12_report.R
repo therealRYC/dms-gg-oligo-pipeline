@@ -377,7 +377,7 @@ report_fixed_overhangs <- function(assembly_plan, helper, cfg) {
       cfg$paqci_star1 %||% "NNNN"
     ),
     Role = c(
-      "Gene start (BsaI, all tiles)",
+      "Gene start (BsaI, user-specified, upstream of ATG)",
       "Downstream cassette-barcode junction (BsmBI, all tiles)",
       "Barcode-helper junction (BsaI, all tiles)",
       "PaqCI 5' end of insert (Level 2)",
@@ -396,8 +396,14 @@ report_fixed_overhangs <- function(assembly_plan, helper, cfg) {
       paste0("[PaqCI**]--[BsaI>>", oh_L, "]--STUFFER--[", oh4, "<<BsaI]--[PaqCI*]"),
       "```", "",
       paste0("Insert length: ", helper$length[1], " nt"),
-      paste0("oh_L = ", helper$oh_L[1], " (first 4 nt of gene)"),
-      paste0("oh_R = ", helper$oh_R[1], " (= oh4, barcode-helper junction)"), ""
+      paste0("oh_L = ", helper$oh_L[1], " (user-specified, upstream of ATG)"),
+      paste0("oh_R = ", helper$oh_R[1], " (= oh4, barcode-helper junction)"),
+      if (nzchar(assembly_plan$upstream_cassette %||% "")) {
+        paste0("upstream_cassette = '", assembly_plan$upstream_cassette,
+               "' (", nchar(assembly_plan$upstream_cassette), " nt, between oh_L and ATG)")
+      } else {
+        "upstream_cassette = (none)"
+      }, ""
     )
   }
 

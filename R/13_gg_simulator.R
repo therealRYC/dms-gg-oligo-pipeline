@@ -500,7 +500,8 @@ verify_assembly_product_strict <- function(product, expected,
 #'   If provided, checks for core_polIII instead of full polIII.
 #' @return List with pass (logical), and detail flags
 verify_assembly_product <- function(product, expected_cds, mut_position, mut_codon,
-                                      polIII, barcode, core_polIII = NULL) {
+                                      polIII, barcode, core_polIII = NULL,
+                                      upstream_cassette = "") {
 
   # Build expected mutant CDS
   expected_mut_cds <- replace_codon(expected_cds, mut_position, mut_codon)
@@ -515,6 +516,15 @@ verify_assembly_product <- function(product, expected_cds, mut_position, mut_cod
   # Check for barcode
   has_barcode <- grepl(barcode, product, fixed = TRUE)
 
+  # Check upstream_cassette appears before CDS (if non-empty)
+  has_upstream <- if (nzchar(upstream_cassette)) {
+    uc_pos <- regexpr(upstream_cassette, product, fixed = TRUE)
+    gene_pos_check <- regexpr(expected_mut_cds, product, fixed = TRUE)
+    (uc_pos > 0L) && (gene_pos_check > 0L) && (uc_pos < gene_pos_check)
+  } else {
+    TRUE
+  }
+
   # Check order: gene before polIII before barcode
   gene_pos <- regexpr(expected_mut_cds, product, fixed = TRUE)
   polIII_pos <- regexpr(polIII_check, product, fixed = TRUE)
@@ -523,10 +533,11 @@ verify_assembly_product <- function(product, expected_cds, mut_position, mut_cod
                    (gene_pos < polIII_pos) && (polIII_pos < barcode_pos)
 
   list(
-    pass = has_mut_gene && has_polIII && has_barcode && correct_order,
+    pass = has_mut_gene && has_polIII && has_barcode && correct_order && has_upstream,
     has_mut_gene = has_mut_gene,
     has_polIII = has_polIII,
     has_barcode = has_barcode,
+    has_upstream = has_upstream,
     correct_order = correct_order
   )
 }
@@ -646,8 +657,11 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
           bsai_block_seqs = bsai_block_seqs,
           bsmbi_block_seqs = bsmbi_block_seqs
         )
-
-        # Original (coarse) verification
+        upstream_cassette <- if (!is.null(assembly_plan)) {
+          assembly_plan$upstream_cassette %||% ""
+        } else {
+          ""
+        }
         verify <- verify_assembly_product(
           product = product,
           expected_cds = cds,
@@ -655,7 +669,8 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
           mut_codon = variants$mut_codon[vi],
           polIII = polIII,
           barcode = barcode,
-          core_polIII = core_polIII
+          core_polIII = core_polIII,
+          upstream_cassette = upstream_cassette
         )
 
         # Strict (nucleotide-level) verification
