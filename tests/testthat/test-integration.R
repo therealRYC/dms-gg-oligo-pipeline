@@ -83,8 +83,10 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
 
   # Filter gene-edge variants with partial oh overlap (BUG-6)
   skipped_mask <- !is.na(variants$overhang_note) & variants$overhang_note == "partial_oh_overlap"
-  skipped_variants <- variants[skipped_mask, ]
-  skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+  skipped_variants <- variants[skipped_mask, , drop = FALSE]
+  if (nrow(skipped_variants) > 0L) {
+    skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+  }
   variants <- variants[!skipped_mask, ]
   # Skipped count should be small (< 5% of total)
   expect_true(nrow(skipped_variants) < (nrow(variants) + nrow(skipped_variants)) * 0.05)
@@ -298,8 +300,10 @@ test_that("full pipeline runs on long test gene with superblocking", {
 
   # Filter gene-edge variants with partial oh overlap (BUG-6)
   skipped_mask <- !is.na(variants$overhang_note) & variants$overhang_note == "partial_oh_overlap"
-  skipped_variants <- variants[skipped_mask, ]
-  skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+  skipped_variants <- variants[skipped_mask, , drop = FALSE]
+  if (nrow(skipped_variants) > 0L) {
+    skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+  }
   variants <- variants[!skipped_mask, ]
   expect_true(nrow(skipped_variants) < (nrow(variants) + nrow(skipped_variants)) * 0.05)
 
@@ -504,8 +508,10 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
 
   # Filter gene-edge variants with partial oh overlap (BUG-6)
   skipped_mask <- !is.na(variants$overhang_note) & variants$overhang_note == "partial_oh_overlap"
-  skipped_variants <- variants[skipped_mask, ]
-  skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+  skipped_variants <- variants[skipped_mask, , drop = FALSE]
+  if (nrow(skipped_variants) > 0L) {
+    skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+  }
   variants <- variants[!skipped_mask, ]
   expect_true(nrow(skipped_variants) < (nrow(variants) + nrow(skipped_variants)) * 0.05)
 

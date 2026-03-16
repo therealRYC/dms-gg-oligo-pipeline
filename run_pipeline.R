@@ -213,8 +213,10 @@ variants <- assign_variants_to_tiles(variants, tiles)
 # These codons partially overlap fixed overhangs and would produce chimeric
 # assembled products — neither WT nor the intended mutation.
 skipped_mask <- !is.na(variants$overhang_note) & variants$overhang_note == "partial_oh_overlap"
-skipped_variants <- variants[skipped_mask, ]
-skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+skipped_variants <- variants[skipped_mask, , drop = FALSE]
+if (nrow(skipped_variants) > 0L) {
+  skipped_variants$skip_reason <- "partial_oh_overlap: mutation codon overlaps fixed oh1/oh2 overhang at gene edge"
+}
 variants <- variants[!skipped_mask, ]
 if (nrow(skipped_variants) > 0) {
   cli::cli_alert_warning(paste0(
