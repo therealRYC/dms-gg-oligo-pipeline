@@ -115,9 +115,9 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 3. **Enzyme site scan** (`02_enzyme_site_scan.R`) -- Find endogenous BsaI/BsmBI/PaqCI sites, suggest silent mutations for domestication
 4. **Codon table** (`03_codon_table.R`) -- Human codon usage table, preferred codon lookup
 5. **Mutation design** (`04_mutation_design.R`) -- Generate 19 missense + 1 nonsense + 1 WT control per position (+ optional synonymous) using preferred human codons
-6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- Reaction-aware boundary optimization: SB boundaries placed first via simulated annealing MC (maximizing min set fidelity across all reactions), then tile boundaries within SB segments via max-min DP + joint refinement; oh3/oh4 auto-selection by score ranking
+6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- Reaction-aware boundary optimization: SB boundaries placed first via simulated annealing MC (maximizing min set fidelity across all reactions), then tile boundaries within SB segments via max-min DP + joint refinement; oh3/oh4 auto-selection by score ranking; oh_R cassette search extends last tile into downstream cassette for stop codon mutability
 7. **Barcode design** (`07_barcode_design.R`) -- Unified hierarchical prefix-suffix barcodes with Hamming distance guarantee on prefixes
-8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles)
+8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles; last tile includes invariant cassette prefix from oh_R extension)
 9. **Gene block design** (`09_wt_geneblock_design.R`) -- WT gene blocks with correct flanking enzyme sites; superblock splitting for fragments >1800 bp
 10. **QC** (`10_qc_checks.R`) -- Validates oligo lengths, enzyme site absence, barcode uniqueness, tile coverage, gene block sizes
 10b. **In-silico GG simulation** (`13_gg_simulator.R`, optional) -- Simulates BsaI + BsmBI digestion and ligation for sampled oligos; verifies assembled products match expected sequences
