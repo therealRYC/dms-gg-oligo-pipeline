@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-16 — oh_R search: extend last tile into cassette for stop codon mutability
+# Last updated: 2026-03-18 — Accept oh_L from config; oh_R cassette search
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -343,15 +343,19 @@ search_oh_R <- function(cassette_seq, last_tile_gene_nt,
 #' @param overlap_codons Integer, tile overlap (rightward extension). oh2 is
 #'   computed at the EXTENDED tile end (b + overlap_codons), not at the core
 #'   boundary (b). Default 0 (no overlap, oh2 at core boundary).
+#' @param oh_L Character, 4-nt BsaI overhang at gene start (user-specified).
+#'   If NULL, falls back to first 4 nt of CDS (legacy behavior).
 #' @return List with vectors: oh1_seq, oh2_seq, score, valid (all length n_codons)
 precompute_boundary_scores <- function(cds, oh_fidelity,
                                        eff_lookup = NULL,
                                        blacklisted_oh2 = NULL,
                                        blacklisted_oh1 = NULL,
-                                       overlap_codons = 0L) {
+                                       overlap_codons = 0L,
+                                       oh_L = NULL) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
-  oh_L <- substring(cds, 1, 4)
+  # oh_L: user-specified overhang at gene start; fallback to CDS[1:4] for legacy
+  if (is.null(oh_L)) oh_L <- substring(cds, 1, 4)
   oh_L_rc <- reverse_complement(oh_L)
 
   fid_lookup <- oh_fidelity$fidelity
@@ -1013,7 +1017,7 @@ sb_dp_to_partition <- function(sb_result, tiles, gene_len, polIII_len,
 #' @param polIII PolIII promoter sequence
 #' @param max_mutable_nt Max mutable region in nt (from compute_max_tile_size)
 #' @param max_block_length Max synthesis length (default 1800)
-#' @param config List with manual_oh3, manual_oh4,
+#' @param config List with manual_oh3, manual_oh4, oh_L, upstream_cassette,
 #'   search_window_K, min_mutable_codons
 #' @param downstream_cassette Full downstream cassette sequence (intergene + polIII).
 #'   When NULL (default), uses polIII only — backward compatible.
@@ -1068,12 +1072,22 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   # =========================================================================
   # Phase 1: Select fixed overhangs (oh_L, oh3, oh4) before any DP
   # =========================================================================
-  # These are physical constraints — oh_L is the gene's first 4 nt, oh3 is
-  # derived from the PolIII promoter (or score-selected), oh4 is score-selected.
+  # These are physical constraints — oh_L is user-specified (sits upstream of
+  # ATG in the helper plasmid), oh3 is derived from the PolIII promoter (or
+  # score-selected), oh4 is score-selected.
   # All three are committed before the tile DP runs so the DP can route around
   # them. Constrained things first, flexible things second.
   cli::cli_h3("Phase 1: Selecting fixed overhangs (oh_L, oh3, oh4)")
-  oh_L <- substring(cds, 1, 4)
+  oh_L <- config$oh_L
+  upstream_cassette <- config$upstream_cassette %||% ""
+  if (is.null(oh_L) || !nzchar(oh_L)) {
+    stop("oh_L must be provided in config (no default — determined by helper plasmid design)")
+  }
+  oh_L <- toupper(oh_L)
+  cli::cli_alert_info(paste0(
+    "oh_L = ", oh_L, " (user-specified, upstream of ATG)",
+    if (nzchar(upstream_cassette)) paste0(", upstream_cassette = '", upstream_cassette, "'") else ""
+  ))
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
   strategy_used <- "promoter_derived"
@@ -1531,6 +1545,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     oh3 = oh3,
     oh4 = oh4,
     oh_L = oh_L,
+    upstream_cassette = upstream_cassette, # sequence between oh_L and ATG (may be "")
     oh3_in_hf = oh3_in_hf,
     oh4_in_hf = oh4_in_hf,
     core_polIII = core_polIII, # promoter minus last 5 nt (NULL if not derived)
