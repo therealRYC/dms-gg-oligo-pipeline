@@ -292,7 +292,8 @@ oligos <- assemble_oligos(
   tiles = tiles,
   oh3 = oh3,
   oh4 = oh4,
-  max_oligo_length = cfg$max_oligo_length
+  max_oligo_length = cfg$max_oligo_length,
+  full_seq = assembly_plan$full_seq
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["8_oligo_assembly"]] <- step_elapsed

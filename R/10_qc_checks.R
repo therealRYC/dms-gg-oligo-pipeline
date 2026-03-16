@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-03 — Compute expected variant count dynamically (supports WT controls + synonymous)
+# Last updated: 2026-03-16 — Clamp tile coverage to gene_len for oh_R cassette extension
 # 10_qc_checks.R — Comprehensive QC validation for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 
@@ -89,10 +89,13 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
   )
 
   # 5. Tile coverage
+  # Clamp tile ranges to gene_len — the last tile may extend into the
+  # cassette (oh_R feature), but we only check gene coverage here.
   gene_len <- nchar(cds)
   covered <- rep(FALSE, gene_len)
   for (i in seq_len(nrow(tiles))) {
-    covered[tiles$start_nt[i]:tiles$end_nt[i]] <- TRUE
+    end_clamped <- min(tiles$end_nt[i], gene_len)
+    covered[tiles$start_nt[i]:end_clamped] <- TRUE
   }
   checks[[5]] <- qc_check(
     name   = "tile_coverage",

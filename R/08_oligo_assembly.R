@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-01 — Remove dead functions build_mutant_tile() and build_oligo()
+# Last updated: 2026-03-16 — Support oh_R cassette extension (full_seq parameter for last tile)
 # 08_oligo_assembly.R — Assemble universal oligo sequences for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 #
@@ -34,10 +34,14 @@
 #' @param oh3 Fixed BsmBI overhang at PolIII-barcode junction
 #' @param oh4 Fixed BsaI overhang at barcode-helper junction
 #' @param max_oligo_length Maximum oligo length
+#' @param full_seq Full sequence (gene + core cassette) for tiles that extend
+#'   past the gene end (oh_R feature). When NULL, uses cds only (backward
+#'   compatible). Required when the last tile's end_nt exceeds nchar(cds).
 #' @return Data frame with oligo_name, sequence, length, variant_id, tile_id
 assemble_oligos <- function(variants, cds, barcodes, tiles,
                             oh3, oh4,
-                            max_oligo_length = MAX_OLIGO_LENGTH) {
+                            max_oligo_length = MAX_OLIGO_LENGTH,
+                            full_seq = NULL) {
   n <- nrow(variants)
 
   # --- (B) Pre-compute invariant enzyme site strings ---
@@ -57,8 +61,11 @@ assemble_oligos <- function(variants, cds, barcodes, tiles,
   tile_start_nt <- tiles$start_nt
   tile_lens <- integer(n_tiles)
 
+  gene_len <- nchar(cds)
   for (t in seq_len(n_tiles)) {
-    wt_tile_seqs[t] <- substring(cds, tiles$start_nt[t], tiles$end_nt[t])
+    # Use full_seq when tile extends past gene end (oh_R cassette extension)
+    source <- if (tiles$end_nt[t] > gene_len && !is.null(full_seq)) full_seq else cds
+    wt_tile_seqs[t] <- substring(source, tiles$start_nt[t], tiles$end_nt[t])
     tile_oh2_rev[t] <- orient_enzyme_site("BsmBI", tiles$oh2_seq[t], "reverse")
     tile_lens[t] <- tiles$end_nt[t] - tiles$start_nt[t] + 1L
   }

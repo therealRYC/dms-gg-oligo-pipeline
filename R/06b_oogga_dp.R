@@ -211,11 +211,14 @@ precompute_sb_boundary_candidates <- function(full_seq, gene_len,
       oh1 <- substring(full_seq, p + 1L, p + 4L)
 
       # oh2: 4 nt at overlap extension (= oh2 of prev segment's last tile)
-      # Same as tile DP: oh2_codon = min(b + overlap_codons, n_codons)
+      # Same as tile DP: oh2 at boundary + overlap_codons.
+      # No gene-end clamp — oh2 can extend into the cassette when the
+      # boundary is near the gene end. This ensures each SB boundary gets
+      # a unique oh2 (clamping caused duplicate oh2 for near-end boundaries).
       boundary_codon <- p %/% 3L
-      oh2_codon <- min(boundary_codon + overlap_codons, n_codons_gene)
-      oh2_pos <- oh2_codon * 3L
-      oh2 <- substring(full_seq, oh2_pos - 3L, oh2_pos)
+      oh2_pos_target <- (boundary_codon + overlap_codons) * 3L
+      if (oh2_pos_target > total_len || oh2_pos_target < 4L) next
+      oh2 <- substring(full_seq, oh2_pos_target - 3L, oh2_pos_target)
 
       oh1_seq[p] <- oh1
       oh2_seq[p] <- oh2

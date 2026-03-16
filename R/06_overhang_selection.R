@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-05 — Hard codon constraint, remove anchors, SB overlap, cassette pass-through
+# Last updated: 2026-03-16 — oh_R search: extend last tile into cassette for stop codon mutability
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -225,6 +225,99 @@ overhang_score <- function(oh, fid_lookup, eff_lookup) {
   fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else NA_real_
   eff <- if (oh %in% names(eff_lookup)) unname(eff_lookup[oh]) else NA_real_
   fid * eff
+}
+
+# =============================================================================
+# oh_R SEARCH — LAST TILE CASSETTE OVERHANG
+# =============================================================================
+
+#' Search for optimal oh_R (last tile oh2) in downstream cassette
+#'
+#' After the tile DP places boundaries within the gene, the last tile's oh2
+#' is clamped at the gene end (stop codon in the oh2 zone). This function
+#' searches the downstream cassette at 1-nt resolution to find a better oh2
+#' position, scoring each candidate by P_fid * P_eff (BsmBI cycling).
+#'
+#' By extending the last tile into the cassette, the stop codon moves from
+#' the oh2 zone into the tile interior where it becomes mutable.
+#'
+#' @param cassette_seq Downstream cassette sequence (core, without oh3 tail)
+#' @param last_tile_gene_nt Last tile's gene content in nt (from tile DP)
+#' @param max_mutable_nt Max mutable region in nt (from compute_max_tile_size).
+#'   The total tile length (gene + cassette prefix) must fit within
+#'   max_mutable_nt + 8 (oh1 + oh2 flanks).
+#' @param oh_fidelity Data frame with overhang + fidelity columns
+#' @param eff_lookup Named numeric vector (overhang -> efficiency)
+#' @param alien_ohs Character vector of overhangs to avoid (oh3, SB junction
+#'   OHs + their reverse complements). Used for OOGGA identity checking.
+#' @param max_identity OOGGA max positional identity (default 2)
+#' @param min_clearance_nt Minimum nt past gene end for oh_R start (default 5).
+#'   Ensures the stop codon is NOT in the oh2 zone (oh2 = last 4 nt of tile).
+#'   Clearance = cassette_prefix - 4 ≥ 1 when min_clearance_nt = 5.
+#' @return List(oh_R, cassette_pos, score, fidelity) or NULL if no valid
+#'   candidate found. cassette_pos is the end position of oh_R within
+#'   cassette_seq (1-indexed).
+search_oh_R <- function(cassette_seq, last_tile_gene_nt,
+                        max_mutable_nt,
+                        oh_fidelity, eff_lookup,
+                        alien_ohs = character(0),
+                        max_identity = 2L,
+                        min_clearance_nt = 5L) {
+  cass_len <- nchar(cassette_seq)
+  if (cass_len < 4L) return(NULL)
+
+  # Build fidelity lookup
+  fid_lookup <- oh_fidelity$fidelity
+  names(fid_lookup) <- oh_fidelity$overhang
+
+  # --- Search window bounds (cassette_pos = end position of 4-nt OH, 1-indexed) ---
+  # Minimum: far enough past gene end so stop codon has positive clearance.
+  # oh2 zone = last 4 nt of tile → clearance = cassette_prefix - 4.
+  # For clearance ≥ 1: cassette_prefix ≥ 5 → oh_R end at cassette position ≥ 5.
+  min_pos <- min_clearance_nt
+
+  # Maximum: constrained by oligo length budget.
+  # tile_len = last_tile_gene_nt + cassette_prefix ≤ max_mutable_nt + 8
+  # → cassette_prefix ≤ max_mutable_nt + 8 - last_tile_gene_nt
+  max_prefix <- max_mutable_nt + 8L - last_tile_gene_nt
+  max_pos <- min(max_prefix, cass_len)
+
+  if (max_pos < min_pos || max_pos < 4L) return(NULL)
+
+  # --- Pre-compute OOGGA compatibility matrix for alien checks ---
+  compat <- build_oh_compatibility(max_identity)
+
+  best <- NULL
+  best_score <- -Inf
+
+  for (p in max(4L, min_pos):max_pos) {
+    oh <- substring(cassette_seq, p - 3L, p)
+    if (nchar(oh) < 4L) next
+
+    # Hard filters: palindromes, homopolymers
+    if (oh %in% PALINDROMIC_4NT) next
+    if (oh %in% HOMOPOLYMER_4NT) next
+
+    # OOGGA identity check against all alien overhangs
+    compatible <- TRUE
+    for (alien in alien_ohs) {
+      if (nchar(alien) != 4L) next
+      if (!compat[oh, alien]) { compatible <- FALSE; break }
+    }
+    if (!compatible) next
+
+    # Score: P_fid * P_eff
+    score <- overhang_score(oh, fid_lookup, eff_lookup)
+    if (is.na(score)) next
+
+    if (score > best_score) {
+      best_score <- score
+      fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else NA_real_
+      best <- list(oh_R = oh, cassette_pos = p, score = score, fidelity = fid)
+    }
+  }
+
+  best
 }
 
 # =============================================================================
@@ -1188,6 +1281,68 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         overlap_codons = overlap_codons
       )
 
+    # ---------------------------------------------------------------
+    # Phase 3.5: oh_R search — find optimal oh2 for last tile
+    # ---------------------------------------------------------------
+    # The tile DP placed boundaries within the gene. The last tile's
+    # oh2 is clamped at the gene end (stop codon in oh2 zone).
+    # Search the downstream cassette for a better oh2 position,
+    # extending the last tile into invariant cassette sequence.
+    oh_R_result <- NULL
+    if (nchar(cassette_seq) > 0L) {
+      last_tile_idx <- nrow(tiles)
+      last_tile_gene_nt <- tiles$end_nt[last_tile_idx] - tiles$start_nt[last_tile_idx] + 1L
+
+      # Alien overhangs for the last tile's BsmBI pot:
+      # oh3 (always in BsmBI pot) + SB junction OHs that share the pot
+      oh_R_aliens <- unique(c(
+        oh3, reverse_complement(oh3),
+        sb_junction_ohs,
+        vapply(sb_junction_ohs, reverse_complement, character(1))
+      ))
+
+      oh_R_result <- search_oh_R(
+        cassette_seq = cassette_seq,
+        last_tile_gene_nt = last_tile_gene_nt,
+        max_mutable_nt = max_mutable_nt,
+        oh_fidelity = oh_fidelity,
+        eff_lookup = eff_lookup,
+        alien_ohs = oh_R_aliens,
+        max_identity = oogga_max_identity
+      )
+
+      if (!is.null(oh_R_result)) {
+        # Extend last tile into cassette
+        full_seq_for_tiles <- paste0(cds, cassette_seq)
+        tiles$end_nt[last_tile_idx] <- gene_len + oh_R_result$cassette_pos
+        tiles$end_codon[last_tile_idx] <- tiles$end_nt[last_tile_idx] %/% 3L
+        tiles$oh2_seq[last_tile_idx] <- oh_R_result$oh_R
+        tiles$tile_seq[last_tile_idx] <- substring(
+          full_seq_for_tiles,
+          tiles$start_nt[last_tile_idx],
+          tiles$end_nt[last_tile_idx]
+        )
+        tiles$n_codons[last_tile_idx] <- (tiles$end_nt[last_tile_idx] -
+          tiles$start_nt[last_tile_idx] + 1L) %/% 3L
+        tiles$oh2_score[last_tile_idx] <- oh_R_result$score
+        tiles$oh2_fidelity[last_tile_idx] <- oh_R_result$fidelity
+        tiles$oh2_in_hf[last_tile_idx] <- oh_R_result$oh_R %in% hf_set
+        tiles$boundary_score[last_tile_idx] <- tiles$oh1_score[last_tile_idx] +
+          oh_R_result$score
+
+        cli::cli_alert_success(paste0(
+          "oh_R search: extended last tile ", oh_R_result$cassette_pos,
+          " nt into cassette. oh_R=", oh_R_result$oh_R,
+          " (score=", round(oh_R_result$score, 4),
+          ", fid=", round(oh_R_result$fidelity, 4), ")"
+        ))
+      } else {
+        cli::cli_alert_info(
+          "oh_R search: no valid candidate in cassette. Last tile oh2 unchanged."
+        )
+      }
+    }
+
     # Convert SB result to partition format
     n_tiles <- nrow(tiles)
     full_seq_for_sb <- paste0(cds, cassette_seq)
@@ -1387,6 +1542,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     cassette_needs_splitting = partition_result$cassette_needs_splitting,
     sb_result = sb_result, # SB DP result for inspection
     cassette_splits = cassette_splits, # pre-computed cassette boundaries
+    oh_R_result = oh_R_result, # NULL if no cassette or no valid candidate
+    full_seq = paste0(cds, cassette_seq), # gene + core cassette (for oligo assembly)
     summary = list(
       n_tiles = n_tiles,
       n_boundaries = n_boundaries,

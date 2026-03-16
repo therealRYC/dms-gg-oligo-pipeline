@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-03 — Add WT controls (always) and optional synonymous variants; add variant_type column
+# Last updated: 2026-03-16 — Update stop codon exclusion rationale (experimental, not geometric)
 # 04_mutation_design.R — Generate all single-AA substitutions + stops
 # DMS Golden Gate Oligo Pipeline
 
@@ -17,8 +17,8 @@
 #' Positions 1 (start Met) and n_codons (stop codon) are EXCLUDED because:
 #' - Codon 1 (Met/ATG) always falls in the first tile's oh1 overhang,
 #'   so its mutation is silently overridden during assembly.
-#' - The last codon (stop) always falls in the last tile's oh2 overhang,
-#'   and there is no downstream tile to cover it.
+#' - The last codon (stop) is excluded because read-through mutations
+#'   are not of experimental interest in DMS.
 #'
 #' @param cds Character string of coding DNA sequence (domesticated)
 #' @param codon_usage Data frame from load_codon_usage()

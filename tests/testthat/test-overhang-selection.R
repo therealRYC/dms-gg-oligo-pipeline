@@ -448,3 +448,154 @@ test_that("plan_assembly uses oogga_two_pass by default", {
   expect_true(is.list(plan_otp))
   expect_true(!is.null(plan_otp$tiles))
 })
+
+# =============================================================================
+# search_oh_R() — Last tile cassette overhang search
+# =============================================================================
+
+test_that("search_oh_R finds valid candidate in known cassette", {
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  mat <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(mat)
+
+  # Use the test PolIII promoter as cassette
+  cassette <- TEST_POLIII
+  result <- search_oh_R(
+    cassette_seq = cassette,
+    last_tile_gene_nt = 200L,
+    max_mutable_nt = 243L,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    alien_ohs = character(0)
+  )
+
+  expect_true(!is.null(result), info = "Should find at least one valid oh_R")
+  expect_equal(nchar(result$oh_R), 4L)
+  expect_true(result$cassette_pos >= 5L, info = "Min clearance enforced")
+  expect_true(result$score > 0)
+  expect_true(!is.na(result$fidelity))
+  # oh_R should be the 4-nt substring at the reported position
+  expected_oh <- substring(cassette, result$cassette_pos - 3L, result$cassette_pos)
+  expect_equal(result$oh_R, expected_oh)
+})
+
+test_that("search_oh_R rejects palindromic and homopolymer candidates", {
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  mat <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(mat)
+
+  # Craft a short cassette that starts with palindromic/homopolymer sequences
+  # "AATTAAAAACCCC..." — positions 4-8 are AATT (palindrome), AAAA (homopolymer), etc.
+  cassette <- paste0("AATTAAAACCCCGTACGTACGATCAATCGATA")
+  result <- search_oh_R(
+    cassette_seq = cassette,
+    last_tile_gene_nt = 200L,
+    max_mutable_nt = 243L,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    alien_ohs = character(0),
+    min_clearance_nt = 5L
+  )
+
+  # If result is found, it should NOT be a palindrome or homopolymer
+  if (!is.null(result)) {
+    expect_false(result$oh_R %in% PALINDROMIC_4NT)
+    expect_false(result$oh_R %in% HOMOPOLYMER_4NT)
+  }
+})
+
+test_that("search_oh_R respects alien overhang filtering", {
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  mat <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(mat)
+
+  cassette <- TEST_POLIII
+
+  # First, find the best oh_R without aliens
+  result_free <- search_oh_R(
+    cassette_seq = cassette,
+    last_tile_gene_nt = 200L,
+    max_mutable_nt = 243L,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    alien_ohs = character(0)
+  )
+  expect_true(!is.null(result_free))
+
+  # Now block that oh_R as alien — result should be different
+  result_blocked <- search_oh_R(
+    cassette_seq = cassette,
+    last_tile_gene_nt = 200L,
+    max_mutable_nt = 243L,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    alien_ohs = c(result_free$oh_R, reverse_complement(result_free$oh_R))
+  )
+
+  if (!is.null(result_blocked)) {
+    expect_true(result_blocked$oh_R != result_free$oh_R,
+      info = "Should select a different oh_R when the best is alien-blocked"
+    )
+  }
+})
+
+test_that("search_oh_R respects oligo length budget", {
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  mat <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(mat)
+
+  cassette <- TEST_POLIII
+
+  # With very large last_tile_gene_nt, budget is tight
+  result <- search_oh_R(
+    cassette_seq = cassette,
+    last_tile_gene_nt = 248L, # max_mutable_nt + 8 - 248 = 3 → max_pos = 3 < min_pos = 5
+    max_mutable_nt = 243L,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    alien_ohs = character(0)
+  )
+
+  # Budget too tight for any extension — should return NULL
+  expect_null(result, info = "No budget for cassette extension")
+})
+
+test_that("search_oh_R returns NULL for empty cassette", {
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  mat <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(mat)
+
+  result <- search_oh_R(
+    cassette_seq = "",
+    last_tile_gene_nt = 200L,
+    max_mutable_nt = 243L,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup
+  )
+  expect_null(result)
+})
+
+test_that("plan_assembly includes oh_R_result and full_seq in output", {
+  cu <- builtin_human_codon_usage()
+  cds <- TEST_GENE_SEQ
+  scan_result <- scan_enzyme_sites(cds, "", cu)
+  if (nrow(scan_result$domestication) > 0) {
+    cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
+  }
+
+  tile_size <- compute_max_tile_size(300, 12)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+
+  # oh_R_result should exist in the plan (may be NULL if no cassette)
+  expect_true("oh_R_result" %in% names(plan))
+  expect_true("full_seq" %in% names(plan))
+  expect_true(nchar(plan$full_seq) >= nchar(cds))
+
+  # If oh_R was found, the last tile should extend past gene_len
+  if (!is.null(plan$oh_R_result)) {
+    gene_len <- nchar(cds)
+    last_tile <- plan$tiles[nrow(plan$tiles), ]
+    expect_gt(last_tile$end_nt, gene_len)
+    expect_equal(last_tile$oh2_seq, plan$oh_R_result$oh_R)
+  }
+})

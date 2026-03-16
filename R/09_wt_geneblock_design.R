@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-07 — Add oh_5/oh_3 columns to all block data frames for correct report display
+# Last updated: 2026-03-16 — Trim cassette prefix for oh_R extended last tile
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -877,17 +877,35 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       }
     } else {
       # This is the last tile — only PolIII/cassette fragment (no gene content)
-      polIII_block_len <- nchar(polIII_for_block) + block_overhead
-      if (polIII_block_len > max_block_length && use_precomputed_splits &&
+      # When oh_R extends the tile into the cassette, the oligo already carries
+      # the first cassette_on_oligo nucleotides. The gene block contains only
+      # the REMAINING cassette (after the oh_R position).
+      cassette_on_oligo <- max(0L, tile$end_nt - gene_len)
+      remaining_cassette <- if (cassette_on_oligo > 0L) {
+        substring(polIII_for_block, cassette_on_oligo + 1L)
+      } else {
+        polIII_for_block
+      }
+
+      remaining_cass_block_len <- nchar(remaining_cassette) + block_overhead
+      if (remaining_cass_block_len > max_block_length && use_precomputed_splits &&
         !is.null(assembly_plan$oh_fidelity_used)) {
         # Cassette alone is oversized — split it
         # Use pre-computed SB DP cassette splits if available, else greedy
+        # Adjust pre-computed split positions by the cassette prefix on the oligo
         if (!is.null(assembly_plan$cassette_splits) &&
           nrow(assembly_plan$cassette_splits) > 0) {
           cass_splits <- assembly_plan$cassette_splits
+          if (cassette_on_oligo > 0L) {
+            cass_splits$split_pos <- cass_splits$split_pos - cassette_on_oligo
+            cass_splits <- cass_splits[cass_splits$split_pos > 0L, , drop = FALSE]
+          }
           cli::cli_alert_info(paste0(
             "Tile ", tile$tile_id, ": using ", nrow(cass_splits),
-            " pre-computed SB DP cassette split(s)."
+            " pre-computed SB DP cassette split(s).",
+            if (cassette_on_oligo > 0L) paste0(
+              " (adjusted by ", cassette_on_oligo, " nt oligo prefix)"
+            ) else ""
           ))
         } else {
           # Exclude ALL tiles' oh2 — cassette sub-blocks are shared via dedup
@@ -896,7 +914,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             vapply(c(oh3, all_oh2), reverse_complement, character(1))
           ))
           cass_splits <- find_cassette_split_points(
-            cassette_seq = polIII_for_block,
+            cassette_seq = remaining_cassette,
             max_sub_length = max_sub_content,
             existing_ohs = cass_exclude,
             oh_fidelity = assembly_plan$oh_fidelity_used
@@ -904,7 +922,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         }
         if (nrow(cass_splits) > 0) {
           cass_result <- build_cassette_subblocks(
-            cassette_seq = polIII_for_block,
+            cassette_seq = remaining_cassette,
             oh_5 = tile$oh2_seq,
             oh_3_final = oh3,
             oh3_spacer = oh3_spacer,
@@ -920,7 +938,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         } else {
           # Fallback: couldn't find split points, build as single block (will be flagged by QC)
           block_name <- paste0("bsmbi_polIII_tile", tile$tile_id)
-          block_seq <- create_bsmbi_block(polIII_for_block, tile$oh2_seq, oh3,
+          block_seq <- create_bsmbi_block(remaining_cassette, tile$oh2_seq, oh3,
             oh3_spacer = oh3_spacer
           )
           blocks[[length(blocks) + 1]] <- data.frame(
@@ -935,7 +953,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       } else {
         # Cassette fits in one block
         block_name <- paste0("bsmbi_polIII_tile", tile$tile_id)
-        block_seq <- create_bsmbi_block(polIII_for_block, tile$oh2_seq, oh3,
+        block_seq <- create_bsmbi_block(remaining_cassette, tile$oh2_seq, oh3,
           oh3_spacer = oh3_spacer
         )
 
