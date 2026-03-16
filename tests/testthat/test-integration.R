@@ -420,18 +420,16 @@ test_that("full pipeline runs on long test gene with superblocking", {
   unlink(output_dir, recursive = TRUE)
 })
 
-test_that("full pipeline runs on TRIO gene (large gene stress test)", {
-  # Skip unless RUN_SLOW_TESTS=true (this test takes several minutes)
-  skip_if(
-    Sys.getenv("RUN_SLOW_TESTS") != "true",
-    "Slow test: set RUN_SLOW_TESTS=true to run"
-  )
+test_that("full pipeline runs on AKAP11 gene (large gene stress test)", {
+  # AKAP11: NM_016248.4, 5706 nt, 1902 codons
+  # Always runs — serves as the benchmark integration test for superblocking
+  # and large barcode pools. Uses the FASTA file in data/.
+  akap11_fasta <- file.path(pipeline_dir, "data", "AKAP11_NM_016248_CDS.fasta")
+  skip_if_not(file.exists(akap11_fasta), "AKAP11 FASTA not found in data/")
 
-  # TRIO: NM_007118.4, 9294 nt, 3098 codons, 20 enzyme sites
-  tmp_fasta <- tempfile(fileext = ".fasta")
-  writeLines(c(">TRIO", TEST_TRIO_SEQ), tmp_fasta)
+  tmp_fasta <- akap11_fasta # use directly, no temp copy needed
   tmp_dir <- tempdir()
-  output_dir <- file.path(tmp_dir, "test_output_trio")
+  output_dir <- file.path(tmp_dir, "test_output_akap11")
 
   tmp_config <- tempfile(fileext = ".yaml")
   config_lines <- c(
@@ -458,16 +456,16 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
 
   # Step 2: Read gene
   gene <- read_gene(cfg$gene_fasta)
-  expect_equal(nchar(gene$cds), 9294)
+  expect_equal(nchar(gene$cds), 5706)
 
   # Step 3: Load codon usage
   codon_usage <- load_codon_usage()
 
-  # Step 4: Scan and domesticate — TRIO has 20 enzyme sites
+  # Step 4: Scan and domesticate — AKAP11 has enzyme sites
   scan_result <- scan_enzyme_sites(gene$cds, cfg$polIII_promoter, codon_usage)
   gene$original_cds <- gene$cds
   expect_true(nrow(scan_result$domestication) > 0,
-    info = "TRIO should have enzyme sites requiring domestication"
+    info = "AKAP11 should have enzyme sites requiring domestication"
   )
 
   if (cfg$auto_domesticate && nrow(scan_result$domestication) > 0) {
@@ -484,10 +482,10 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
     )
   }
 
-  # Step 5: Design mutations — 3096 mutable codons * 21 variants
+  # Step 5: Design mutations — 1900 mutable codons * 21 variants
   variants <- design_mutations(gene$cds, codon_usage)
   variants <- check_and_fix_new_sites(variants, gene$cds, codon_usage)
-  expect_equal(nrow(variants), 3096 * 21) # 3096 mutable codons (skip Met@1, stop@3098) * 21
+  expect_equal(nrow(variants), 1900 * 21) # 1900 mutable codons (skip Met@1, stop@1902) * 21
 
   # Step 6: Plan assembly (dynamic tile boundary search + superblocks)
   tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
@@ -515,21 +513,21 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   variants <- variants[!skipped_mask, ]
   expect_true(nrow(skipped_variants) < (nrow(variants) + nrow(skipped_variants)) * 0.05)
 
-  expect_true(nrow(tiles) >= 38,
-    info = "9294 nt / 243 nt per tile ~ 39 tiles"
+  expect_true(nrow(tiles) >= 23,
+    info = "5706 nt / 243 nt per tile ~ 24 tiles"
   )
   expect_true(all(!is.na(variants$tile_id)))
   expect_equal(nchar(oh3), 4)
   expect_equal(nchar(oh4), 4)
 
-  # TRIO MUST trigger superblock splitting (tile-boundary partitioning)
+  # AKAP11 MUST trigger superblock splitting (tile-boundary partitioning)
   expect_true(!is.null(assembly_plan$tile_partition))
-  expect_true(assembly_plan$tile_partition$n_superblocks >= 4L,
-    info = "TRIO (9294 nt) should have >= 4 superblocks"
+  expect_true(assembly_plan$tile_partition$n_superblocks >= 3L,
+    info = "AKAP11 (5706 nt) should have >= 3 superblocks"
   )
   expect_equal(assembly_plan$tile_partition$n_collisions, 0L)
-  expect_true(nrow(assembly_plan$superblock_splits) >= 5,
-    info = "TRIO (9294 nt) should have >= 5 per-tile split entries"
+  expect_true(nrow(assembly_plan$superblock_splits) >= 3,
+    info = "AKAP11 (5706 nt) should have >= 3 per-tile split entries"
   )
 
   # Per-reaction fidelity should be computed
@@ -601,7 +599,7 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
     oligos = oligos, geneblock_result = geneblock_result,
     variants = variants, barcodes = barcodes,
     qc_result = qc_result, output_dir = output_dir,
-    gene_name = "TRIO",
+    gene_name = "AKAP11",
     original_cds = gene$original_cds %||% gene$cds,
     domesticated_cds = gene$cds,
     protein = gene$protein,
@@ -620,8 +618,7 @@ test_that("full pipeline runs on TRIO gene (large gene stress test)", {
   expect_true(file.exists(output_paths$geneblock_order_fasta))
   expect_true(file.exists(output_paths$sequences_fasta))
 
-  # Cleanup
-  unlink(tmp_fasta)
+  # Cleanup (tmp_fasta is the real FASTA in data/ — don't delete it)
   unlink(tmp_config)
   unlink(output_dir, recursive = TRUE)
 })
