@@ -315,23 +315,10 @@ generate_prefixes <- function(k, min_hamming, n_needed,
       prefixes <- result$prefixes
       code_type <- "linear"
 
-      # Stage 1 prefix filtering: enzyme sites, homopolymers, PolIII terminator
-      prefixes <- filter_sequences_fast(prefixes, max_homopolymer,
-                                        filter_poliii_term = filter_poliii_term)
-
-      # Stage 1 prefix filtering: junction context
-      if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
-        n_before <- length(prefixes)
-        prefixes <- filter_barcode_junctions(
-          prefixes, junction_left_context, junction_right_context
-        )
-        n_removed <- n_before - length(prefixes)
-        if (n_removed > 0) {
-          cli::cli_alert_info(paste0(
-            "Removed ", n_removed, " prefixes with enzyme sites at junction boundaries."
-          ))
-        }
-      }
+      # Stage 1 prefix filtering: enzyme sites, homopolymers, PolIII terminator,
+      # and junction context
+      prefixes <- filter_prefixes(prefixes, max_homopolymer, filter_poliii_term,
+                                   junction_left_context, junction_right_context)
 
       if (length(prefixes) >= n_needed) {
         cli::cli_alert_success(paste0(
@@ -362,20 +349,8 @@ generate_prefixes <- function(k, min_hamming, n_needed,
       code_type <- "lexicode"
 
       # Stage 1 prefix filtering
-      prefixes <- filter_sequences_fast(prefixes, max_homopolymer,
-                                        filter_poliii_term = filter_poliii_term)
-      if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
-        n_before <- length(prefixes)
-        prefixes <- filter_barcode_junctions(
-          prefixes, junction_left_context, junction_right_context
-        )
-        n_removed <- n_before - length(prefixes)
-        if (n_removed > 0) {
-          cli::cli_alert_info(paste0(
-            "Removed ", n_removed, " prefixes with enzyme sites at junction boundaries."
-          ))
-        }
-      }
+      prefixes <- filter_prefixes(prefixes, max_homopolymer, filter_poliii_term,
+                                   junction_left_context, junction_right_context)
 
       if (length(prefixes) >= n_needed) {
         cli::cli_alert_success(paste0(
@@ -573,6 +548,53 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
   barcodes
 }
 
+#' Vectorized enzyme site check across a character vector
+#'
+#' Returns a logical vector indicating which sequences contain any enzyme
+#' recognition site (forward or reverse complement) from the global ENZYMES list.
+#'
+#' @param seqs Character vector of DNA sequences
+#' @return Logical vector (TRUE = sequence contains at least one enzyme site)
+has_enzyme_sites_vec <- function(seqs) {
+  bad <- rep(FALSE, length(seqs))
+  for (enz_name in names(ENZYMES)) {
+    enz <- ENZYMES[[enz_name]]
+    bad <- bad | grepl(enz$recog, seqs, fixed = TRUE) |
+                  grepl(enz$recog_rc, seqs, fixed = TRUE)
+  }
+  bad
+}
+
+#' Apply all biological filters to prefix candidates
+#'
+#' Runs enzyme site, homopolymer, PolIII terminator, and junction context
+#' filters on a prefix vector. Used during both linear and lexicode code paths.
+#'
+#' @param prefixes Character vector of prefix sequences
+#' @param max_homopolymer Maximum allowed homopolymer run
+#' @param filter_poliii_term Logical; filter PolIII terminator sequences
+#' @param junction_left_context Left context for junction check
+#' @param junction_right_context Right context for junction check
+#' @return Filtered character vector of prefixes
+filter_prefixes <- function(prefixes, max_homopolymer, filter_poliii_term,
+                             junction_left_context, junction_right_context) {
+  prefixes <- filter_sequences_fast(prefixes, max_homopolymer,
+                                    filter_poliii_term = filter_poliii_term)
+  if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
+    n_before <- length(prefixes)
+    prefixes <- filter_barcode_junctions(
+      prefixes, junction_left_context, junction_right_context
+    )
+    n_removed <- n_before - length(prefixes)
+    if (n_removed > 0) {
+      cli::cli_alert_info(paste0(
+        "Removed ", n_removed, " prefixes with enzyme sites at junction boundaries."
+      ))
+    }
+  }
+  prefixes
+}
+
 #' Vectorized batch filter for full barcodes
 #'
 #' Applies all biological filters in a single pass over the entire candidate vector:
@@ -592,12 +614,7 @@ filter_barcodes_batch <- function(barcodes, max_homopolymer, gc_range,
   if (n == 0L) return(logical(0))
 
   # Enzyme site filter (on barcode alone)
-  bad <- rep(FALSE, n)
-  for (enz_name in names(ENZYMES)) {
-    enz <- ENZYMES[[enz_name]]
-    bad <- bad | grepl(enz$recog, barcodes, fixed = TRUE) |
-                  grepl(enz$recog_rc, barcodes, fixed = TRUE)
-  }
+  bad <- has_enzyme_sites_vec(barcodes)
 
   # Homopolymer filter
   homo_pattern <- paste0("([ACGT])\\1{", max_homopolymer, ",}")
@@ -616,11 +633,7 @@ filter_barcodes_batch <- function(barcodes, max_homopolymer, gc_range,
   # Junction context filter (enzyme sites spanning barcode-flanking junction)
   if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
     junction_seqs <- paste0(junction_left_context, barcodes, junction_right_context)
-    for (enz_name in names(ENZYMES)) {
-      enz <- ENZYMES[[enz_name]]
-      bad <- bad | grepl(enz$recog, junction_seqs, fixed = TRUE) |
-                    grepl(enz$recog_rc, junction_seqs, fixed = TRUE)
-    }
+    bad <- bad | has_enzyme_sites_vec(junction_seqs)
   }
 
   !bad
@@ -637,12 +650,7 @@ filter_barcodes_batch <- function(barcodes, max_homopolymer, gc_range,
 #' @return Filtered character vector
 filter_sequences_fast <- function(seqs, max_homopolymer = 4L,
                                    filter_poliii_term = TRUE) {
-  bad <- rep(FALSE, length(seqs))
-  for (enz_name in names(ENZYMES)) {
-    enz <- ENZYMES[[enz_name]]
-    bad <- bad | grepl(enz$recog, seqs, fixed = TRUE) |
-                 grepl(enz$recog_rc, seqs, fixed = TRUE)
-  }
+  bad <- has_enzyme_sites_vec(seqs)
   homo_pattern <- paste0("([ACGT])\\1{", max_homopolymer, ",}")
   bad <- bad | grepl(homo_pattern, seqs)
   # PolIII terminator filter (TTTT causes premature transcription termination)
@@ -670,12 +678,7 @@ filter_barcode_junctions <- function(barcodes, left_context = "", right_context 
   if (nchar(left_context) == 0L && nchar(right_context) == 0L) return(barcodes)
 
   junction_seqs <- paste0(left_context, barcodes, right_context)
-  bad <- rep(FALSE, length(barcodes))
-  for (enz_name in names(ENZYMES)) {
-    enz <- ENZYMES[[enz_name]]
-    bad <- bad | grepl(enz$recog, junction_seqs, fixed = TRUE) |
-                  grepl(enz$recog_rc, junction_seqs, fixed = TRUE)
-  }
+  bad <- has_enzyme_sites_vec(junction_seqs)
   barcodes[!bad]
 }
 
