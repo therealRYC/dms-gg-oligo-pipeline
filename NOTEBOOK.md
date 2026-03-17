@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-16 — Entry 47: oh_R cassette search implemented -->
+<!-- Last updated: 2026-03-17 — Entry 48: Runt-tile investigation + prevent_runt_tiles flag -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -46,6 +46,7 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-14 | Enzyme-aware alien sets for tile DP (oh1=BsaI, oh2=BsmBI) | oh1 and oh2 are in different enzyme pots; checking both against all aliens was over-constrained | Entry 43 |
 | 2026-03-14 | Remove tile-to-tile collision checking | Each tile's assembly reaction is independent (separate pot); Bellman DP replaces beam search | Entry 43 |
 | 2026-03-16 | oh_R cassette search for last tile | Scan cassette at 1-nt resolution to push stop codon from oh2 zone to tile interior | Entry 47 |
+| 2026-03-17 | prevent_runt_tiles opt-in flag (default off) | SB DP product scoring naturally avoids runts; flag available as safety net for edge cases | Entry 48 |
 | 2026-03-14 | Reduce SB DP max by overlap_codons*3 | Prevents oversized sub-blocks at boundary tiles after overlap zone extension | Entry 43 |
 | 2026-03-08 | Drop tile MC from production pipeline | Benchmarking: tile MC = DP v2 on 2/3 genes, degraded TRIO; 500-900s wasted | Entry 24 |
 | 2026-03-08 | Document & shelve convergent U6T7 tornado design | Promising but needs wet-lab validation; current pipeline working; can add as config toggle later | Entry 25 |
@@ -1823,3 +1824,33 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 **Next steps**:
 - Implement oh_L fix (first tile, separate session — mirror of this work)
 - Full pipeline integration test on a real gene (e.g., BRCA1 exon)
+
+---
+
+### 2026-03-17 10:13 — Runt-tile investigation + prevent_runt_tiles flag
+
+**Type**: session
+**Status**: completed
+**Tags**: [superblock, runt-tile, sb-dp, benchmarking, config]
+
+**Goal**: Determine whether the SB DP can create "runt" last gene segments (< min_mutable_nt) when a boundary falls near the gene end, and ship a fix if needed.
+
+**Approach**: The SB DP's `min_block_length` (300 nt) constraint operates on `full_seq` (gene + cassette), but `tile_segments_oogga()` only tiles the gene portion. If a boundary is near the gene end, the cassette pads the segment to meet 300 nt while the gene content could be as low as 55 nt. Investigated two options: (1) constrain SB DP to exclude near-end boundaries, (3) baseline (let tile DP handle it). Benchmarked on GRIN2A, AKAP11, GRIN2A long cassette, and two synthetic trimmed GRIN2A genes (3630 nt / 3591 nt targeting the runt zone).
+
+**Key findings**:
+- All five test genes produced **identical results** between Option 1 and baseline — the constraint never activated
+- The SB DP's **product scoring** naturally distributes segments evenly, avoiding near-end boundaries
+- The runt zone (55-243 nt gene residual) is theoretically reachable but requires gene lengths where `gene_len mod sb_max_content` is small AND the best overhangs cluster near the gene end — did not occur for any GRIN2A-derived sequence
+- Mathematical analysis: for GRIN2A (4395 nt), the runt requires the last SB boundary past nt 4152, which needs K=3 boundaries. Product scoring prefers K=2, so the boundary stays at ~3186
+
+**Decisions made**:
+- Ship `prevent_runt_tiles` as opt-in boolean config flag (default false): theoretical edge case, zero-cost safety net (over always-on, which adds unnecessary constraint)
+- When true, derives `min_gene_residual = min_mutable_nt` automatically from oligo synthesis limits (over exposing raw nt threshold to users)
+
+**Artifacts**:
+- `R/06_overhang_selection.R` — `prevent_runt_tiles` config flag, `min_gene_residual` derivation
+- `R/06b_oogga_dp.R` — `min_gene_residual` filter in `precompute_sb_boundary_candidates()`
+
+**Related commits**:
+- `112f3db` — feat: Runt-tile prevention — min_gene_residual constraint on SB DP
+- `a747074` — refactor: Change min_gene_residual to boolean prevent_runt_tiles flag
