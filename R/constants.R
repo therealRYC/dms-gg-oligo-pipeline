@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-02 — Remove DEFAULT_HF_BONUS_WEIGHT; update scoring formula (BUG-008)
+# Last updated: 2026-03-17 — Add enhanced barcode filter defaults; tighten GC range to 0.35-0.65
 # constants.R — Enzyme definitions, synthesis limits, amino acid alphabet
 # DMS Golden Gate Oligo Pipeline
 
@@ -93,9 +93,38 @@ for (codon in names(CODON_TABLE)) {
 DEFAULT_BARCODE_LENGTH <- 20L
 DEFAULT_MIN_HAMMING <- 3L
 DEFAULT_PREFIX_LENGTH <- 12L # Unified hierarchical mode: prefix carries hard Hamming guarantee
-DEFAULT_GC_RANGE <- c(0.25, 0.75)
+DEFAULT_GC_RANGE <- c(0.35, 0.65) # Tightened from 0.25-0.75; captures most Tm benefit cheaply
 DEFAULT_MAX_HOMOPOLYMER <- 4L
 DEFAULT_MIN_HAMMING_FLOOR <- 2L # Floor for auto-adjustment when capacity is tight
+
+# --- Enhanced Barcode Filters ---
+# Literature-motivated filters for improved barcode quality in VIS-Seq/LABEL-Seq readout.
+# Each filter has a boolean toggle (ON/OFF) and a threshold parameter.
+# Conservative defaults: low-rejection filters ON, high-rejection filters OFF.
+
+# GGC motif: Illumina error hotspot — 16% of substitution errors linked to GG motifs
+# (Schirmer et al. 2016). ~25% rejection rate, so OFF by default.
+DEFAULT_FILTER_GGC <- FALSE
+
+# Self-complementarity (hairpins): Hairpin stems reduce PCR efficiency 40-90% and
+# impair padlock probe hybridization. ~10-15% rejection rate. ON by default.
+DEFAULT_FILTER_HAIRPIN <- TRUE
+DEFAULT_MAX_HAIRPIN_STEM <- 3L # Max stem length (bp) before rejection
+
+# Dinucleotide repeats: Excessive runs (e.g., ACACAC) cause indel errors during
+# sequencing via polymerase slippage. ~2% rejection rate. ON by default.
+DEFAULT_FILTER_DINUC_REPEATS <- TRUE
+DEFAULT_MAX_DINUC_REPEAT_UNITS <- 4L # Max repeat units before rejection (e.g., 4 = ACACACAC ok)
+
+# Strict poly-G: Worst homopolymer for Illumina two-channel chemistry + T7 slippage.
+# ~6% rejection rate. OFF by default — general homopolymer filter already catches runs > 4.
+DEFAULT_FILTER_POLYG <- FALSE
+DEFAULT_MAX_POLYG <- 2L # Max consecutive G's when filter is enabled
+
+# Tm uniformity: All barcodes within ±N°C of set median for consistent padlock probe
+# ligation. Post-hoc filter (needs full set). ~10-20% rejection rate. OFF by default.
+DEFAULT_FILTER_TM_UNIFORMITY <- FALSE
+DEFAULT_TM_TOLERANCE <- 2.0 # ±°C from median Tm
 
 # --- PolIII Terminator Signal ---
 # RNA Polymerase III terminates at runs of >=4 consecutive Ts on the non-template

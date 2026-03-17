@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-17 — Add optional PCR handle support
+# Last updated: 2026-03-17 — Add enhanced barcode filter config params + PCR handle support
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -35,8 +35,17 @@ load_config <- function(config_path) {
     barcode_length = 20L,
     min_hamming_distance = 3L,
     barcode_prefix_length = 12L,
-    barcode_gc_range = c(0.25, 0.75),
+    barcode_gc_range = c(0.35, 0.65),
     barcode_max_homopolymer = 4L,
+    barcode_filter_ggc = FALSE,
+    barcode_filter_hairpin = TRUE,
+    barcode_max_hairpin_stem = 3L,
+    barcode_filter_dinuc_repeats = TRUE,
+    barcode_max_dinuc_repeat_units = 4L,
+    barcode_filter_polyg = FALSE,
+    barcode_max_polyg = 2L,
+    barcode_filter_tm_uniformity = FALSE,
+    barcode_tm_tolerance = 2.0,
     search_window_K = 15L,
     dp_k_range = 5L,
     boundary_method = "oogga_two_pass",
@@ -73,6 +82,15 @@ load_config <- function(config_path) {
   cfg$barcode_prefix_length <- as.integer(cfg$barcode_prefix_length)
   cfg$barcode_max_homopolymer <- as.integer(cfg$barcode_max_homopolymer)
   cfg$barcode_gc_range <- as.numeric(cfg$barcode_gc_range)
+  cfg$barcode_filter_ggc <- as.logical(cfg$barcode_filter_ggc)
+  cfg$barcode_filter_hairpin <- as.logical(cfg$barcode_filter_hairpin)
+  cfg$barcode_max_hairpin_stem <- as.integer(cfg$barcode_max_hairpin_stem)
+  cfg$barcode_filter_dinuc_repeats <- as.logical(cfg$barcode_filter_dinuc_repeats)
+  cfg$barcode_max_dinuc_repeat_units <- as.integer(cfg$barcode_max_dinuc_repeat_units)
+  cfg$barcode_filter_polyg <- as.logical(cfg$barcode_filter_polyg)
+  cfg$barcode_max_polyg <- as.integer(cfg$barcode_max_polyg)
+  cfg$barcode_filter_tm_uniformity <- as.logical(cfg$barcode_filter_tm_uniformity)
+  cfg$barcode_tm_tolerance <- as.numeric(cfg$barcode_tm_tolerance)
   cfg$search_window_K <- as.integer(cfg$search_window_K)
   cfg$dp_k_range <- as.integer(cfg$dp_k_range %||% 5L)
   cfg$boundary_method <- as.character(cfg$boundary_method)
@@ -496,6 +514,20 @@ validate_config <- function(cfg) {
   }
   if (cfg$barcodes_per_variant < 1L) {
     errors <- c(errors, "barcodes_per_variant must be an integer >= 1")
+  }
+
+  # Enhanced barcode filter validation
+  if (cfg$barcode_max_hairpin_stem < 2L || cfg$barcode_max_hairpin_stem > 10L) {
+    errors <- c(errors, "barcode_max_hairpin_stem must be between 2 and 10")
+  }
+  if (cfg$barcode_max_dinuc_repeat_units < 2L || cfg$barcode_max_dinuc_repeat_units > 10L) {
+    errors <- c(errors, "barcode_max_dinuc_repeat_units must be between 2 and 10")
+  }
+  if (cfg$barcode_max_polyg < 1L || cfg$barcode_max_polyg > 10L) {
+    errors <- c(errors, "barcode_max_polyg must be between 1 and 10")
+  }
+  if (cfg$barcode_tm_tolerance <= 0 || cfg$barcode_tm_tolerance > 20) {
+    errors <- c(errors, "barcode_tm_tolerance must be between 0 and 20 (degrees C)")
   }
 
   # overlap_codons validation: must be even and >= 2
