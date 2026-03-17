@@ -175,6 +175,10 @@ count_positional_identity <- function(oh_a, oh_b) {
 #' @param overlap_codons Integer, number of overlap codons for oh2 computation
 #'   in gene-region boundaries (default 4). Must match the tile DP's
 #'   overlap_codons to ensure SB and tile boundaries use the same formula.
+#' @param min_gene_residual Integer, minimum gene nt that must remain AFTER
+#'   a gene-region boundary (i.e., gene_len - p >= min_gene_residual).
+#'   Prevents SB boundaries from creating runt last-gene-segments that are
+#'   too short for a useful tile. Default 0 (no constraint).
 #' @return List with vectors: oh1_seq, oh2_seq, score, valid (all length =
 #'   nchar(full_seq)). oh2_seq is "" for cassette-region positions.
 precompute_sb_boundary_candidates <- function(full_seq, gene_len,
@@ -182,7 +186,8 @@ precompute_sb_boundary_candidates <- function(full_seq, gene_len,
                                               blacklist_ohs = character(0),
                                               allowed_gene_positions = NULL,
                                               cassette_needs_splitting = TRUE,
-                                              overlap_codons = 4L) {
+                                              overlap_codons = 4L,
+                                              min_gene_residual = 0L) {
   total_len <- nchar(full_seq)
   n_codons_gene <- gene_len %/% 3L
   fid_lookup <- oh_fidelity$fidelity
@@ -205,6 +210,9 @@ precompute_sb_boundary_candidates <- function(full_seq, gene_len,
       # Same formula as tile DP's precompute_boundary_scores()
       if ((p %% 3L) != 0L) next # codon boundary only
       if (!is.null(allowed_gene_positions) && !(p %in% allowed_gene_positions)) next
+      # Option 1 runt-tile prevention: exclude positions that leave too
+      # little gene content after the boundary for a useful last tile.
+      if (min_gene_residual > 0L && (gene_len - p) < min_gene_residual) next
 
       # oh1: first 4 nt past boundary (= oh1 of next segment's first tile)
       if (p + 4L > total_len) next # need room for oh1
@@ -507,7 +515,8 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
                                        allowed_gene_positions = NULL,
                                        cassette_blacklist_ohs = character(0),
                                        cassette_needs_splitting = TRUE,
-                                       overlap_codons = 4L) {
+                                       overlap_codons = 4L,
+                                       min_gene_residual = 0L) {
   total_len <- nchar(full_seq)
 
   # Load data if not provided
@@ -543,6 +552,7 @@ search_sb_boundaries_oogga <- function(full_seq, gene_len,
   candidates <- precompute_sb_boundary_candidates(
     full_seq, gene_len, oh_fidelity, eff_lookup,
     blacklist_ohs = blacklist,
+    min_gene_residual = min_gene_residual,
     allowed_gene_positions = allowed_gene_positions,
     cassette_needs_splitting = cassette_needs_splitting,
     overlap_codons = overlap_codons

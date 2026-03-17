@@ -1049,6 +1049,12 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     min_mutable_nt <- max(81L, max_mutable_nt %/% 3L)
     min_mutable_nt <- (min_mutable_nt %/% 3L) * 3L
   }
+  # Runt-tile prevention: exclude SB boundary positions that leave too little
+  # gene content after them. Prevents the SB DP from creating a tiny last gene
+  # segment that becomes a runt tile. Default = min_mutable_nt (ensures the
+  # last gene segment can produce at least one reasonably-sized tile).
+  # Set to 0 to disable.
+  min_gene_residual <- config$min_gene_residual %||% min_mutable_nt
 
   # Load data
   # BsmBI cycling fidelity (Pryor 2020) for boundary scoring — matches actual
@@ -1243,7 +1249,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
           max_identity = oogga_max_identity,
           beam_width = oogga_beam_width,
           cassette_needs_splitting = cass_needs_split,
-          overlap_codons = overlap_codons
+          overlap_codons = overlap_codons,
+          min_gene_residual = min_gene_residual
           # NO allowed_gene_positions — SBs at any codon position
         )
         # Extract junction overhangs from SB result (both oh1_sb and oh2_sb)
