@@ -669,15 +669,12 @@ get_tile_reaction_overhangs <- function(partition_result, tile_idx, tiles,
 #' @param tiles Data frame of tiles (must have end_nt, start_nt, oh2_seq,
 #'   oh2_in_hf, oh2_fidelity, tile_id columns)
 #' @param gene_len Length of the domesticated CDS in nucleotides
-#' @param polIII_len Length of downstream cassette (unused, kept for interface
-#'   consistency)
 #' @param sb_result SB DP result list from search_sb_boundaries_oogga(), or NULL
 #'   for legacy single-OH behavior. Must have boundaries$oh1_sb and oh2_sb.
 #' @param overlap_codons Integer, overlap codons for position computation (default 4)
 #' @return Data frame with columns: split_nt, junction_oh, junction_in_hf,
 #'   junction_fidelity, block_type, tile_id. Empty (0-row) if n_superblocks <= 1.
 convert_partition_to_splits <- function(partition_result, tiles, gene_len,
-                                        polIII_len = 0L,
                                         sb_result = NULL,
                                         overlap_codons = 4L) {
   empty_result <- data.frame(
@@ -1384,7 +1381,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     partition_result = partition_result,
     tiles = tiles,
     gene_len = gene_len,
-    polIII_len = polIII_len,
     sb_result = sb_result,
     overlap_codons = overlap_codons
   )
