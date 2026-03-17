@@ -1051,10 +1051,10 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   }
   # Runt-tile prevention: exclude SB boundary positions that leave too little
   # gene content after them. Prevents the SB DP from creating a tiny last gene
-  # segment that becomes a runt tile. Default = min_mutable_nt (ensures the
-  # last gene segment can produce at least one reasonably-sized tile).
-  # Set to 0 to disable.
-  min_gene_residual <- config$min_gene_residual %||% min_mutable_nt
+  # segment that becomes a runt tile. Default 0 (disabled) — the SB DP's
+  # product scoring naturally distributes segments evenly. Set to
+  # min_mutable_nt to enforce a minimum last-segment size.
+  min_gene_residual <- config$min_gene_residual %||% 0L
 
   # Load data
   # BsmBI cycling fidelity (Pryor 2020) for boundary scoring — matches actual
