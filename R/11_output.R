@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-03 — Add variant_type column to barcode map and skipped variants outputs
+# Last updated: 2026-03-17 — Add PCR primer table output and handle columns in barcode map
 # 11_output.R — Write CSV/FASTA outputs for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 
@@ -19,13 +19,15 @@
 #' @param gene_description Full gene description for FASTA headers (optional)
 #' @param gene_fasta Path to source FASTA file (optional, for provenance)
 #' @param skipped_variants Data frame of variants skipped due to gene-edge overlap (optional)
+#' @param pcr_handles Optional list of per-tile PCR handle pairs for primer table output
 write_outputs <- function(oligos, geneblock_result, variants, barcodes,
                           qc_result, output_dir, gene_name = "gene",
                           min_hamming_dist = NULL,
                           original_cds = NULL, domesticated_cds = NULL,
                           protein = NULL, gene_description = NULL,
                           gene_fasta = NULL,
-                          skipped_variants = NULL) {
+                          skipped_variants = NULL,
+                          pcr_handles = NULL) {
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
   }
@@ -144,6 +146,34 @@ write_outputs <- function(oligos, geneblock_result, variants, barcodes,
     ))
   }
 
+  # 11. PCR primer table (when pcr_handles are provided)
+  pcr_primer_path <- NULL
+  if (!is.null(pcr_handles) && length(pcr_handles) > 0) {
+    # Count oligos per tile for the table
+    oligos_per_tile <- as.integer(table(factor(
+      oligos$tile_id, levels = seq_along(pcr_handles)
+    )))
+
+    pcr_primer_table <- data.frame(
+      tile_id            = seq_along(pcr_handles),
+      fwd_handle         = vapply(pcr_handles, function(h) h$fwd, character(1)),
+      rev_handle         = vapply(pcr_handles, function(h) h$rev, character(1)),
+      rev_primer_to_order = vapply(pcr_handles, function(h) {
+        reverse_complement(h$rev)
+      }, character(1)),
+      fwd_len            = nchar(pcr_handles[[1]]$fwd),
+      rev_len            = nchar(pcr_handles[[1]]$rev),
+      n_oligos_in_tile   = oligos_per_tile,
+      stringsAsFactors   = FALSE
+    )
+    pcr_primer_path <- file.path(output_dir, paste0(gene_name, "_pcr_primer_table.csv"))
+    readr::write_csv(pcr_primer_table, pcr_primer_path)
+    cli::cli_alert_success(paste0(
+      "Wrote PCR primer table: ", pcr_primer_path,
+      " (", length(pcr_handles), " tile pairs)"
+    ))
+  }
+
   invisible(list(
     oligo_pool_csv        = oligo_path,
     geneblock_order_csv   = block_path,
@@ -154,7 +184,8 @@ write_outputs <- function(oligos, geneblock_result, variants, barcodes,
     oligo_pool_fasta      = fasta_path,
     geneblock_order_fasta = block_fasta_path,
     sequences_fasta       = seq_fasta_path,
-    skipped_variants_csv  = skipped_path
+    skipped_variants_csv  = skipped_path,
+    pcr_primer_table_csv  = pcr_primer_path
   ))
 }
 

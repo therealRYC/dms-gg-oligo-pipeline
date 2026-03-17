@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-16 — Clamp tile coverage to gene_len for oh_R cassette extension
+# Last updated: 2026-03-17 — Add PCR handle enzyme site QC check
 # 10_qc_checks.R — Comprehensive QC validation for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 
@@ -18,6 +18,7 @@
 #' @param max_block_length Max gene block length
 #' @param min_hamming Min Hamming distance for barcodes
 #' @param assembly_plan Optional assembly_plan from plan_assembly() for per-reaction fidelity QC
+#' @param pcr_handles Optional list of per-tile PCR handle pairs for enzyme site QC
 #' @return List with qc_pass (logical) and qc_report (data frame of checks)
 run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
                           tiles, tile_overhangs, cds,
@@ -26,7 +27,8 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
                           max_block_length = MAX_GENEBLOCK_LENGTH,
                           min_block_length = MIN_GENEBLOCK_LENGTH,
                           min_hamming = DEFAULT_MIN_HAMMING,
-                          assembly_plan = NULL) {
+                          assembly_plan = NULL,
+                          pcr_handles = NULL) {
   checks <- list()
   blocks <- geneblock_result$blocks
 
@@ -335,6 +337,30 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
           paste(colliding_ohs, collapse = ", "),
           ". Assembly will produce ambiguous ligation!"
         )
+      }
+    )
+  }
+
+  # 18. PCR handle enzyme sites (defense-in-depth — config parsing also checks this)
+  if (!is.null(pcr_handles) && length(pcr_handles) > 0) {
+    n_handle_sites <- 0L
+    for (i in seq_along(pcr_handles)) {
+      for (handle_end in c("fwd", "rev")) {
+        seq <- pcr_handles[[i]][[handle_end]]
+        for (enz_name in names(ENZYMES)) {
+          sites <- find_enzyme_sites(seq, ENZYMES[[enz_name]]$recog)
+          if (nrow(sites) > 0) n_handle_sites <- n_handle_sites + 1L
+        }
+      }
+    }
+    checks[[length(checks) + 1L]] <- qc_check(
+      name = "pcr_handle_enzyme_sites",
+      desc = "PCR handles free of enzyme recognition sites",
+      pass = n_handle_sites == 0L,
+      detail = if (n_handle_sites == 0L) {
+        paste0(length(pcr_handles), " handle pair(s) checked, all clean")
+      } else {
+        paste0(n_handle_sites, " handle(s) contain enzyme site(s)")
       }
     )
   }
