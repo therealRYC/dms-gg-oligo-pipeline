@@ -1,7 +1,7 @@
 # DMS GG Oligo Pipeline — Code Walkthrough
 
 *Code review and implementation guide for the `dms-gg-oligo-pipeline`*
-*Generated: 2026-03-07, updated 2026-03-09*
+*Generated: 2026-03-07, updated 2026-03-16*
 
 ---
 
@@ -451,7 +451,7 @@ For each mutable position (codons 2 through n-1), generates:
 
 **Why codons 1 and n are excluded:**
 - Codon 1 (Met/ATG) always falls in the first tile's oh1 overhang — its mutation would be silently overridden during assembly.
-- The last codon (stop) always falls in the last tile's oh2 overhang — there is no downstream tile to cover it.
+- The last codon (stop) is excluded because read-through mutations are not of experimental interest in DMS. (Note: since the oh_R cassette extension feature, the stop codon is geometrically *inside* the last tile's mutable region — it's excluded by choice, not by constraint.)
 
 ```r
 mutable_positions <- 2L:(n_codons - 1L)
@@ -546,89 +546,79 @@ Variants at gene edges that can only achieve quality 1 are flagged with `overhan
 
 ## 9. Overhang Selection
 
-### `06_overhang_selection.R` — The largest and most complex module
+### `06_overhang_selection.R` + `06b_oogga_dp.R` — Assembly planning with OOGGA collision-aware DP
 
-**File**: `R/06_overhang_selection.R` (~3700 lines)
+**Files**: `R/06_overhang_selection.R` (~1600 lines) + `R/06b_oogga_dp.R` (~1400 lines)
 
-This module integrates tiling and overhang selection into a single planning system. It uses the **`dp`** boundary method: tile-first dynamic programming with individual overhang scoring (P_fid × P_eff from BsmBI cycling data), followed by SB assignment at tile junctions with iterative collision blacklisting.
+These modules integrate tiling, overhang selection, and superblock partitioning into a single planning system. The architecture uses **OOGGA-style collision-aware dynamic programming** (inspired by Mukundan & Madhusudhan 2025) in a two-pass design: SB boundaries first, then tile boundaries per SB segment.
 
-#### Overhang Scoring Formula (BUG-008 Fix)
+#### Overhang Scoring Formula
 
 ```
 Score = P_fid(oh) × P_eff(oh)
 ```
 
 Both metrics from the **BsmBI cycling 256×256 matrix** (Pryor et al. 2020):
-- **P_fid** = M[X,X] / sum(M[X,*]) — individual fidelity (accuracy: what fraction of ligated product at this overhang is correct)
-- **P_eff** = M[X,X] / max(diag(M)) — relative ligation efficiency (yield: how much correct product compared to the best overhang)
+- **P_fid** = M[X,X] / sum(M[X,*]) — individual fidelity (accuracy)
+- **P_eff** = M[X,X] / max(diag(M)) — relative ligation efficiency (yield)
 
-The HF set bonus was dropped because under cycling conditions, pairwise misligation between non-complementary overhangs is negligible.
+Returns `NA` for unknown overhangs (excluded from optimization). The HF set bonus was dropped because under cycling conditions, pairwise misligation between non-complementary overhangs is negligible.
 
 ```r
 overhang_score <- function(oh, fid_lookup, eff_lookup) {
-  fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else 0.5
-  eff <- if (oh %in% names(eff_lookup)) unname(eff_lookup[oh]) else 0.5
+  fid <- if (oh %in% names(fid_lookup)) unname(fid_lookup[oh]) else NA_real_
+  eff <- if (oh %in% names(eff_lookup)) unname(eff_lookup[oh]) else NA_real_
   fid * eff
 }
 ```
 
 #### Data Loading
 
-- `builtin_overhang_fidelity()`: Hard-coded 256 individual fidelity values (Potapov 2018, T4 ligase, 37°C, 18h)
 - `load_overhang_fidelity("BsmBI")`: Loads from RDS file, or derives from pairwise matrix
 - `load_pairwise_matrix("BsmBI")`: Loads the 256×256 BsmBI cycling matrix (Pryor 2020) from `data/neb_overhang_fidelity/bsmbi_pairwise.rds`
-- `POTAPOV_TABLE1_SET3_25`: Hard-coded 25-overhang HF set from Potapov 2018 Table 1
+- `compute_overhang_efficiency(matrix)`: Computes P_eff for all 256 overhangs from the pairwise matrix
+- `POTAPOV_TABLE1_SET3_25`: Hard-coded 25-overhang HF set from Potapov 2018 Table 1 (informational only)
 
 **Matrix convention:** `M[X,Y]` = ligation frequency of overhang X with RC(Y). The diagonal `M[X,X]` = correct Watson-Crick ligation.
 
-#### Dynamic Programming Tile Boundary Search
+#### OOGGA Collision-Aware DP (`06b_oogga_dp.R`)
 
-The DP finds the globally optimal set of K boundary positions that maximize total boundary overhang score, subject to tile size constraints.
+The core innovation: the DP transition checks each candidate overhang against **all prior overhangs on the path**, rejecting candidates with >max_identity/4 positional matches (including RC checks). This eliminates the iterative blacklisting loop from the legacy approach.
 
-##### `precompute_boundary_scores()` — Score all candidate positions
-
-For each codon position `b` in the gene:
-1. Extract `oh1` at position `b*3 + 1` (start of next tile)
-2. Extract `oh2` at position `(b + overlap_codons) * 3` (end of extended current tile)
-3. Compute `score = overhang_score(oh1) + overhang_score(oh2)`
-
-Hard filters that invalidate a position:
-- `oh1` collides with the gene's first overhang (`oh_L`) — would cause ambiguous BsaI ligation
-- Palindromic overhangs — enable self-circularization
-- Homopolymer overhangs — poor ligation specificity
-- Blacklisted overhangs (from SB collision resolution)
-
-##### `dp_solve_k(K, n_codons, min_codons, max_codons, scores, valid)` — Core DP
-
-The DP has K layers (one per boundary). State = codon position of the boundary.
-
-```
-dp_prev[b] = best total score with the current boundary layer ending at codon b
-parent[k, b] = optimal predecessor for boundary k at position b
-```
-
-Transition: for boundary k at position b, find the best predecessor b' such that the tile between b' and b has size in [min_codons, max_codons]:
+##### Collision Primitives
 
 ```r
-for (bp in lo:hi) {
-  if (dp_prev[bp] > best_score) {
-    best_score <- dp_prev[bp]
-    best_pos <- bp
-  }
-}
-dp_curr[b] <- best_score + boundary_scores[b]
+build_oh_compatibility(max_identity = 2L)
 ```
 
-The final answer backtracks through the parent pointers to recover all K boundary positions.
+Pre-computes a 256×256 boolean matrix: `compat[A, B] = TRUE` iff `A` passes the identity check against both `B` and `RC(B)`. The default `max_identity = 2` means ≤2 of 4 positions can match — faithful to OOGGA's `__find_identities()` logic.
 
-##### `search_tile_boundaries_dp()` — Multi-K Search
+##### Two-OH SB Boundary Model
 
-Wraps `dp_solve_k()` with multi-K optimization:
+Each gene-region SB boundary contributes **two overhangs** to the collision set:
+- **oh1**: first 4 nt past the boundary (start of next segment)
+- **oh2**: 4 nt at the overlap extension point (end of prev segment's last tile)
 
-1. Computes `K_ideal = ceiling(n_codons / effective_max_codons) - 1`
-2. Searches K values from `K_ideal - dp_k_range` to `K_ideal + dp_k_range`
-3. Picks the K with the best **average** score per boundary
-4. Applies diminishing-returns stopping: if avg score improvement < 0.5% from K to K+1, stops
+Both oh1 and oh2 must be pairwise compatible with all prior boundary overhangs on the path, plus alien overhangs (oh3, oh4, oh_L + RCs).
+
+Score is multiplicative: `overhang_score(oh1) * overhang_score(oh2)`.
+
+Cassette-region boundaries use a single-OH model (no tile overlap in the cassette).
+
+##### Beam Search DP
+
+The SB DP uses beam search (default width 10) because Bellman optimality doesn't hold — the collision constraint is path-dependent. Each beam entry stores the full tuple (score, positions, oh1s, oh2s) for path reconstruction.
+
+```r
+search_sb_boundaries_oogga(full_seq, gene_len, max_block_length, ...)
+```
+
+##### Per-Segment Tile DP
+
+After SB boundaries are placed, each SB segment gets its own tile DP. Key features:
+- **Enzyme-aware alien sets**: oh1 (BsaI pot) checks against oh_L, oh4 + RCs; oh2 (BsmBI pot) checks against oh3 + RC. This avoids over-constraining — oh1 and oh2 are in different enzyme pots.
+- **Tile-independent reactions**: Each tile's assembly reaction runs in its own pot, so tile-to-tile collision checking is unnecessary. This enables standard Bellman DP (no beam search needed).
+- **Multi-K search**: Tries K_ideal ± dp_k_range tile counts, selecting by geometric mean score per boundary.
 
 ##### Tile Overlap
 
@@ -637,43 +627,9 @@ Tiles are extended rightward by `overlap_codons` (default 4) so adjacent tiles s
 - Each tile physically extends `overlap_codons` past its core end
 - Codons near the boundary are mutable in both tiles — `assign_variants_to_tiles()` picks the tile where they're fully interior
 
-#### Superblock (SB) Architecture
-
-When WT gene blocks exceed the 1800 bp synthesis limit, they're split into "superblocks" — sub-blocks connected by BsmBI overhangs within the same Level 1 reaction.
-
-The pipeline uses a **hybrid approach**:
-1. **Tile-first DP**: Find optimal tile boundaries for the entire gene
-2. **Constrained SB DP**: Find optimal split points for oversized blocks, **constrained to tile boundaries within the gene region**
-
-**Critical constraint**: SB boundaries within the gene are restricted to tile `end_nt` positions. This is enforced in `search_superblock_boundaries_dp()` via the `allowed_gene_positions` parameter:
-
-```r
-# In plan_assembly():
-tile_end_positions <- tiles$end_nt[-n_tiles]
-
-sb_result <- search_superblock_boundaries_dp(
-  ...
-  allowed_gene_positions = tile_end_positions
-)
-
-# Inside search_superblock_boundaries_dp(), boundary candidates are filtered:
-if (p <= gene_len) {
-  if ((p %% 3L) != 0L) next                                                  # codon boundary
-  if (!is.null(allowed_gene_pos_set) && !(p %in% allowed_gene_pos_set)) next  # tile boundary
-}
-```
-
-This means each superblock is a **contiguous group of tiles**. The constraint provides two benefits:
-- **Overhang diversity**: tiles are spaced ~240 nt apart, so gene-derived overhangs at tile boundaries are naturally different 4-mers — avoiding the collision problem where a naive SB DP would repeatedly land on the same high-scoring 4-mer.
-- **Clean mapping**: each SB maps to a range of tiles, simplifying gene block design in `09_wt_geneblock_design.R`.
-
-Positions in the downstream cassette (past `gene_len`) remain **unrestricted** — they can split at any nucleotide position with a high-scoring overhang.
-
-SB junction overhangs are derived from the gene sequence at the split position. The SB DP uses the same scoring formula (P_fid × P_eff) and applies collision checks to ensure SB junction overhangs don't collide with tile boundary overhangs, oh3, oh4, or each other.
-
 #### `plan_assembly()` — Master Orchestrator
 
-This is the main entry point called from `run_pipeline.R`. It follows a **constrained-first ordering**: fixed overhangs are committed before any boundary search runs.
+Main entry point called from `run_pipeline.R`. Follows a **constrained-first ordering**: fixed overhangs are committed before any boundary search runs.
 
 **Phase 1** — Select fixed overhangs (oh_L, oh3, oh4):
 - `oh_L` = first 4 nt of gene (physical constraint)
@@ -681,30 +637,48 @@ This is the main entry point called from `run_pipeline.R`. It follows a **constr
 - `oh4` (BsaI, same for all tiles): highest-scoring overhang that doesn't collide with oh_L
 - oh3 and oh4 do NOT check against oh1/oh2 (which don't exist yet) — downstream phases will blacklist them
 
-**Phase 2** — Tile boundary DP (with iterative SB-aware refinement, up to 5 iterations):
-- Pass oh3 + oh4 (+ RCs) as `sb_blacklist` to the tile DP so no tile boundary lands on these overhangs
-- Run DP to find optimal boundaries using individual overhang scoring (P_fid × P_eff)
-- Trial SB partitioning to check for collisions between SB junction overhangs and tile oh2 values
-- If collision: blacklist the colliding oh2 and re-run DP
+**Phase 2** — SB boundary search (OOGGA DP on full gene+cassette):
+- SBs at any codon position — no tile constraint
+- SB junction OHs must avoid fixed overhangs (oh3, oh4, oh_L)
+- Two-OH model with beam search for collision-free paths
 
-**Phase 3** — Constrained SB DP on gene+cassette:
-- Gene-region SB boundaries constrained to tile `end_nt` positions
-- Cassette-region boundaries unrestricted
-- Collision checks against tile overhangs, oh3, oh4, and other SB junctions
+**Phase 3** — Per-segment tile search (OOGGA DP per SB segment):
+- Each SB segment gets its own tile DP
+- SB junction OHs are alien to the tile DP (prevents tile–SB collisions in the BsmBI pot)
+- Enzyme-aware alien sets (BsaI vs BsmBI pot separation)
+
+**Phase 3.5** — oh_R cassette search (last tile only):
+- After the tile DP, the last tile's oh2 is clamped at the gene end (stop codon in oh2 zone)
+- `search_oh_R()` scans the downstream cassette at **1-nt resolution** to find a better oh2
+- Scoring: P_fid × P_eff with OOGGA identity check vs alien OHs
+- If found, extends the last tile into the cassette — invariant cassette nt on every oligo
+- Pushes the stop codon into the tile interior (geometrically mutable, excluded by experimental choice)
+- Graceful degradation: returns NULL if no valid candidate → behavior unchanged
 
 **Phase 4** — Per-reaction pairwise validation:
 - Compute set fidelity for each BsaI and BsmBI reaction
 - Warn if any reaction falls below `SET_FIDELITY_WARNING_THRESHOLD` (0.80)
 
-Returns `assembly_plan` with tiles, oh3, oh4, superblocks, reaction fidelity.
+Returns `assembly_plan` with tiles, oh3, oh4, oh_R_result, full_seq, superblocks, reaction fidelity.
 
-**Known limitation (BUG-009):** The tile boundary DP pre-computes scores independently per boundary position — it lacks collision prevention between boundary overhangs. Two boundaries can produce the same 4-mer overhang, causing misligation. A two-pass OOGGA implementation with `__overlap_pass()`-style collision checking is planned as a replacement. See `BUGS.md` for details.
+#### `search_oh_R()` — Last Tile Cassette Overhang Search
+
+```r
+search_oh_R(cassette_seq, last_tile_gene_nt, max_mutable_nt,
+            oh_fidelity, eff_lookup, alien_ohs, max_identity, min_clearance_nt)
+```
+
+Slides a 4-nt window through the cassette at 1-nt steps. Unlike gene boundaries (codon-locked), cassette positions are at any offset — giving 10-100× more candidates.
+
+Constraints:
+- **Min clearance** (default 5 nt): ensures stop codon has ≥1 nt gap from oh2 zone
+- **Max prefix** = `max_mutable_nt + 8 - last_tile_gene_nt`: oligo length budget
+- **Hard filters**: palindromes, homopolymers, OOGGA identity vs aliens
 
 **Things to verify:**
-- The iterative SB collision resolution correctly blacklists oh2 values that cause problems, not oh1 values. This is because oh2 is at tile ends (where SB boundaries tend to land), while oh1 is at tile starts.
-- The `oh_collides()` helper checks both identity and RC collision: `oh1 == oh2 || oh1 == RC(oh2)`.
 - `compute_set_fidelity()` computes the Potapov 2018 metric: `set_fidelity = product of per-overhang fidelities`, where each `f(X) = M[X,X] / sum(M[X,Y] for Y in set)`.
 - The constrained-first ordering means oh3 never needs to check against oh2, and oh4 never needs to check against oh1 — downstream phases avoid them.
+- oh_R reconstruction: cassette nt on oligo + remaining cassette in gene block = full core cassette (verified by GG simulator).
 
 ---
 
@@ -826,11 +800,13 @@ Uses the sphere-packing (Hamming) bound: `max_prefixes = 4^k / V(k, t)` where `V
 
 ### `08_oligo_assembly.R` — Universal oligo construction
 
-**File**: `R/08_oligo_assembly.R` (144 lines)
+**File**: `R/08_oligo_assembly.R` (~155 lines)
 
 This module is remarkably concise — the simplicity is a direct benefit of the universal oligo architecture (no tile-type-specific logic).
 
-#### `assemble_oligos()` — Vectorized by Tile
+#### `assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4, max_oligo_length, full_seq)` — Vectorized by Tile
+
+The `full_seq` parameter (gene + core cassette) is needed when the last tile extends past the gene end via oh_R cassette extension. When NULL (backward compatible), uses `cds` only.
 
 The function pre-computes invariant elements once, then loops over tiles with vectorized operations:
 
@@ -844,6 +820,10 @@ bsai_oh4_str <- orient_enzyme_site("BsaI", oh4, "reverse")                     #
 
 For each tile:
 ```r
+# Use full_seq when tile extends past gene end (oh_R cassette extension)
+source <- if (tiles$end_nt[t] > gene_len && !is.null(full_seq)) full_seq else cds
+wt_tile_seqs[t] <- substring(source, tiles$start_nt[t], tiles$end_nt[t])
+
 # Local mutation within the ~230nt tile (NOT full CDS rebuild)
 cs <- (variants$position[idx] - 1L) * 3L + 1L - t_start + 1L
 
@@ -855,22 +835,13 @@ mutant_tiles <- paste0(
 
 # Extract mutable region (strip oh1=4nt front, oh2=4nt back)
 mutable_regions <- substring(mutant_tiles, 5L, t_len - 4L)
-
-# Vectorized oligo assembly
-sequences[idx] <- paste0(
-  bsai_5prime, tile_oh1[tid], mutable_regions,
-  tile_oh2_rev[tid], bsmbi_oh3_str,
-  barcodes[idx], bsai_oh4_str
-)
 ```
 
-**Performance**: This vectorized approach completes in 0.8-2.5s even for TRIO (619K oligos) — no longer a bottleneck.
+For the last tile with oh_R extension, the tile includes invariant cassette nucleotides between the stop codon and the oh2 zone. These appear on every oligo — mutations only happen at gene codon positions.
+
+**Performance**: Vectorized approach completes in 0.8-2.5s even for large genes (60K+ oligos).
 
 **Key insight**: `substring()` in R recycles scalar arguments when applied to a vector. So `substring(wt_tile, 1L, cs - 1L)` where `wt_tile` is a scalar and `cs` is a vector produces a vector of results — this is what enables the vectorization.
-
-**Things to verify:**
-- The mutable region extraction `substring(mutant_tiles, 5L, t_len - 4L)` correctly strips the 4-nt oh1 from the front and the 4-nt oh2 from the back. `5L` = position after 4-nt oh1; `t_len - 4L` = position before 4-nt oh2.
-- The `oh2_rev` (reverse-oriented BsmBI site for oh2) is pre-computed per tile and reused for all oligos in that tile — correct since oh2 is a gene-derived overhang that's the same for all variants in the tile.
 
 ---
 
@@ -897,9 +868,12 @@ For each tile, two reactions use different enzyme systems:
 For each tile:
 1. Compute 5'WT block: gene sequence from PaqCI site to tile start (with BsaI flanking sites)
 2. Compute 3'WT block: gene sequence from tile end through downstream cassette (with BsmBI flanking sites)
-3. Check if blocks exceed synthesis limits; if so, trigger superblock splitting
-4. Design the helper plasmid (holds the BsaI and PaqCI sites)
-5. Build per-tile manifests (which blocks go in which reactions)
+3. For the last tile with oh_R extension: trim the cassette prefix that's already on the oligo. The gene block contains only the *remaining* cassette after the oh_R position.
+4. Check if blocks exceed synthesis limits; if so, trigger superblock splitting
+5. Design the helper plasmid (holds the BsaI and PaqCI sites)
+6. Build per-tile manifests (which blocks go in which reactions)
+
+**oh_R cassette trimming**: When the last tile extends `cassette_on_oligo` nt into the cassette, the gene block's content is `substring(polIII_for_block, cassette_on_oligo + 1)`. Pre-computed cassette split positions are also adjusted by `-cassette_on_oligo`. After BsmBI ligation, the oligo's cassette prefix + gene block's remaining cassette = full core cassette (seamless reconstruction).
 
 #### Superblock Splitting
 
@@ -950,7 +924,7 @@ It contains:
 | 2 | `block_lengths` | All gene blocks ≤ max_geneblock_length (1800 nt) |
 | 3 | `barcode_junction_sites` | No enzyme sites at barcode-context junctions |
 | 4 | `barcode_uniqueness` | All barcodes are unique |
-| 5 | `tile_coverage` | Tiles cover entire gene without gaps |
+| 5 | `tile_coverage` | Tiles cover entire gene without gaps (clamped to gene_len for oh_R extension) |
 | 6 | `variant_count` | Expected number of variants generated |
 | 7 | `single_codon_change` | Each non-control variant differs by exactly one codon from WT |
 | 8 | `oligo_gc_content` | Oligo GC content within 25-75% |
@@ -1147,7 +1121,10 @@ After tile assignment, variants with `overhang_note == "partial_oh_overlap"` are
 
 ```r
 skipped_mask <- !is.na(variants$overhang_note) & variants$overhang_note == "partial_oh_overlap"
-skipped_variants <- variants[skipped_mask, ]
+skipped_variants <- variants[skipped_mask, , drop = FALSE]
+if (nrow(skipped_variants) > 0L) {
+  skipped_variants$skip_reason <- "partial_oh_overlap: ..."
+}
 variants <- variants[!skipped_mask, ]
 ```
 
@@ -1191,15 +1168,20 @@ The pipeline uses a fail-fast approach:
 
 ### Testing
 
-Tests are in `tests/testthat/` with:
+Tests are in `tests/testthat/` with **5,278+ tests** (0 failures):
 - **Unit tests**: Per-function tests with known inputs/outputs
 - **Integration tests**: Full pipeline on test genes (300 nt, 2100 nt)
-- **Tile boundary superblock tests**: `test-tile-boundary-superblocks.R` — covers SB partitioning, collision detection, and iterative DP refinement
-- **TRIO test**: Full pipeline on TRIO (9294 nt, 3098 codons) — skip-gated with `RUN_SLOW_TESTS=true`
+- **OOGGA DP tests**: `test-oogga-dp.R` — collision-aware boundary selection, two-OH SB model, beam search
+- **GG simulator tests**: `test-gg-simulator.R` — in-silico BsaI + BsmBI digestion/ligation verifying full assembly reconstruction
+- **oh_R tests**: 7 tests in `test-overhang-selection.R` — cassette search, alien filtering, budget constraints, backward compat
+- **AKAP11 benchmark**: Full pipeline on AKAP11 (5706 nt, 1902 codons) — always runs, serves as large-gene stress test
+
+### Known Warnings (not failures)
+
+- **`check_and_fix_new_sites()` warnings** (~20-50 per large gene): "Could not find enzyme-site-free codon for variant X". Fires when a mutant codon creates a BsmBI/PaqCI site and no alternative codon avoids it. Root causes: single-codon AAs (Met/Trp), flanking context completing a partial enzyme site. Inherent to gene sequence, not a pipeline bug.
 
 ### Known Open Issues
 
 | Bug | Description | Status |
 |-----|-------------|--------|
 | BUG-003 | Boundary codon mutations blanket-skipped | Confirmed, fix deferred |
-| BUG-004 | Large downstream cassette unsplittable | Open |
