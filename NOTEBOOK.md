@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-17 — Entry 48: Runt-tile investigation + prevent_runt_tiles flag -->
+<!-- Last updated: 2026-03-17 — Entry 49: Codebase simplification + branch protection hook -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -1854,3 +1854,47 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 **Related commits**:
 - `112f3db` — feat: Runt-tile prevention — min_gene_residual constraint on SB DP
 - `a747074` — refactor: Change min_gene_residual to boolean prevent_runt_tiles flag
+
+---
+
+### 2026-03-17 10:25 — Codebase simplification + branch protection hook
+
+**Type**: session
+**Status**: completed
+**Tags**: [refactoring, test-infrastructure, hooks, git-safety]
+
+**Goal**: Reduce ~150 lines of duplication across barcode filtering and test boilerplate, and add programmatic protection against accidental commits to main.
+
+**Approach**: Three independent refactoring streams executed sequentially, each verified by the full test suite (5,312 tests, 0 failures). After discovering the commits accidentally landed on `main` (stale gitStatus reported the wrong branch), added a PreToolUse hook to catch `git commit` on protected branches.
+
+**Key findings**:
+- The enzyme-site-checking loop (`for enz_name in names(ENZYMES)`) appeared 4 times in `07_barcode_design.R` — pure vectorized boolean logic, safe to extract
+- `builtin_human_codon_usage()` was called 58 times across 10 test files instead of being cached once in `setup.R`
+- The same 5-line domestication block (scan + if/apply/else) was copy-pasted 8 times across 7 test files
+- `polIII_len` param in `convert_partition_to_splits()` was accepted but never used
+- The gitStatus provided at session start can be stale — it reported `260316-simplifying-code-and-tests` but the primary working directory had `main` checked out
+
+**Decisions made**:
+- Extract `has_enzyme_sites_vec()` as vectorized boolean helper: keeps the scalar `has_enzyme_sites()` in utils.R (different purpose — returns positions) (over replacing the utils.R version)
+- Extract `filter_prefixes()` to deduplicate identical 13-line prefix filtering in linear vs lexicode code paths (over leaving them inline)
+- Cache codon usage as `TEST_CODON_USAGE` in setup.R with `domesticate_test_gene()` helper: R evaluates defaults lazily at call time, so defining the helper before `TEST_GENE_SEQ` is safe (over moving fixture order)
+- Add branch check to existing `validate-bash-command.py` rather than a separate hook: keeps all Bash validation in one place, only calls `git branch --show-current` when command contains `git commit` (over hookify rule or git pre-commit hook)
+- PreToolUse escalates to `ask` not `deny`: merges and intentional main commits should still work with user approval (over hard block)
+- Stop hook auto-checkpoint left unchanged on all branches: if you're on main, you're there intentionally (over skipping main)
+
+**Artifacts**:
+- `R/07_barcode_design.R` — `has_enzyme_sites_vec()`, `filter_prefixes()` helpers; simplified `filter_barcodes_batch()`, `filter_sequences_fast()`, `filter_barcode_junctions()`
+- `R/06_overhang_selection.R` — removed unused `polIII_len` param from `convert_partition_to_splits()`
+- `tests/testthat/setup.R` — `TEST_CODON_USAGE` constant, `domesticate_test_gene()` helper
+- `~/.claude/hooks/validate-bash-command.py` — `check_commit_on_protected_branch()` function, `PROTECTED_BRANCHES` constant
+
+**Related commits**:
+- `8a250de` — refactor: Deduplicate enzyme site checks in barcode filtering
+- `c6ae006` — refactor: Extract test helpers and cache codon usage in setup.R
+- `d98d96e` — refactor: Remove unused polIII_len param from convert_partition_to_splits
+
+**Open questions**:
+- The 3 refactoring commits landed on `main` instead of the worktree branch — already merged and pushed, can't cleanly rewrite history
+
+**Next steps**:
+- Verify branch protection hook works in a new session by attempting a commit on main
