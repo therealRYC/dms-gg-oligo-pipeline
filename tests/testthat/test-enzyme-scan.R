@@ -1,7 +1,7 @@
 # test-enzyme-scan.R — Tests for 02_enzyme_site_scan.R
 
 test_that("scan_enzyme_sites finds BsmBI in test gene", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   # TEST_GENE_SEQ has BsmBI site (CGTCTC) embedded at codons 32-33
   result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
 
@@ -10,7 +10,7 @@ test_that("scan_enzyme_sites finds BsmBI in test gene", {
 })
 
 test_that("scan_enzyme_sites scans all 3 enzymes", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   # Create a test sequence with a BsaI site
   bsai_gene <- paste0(
     "ATG", "GCT", "GAA", "CTT", "AAA", "GCT", "GCC", "AAG", "GAT", "TTC",
@@ -25,7 +25,7 @@ test_that("scan_enzyme_sites scans all 3 enzymes", {
 })
 
 test_that("suggest_domestication provides valid fixes", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   sites <- find_enzyme_sites(TEST_GENE_SEQ, "CGTCTC")
   sites$enzyme <- "BsmBI"
 
@@ -41,7 +41,7 @@ test_that("suggest_domestication provides valid fixes", {
 })
 
 test_that("suggest_domestication doesn't create new enzyme sites", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   sites <- find_enzyme_sites(TEST_GENE_SEQ, "CGTCTC")
   sites$enzyme <- "BsmBI"
 
@@ -63,7 +63,7 @@ test_that("suggest_domestication doesn't create new enzyme sites", {
 })
 
 test_that("apply_domestication removes BsmBI site", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
 
   if (nrow(result$domestication) > 0) {
@@ -79,7 +79,7 @@ test_that("apply_domestication removes BsmBI site", {
 })
 
 test_that("apply_domestication with iterative re-checking", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
 
   if (nrow(result$domestication) > 0) {

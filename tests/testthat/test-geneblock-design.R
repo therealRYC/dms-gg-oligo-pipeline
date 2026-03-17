@@ -48,13 +48,8 @@ test_that("design_helper_plasmid produces valid output", {
 })
 
 test_that("design_wt_geneblocks returns blocks and manifests", {
-  cu <- builtin_human_codon_usage()
-  scan_result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
-  cds <- if (nrow(scan_result$domestication) > 0) {
-    apply_domestication(TEST_GENE_SEQ, scan_result$domestication, codon_usage = cu)
-  } else {
-    TEST_GENE_SEQ
-  }
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene()
 
   tiles <- partition_tiles(cds, 150)
   oh3 <- "ACTA"
@@ -84,13 +79,8 @@ test_that("design_wt_geneblocks returns blocks and manifests", {
 })
 
 test_that("gene blocks have correct enzyme types", {
-  cu <- builtin_human_codon_usage()
-  scan_result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
-  cds <- if (nrow(scan_result$domestication) > 0) {
-    apply_domestication(TEST_GENE_SEQ, scan_result$domestication, codon_usage = cu)
-  } else {
-    TEST_GENE_SEQ
-  }
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene()
 
   tiles <- partition_tiles(cds, 150)
 
@@ -132,7 +122,7 @@ test_that("deduplicate_blocks removes exact duplicates", {
 # =============================================================================
 
 test_that("non-final 3'WT sub-blocks have gene_region WITHOUT polIII", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_LONG_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {
@@ -192,7 +182,7 @@ test_that("non-final 3'WT sub-blocks have gene_region WITHOUT polIII", {
 })
 
 test_that("global boundaries increase block reuse (long gene)", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_LONG_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {
@@ -245,7 +235,7 @@ test_that("global boundaries increase block reuse (long gene)", {
 setup_geneblocks <- function(cds_raw, polIII = TEST_POLIII,
                               max_block_length = 1800L,
                               min_block_length = 300L) {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   scan_result <- scan_enzyme_sites(cds_raw, "", cu)
   cds <- if (nrow(scan_result$domestication) > 0) {
     apply_domestication(cds_raw, scan_result$domestication, codon_usage = cu)
@@ -340,7 +330,7 @@ test_that("no oversized BsmBI sub-blocks from missing global splits", {
 test_that("min_sub_length uses gene-content semantics (not total block)", {
   # plan_assembly should pass min_sub_length = min_geneblock_length - block_overhead
   # (gene content bounds), not the raw min_geneblock_length (total block bounds)
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_LONG_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {

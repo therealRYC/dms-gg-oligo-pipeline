@@ -1,7 +1,7 @@
 # test-oligo-assembly.R — Tests for 08_oligo_assembly.R (3-enzyme architecture)
 
 test_that("assemble_oligos produces correct number of oligos", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- "ATGGCTGAATAA" # 4 codons
   variants <- design_mutations(cds, cu)
   tiles <- partition_tiles(cds, 300)
@@ -20,13 +20,8 @@ test_that("assemble_oligos produces correct number of oligos", {
 })
 
 test_that("all oligos have same structure regardless of tile position", {
-  cu <- builtin_human_codon_usage()
-  scan_result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
-  cds <- if (nrow(scan_result$domestication) > 0) {
-    apply_domestication(TEST_GENE_SEQ, scan_result$domestication, codon_usage = cu)
-  } else {
-    TEST_GENE_SEQ
-  }
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene()
 
   tile_size <- compute_max_tile_size(300, 12)
   tiles <- partition_tiles(cds, tile_size)

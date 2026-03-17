@@ -3,7 +3,7 @@
 # test-codon-table.R — Tests for 03_codon_table.R
 
 test_that("builtin_human_codon_usage returns valid table", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   expect_equal(nrow(cu), 64)  # 64 codons
   expect_true(all(c("codon", "aa", "frequency") %in% names(cu)))
   expect_true(all(nchar(cu$codon) == 3))
@@ -11,7 +11,7 @@ test_that("builtin_human_codon_usage returns valid table", {
 })
 
 test_that("get_preferred_codons returns one per AA", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   pref <- get_preferred_codons(cu)
 
   # Every standard AA + stop should be present
@@ -28,7 +28,7 @@ test_that("get_preferred_codons returns one per AA", {
 })
 
 test_that("get_ranked_codons returns codons in frequency order", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   ranked_leu <- get_ranked_codons("L", cu)
   expect_equal(ranked_leu[1], "CTG")  # Most frequent Leu codon
   expect_equal(length(ranked_leu), 6)  # 6 Leu codons
@@ -38,7 +38,7 @@ test_that("get_ranked_codons returns codons in frequency order", {
 # Specific frequency value to detect accidental reversion to Kazusa data.
 # CoCoPUTs CTG(Leu) = 36.06; Kazusa CTG(Leu) = 39.6
 test_that("builtin table uses CoCoPUTs data (canary)", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   ctg_freq <- cu$frequency[cu$codon == "CTG"]
   # CoCoPUTs value: 36.06 (Kazusa was 39.6)
   expect_equal(ctg_freq, 36.06)
@@ -47,7 +47,7 @@ test_that("builtin table uses CoCoPUTs data (canary)", {
 # --- CSV loading tests ---
 test_that("load_codon_usage reads CSV files", {
   # Write the builtin table as a CSV to a temp file
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   tmp <- tempfile(fileext = ".csv")
   on.exit(unlink(tmp), add = TRUE)
   write.csv(cu, tmp, row.names = FALSE)
@@ -58,7 +58,7 @@ test_that("load_codon_usage reads CSV files", {
 })
 
 test_that("load_codon_usage reads RDS files", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   tmp <- tempfile(fileext = ".rds")
   on.exit(unlink(tmp), add = TRUE)
   saveRDS(cu, tmp)
@@ -78,7 +78,7 @@ test_that("load_codon_usage rejects unsupported extensions", {
 
 # --- validate_codon_table tests ---
 test_that("validate_codon_table accepts valid table", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   expect_silent(validate_codon_table(cu))
 })
 
@@ -88,32 +88,32 @@ test_that("validate_codon_table rejects missing columns", {
 })
 
 test_that("validate_codon_table rejects wrong row count", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   bad <- cu[1:10, ]  # only 10 rows
   expect_error(validate_codon_table(bad), "Expected 64 rows")
 })
 
 test_that("validate_codon_table rejects invalid codons", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cu$codon[1] <- "XYZ"
   expect_error(validate_codon_table(cu), "Invalid codons")
 })
 
 test_that("validate_codon_table rejects duplicate codons", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cu$codon[2] <- cu$codon[1]  # duplicate
 
   expect_error(validate_codon_table(cu), "Duplicate codons")
 })
 
 test_that("validate_codon_table rejects negative frequencies", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cu$frequency[1] <- -1
   expect_error(validate_codon_table(cu), "non-negative")
 })
 
 test_that("validate_codon_table rejects NA frequencies", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cu$frequency[1] <- NA
   expect_error(validate_codon_table(cu), "NA values")
 })

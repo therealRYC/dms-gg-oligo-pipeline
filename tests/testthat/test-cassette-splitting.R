@@ -127,7 +127,7 @@ test_that("build_cassette_subblocks produces valid BsmBI blocks", {
 # =============================================================================
 
 test_that("design_wt_geneblocks handles oversized cassette (last tile)", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_GENE_SEQ # Short 300 nt gene
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {
@@ -180,7 +180,7 @@ test_that("design_wt_geneblocks handles oversized cassette (last tile)", {
 # =============================================================================
 
 test_that("normal cassette (1067 nt) is NOT split", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_LONG_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {

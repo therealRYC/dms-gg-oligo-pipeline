@@ -3,7 +3,7 @@
 test_that("design_mutations generates correct number of variants with WT controls", {
   # Small test: 4-codon CDS (ATG GCT GAA TAA = M A E *)
   cds <- "ATGGCTGAATAA"
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu)
 
   # Mutable positions: codons 2 to (n_codons - 1) = codons 2-3 (skip Met@1, stop@4)
@@ -13,7 +13,7 @@ test_that("design_mutations generates correct number of variants with WT control
 
 test_that("design_mutations produces correct variant IDs", {
   cds <- "ATGGCTTAA" # M A *
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu)
 
   # Only codon 2 (A) is mutable — codon 1 (Met) and codon 3 (stop) are skipped
@@ -28,7 +28,7 @@ test_that("design_mutations produces correct variant IDs", {
 
 test_that("mutations use preferred human codons", {
   cds <- "ATGGCTTAA"
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   pref <- get_preferred_codons(cu)
   variants <- design_mutations(cds, cu)
 
@@ -44,7 +44,7 @@ test_that("mutations use preferred human codons", {
 
 test_that("variant_type column is correctly assigned", {
   cds <- "ATGGCTGAATAA" # M A E *
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu)
 
   # Should have variant_type column
@@ -69,7 +69,7 @@ test_that("variant_type column is correctly assigned", {
 
 test_that("WT control variants have mut_codon == wt_codon", {
   cds <- "ATGGCTGAATAA"
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu)
 
   wt_ctrls <- variants[variants$variant_type == "wt_control", ]
@@ -85,7 +85,7 @@ test_that("WT control variants have mut_codon == wt_codon", {
 
 test_that("WT control variant IDs follow {AA}{pos}= format", {
   cds <- "ATGGCTGAATAA"
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu)
 
   wt_ctrls <- variants[variants$variant_type == "wt_control", ]
@@ -98,7 +98,7 @@ test_that("include_synonymous adds synonymous variants at non-Met/Trp positions"
   # CDS: ATG GCT TGG TAA = M A W *
   # Mutable: A@2 (has synonymous codons), W@3 (only one codon — no synonymous)
   cds <- "ATGGCTTGGTAA"
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu, include_synonymous = TRUE)
 
   # A@2: 20 missense+nonsense + 1 WT + 1 syn = 22
@@ -121,7 +121,7 @@ test_that("include_synonymous also skips Met positions", {
   # CDS: ATG ATG GCT TAA = M M A *
   # Mutable: M@2 (Met has only ATG — no synonymous), A@3 (has synonymous)
   cds <- "ATGATGGCTTAA"
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu, include_synonymous = TRUE)
 
   # M@2: 20 + 1 WT + 0 syn = 21
@@ -134,7 +134,7 @@ test_that("include_synonymous also skips Met positions", {
 
 test_that("synonymous codon differs from WT and encodes same amino acid", {
   cds <- "ATGGCTGAATAA" # M A E *
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu, include_synonymous = TRUE)
 
   syn_variants <- variants[variants$variant_type == "synonymous", ]
@@ -158,7 +158,7 @@ test_that("synonymous codon differs from WT and encodes same amino acid", {
 test_that("default mode (no synonymous) produces 21 variants per position", {
   # Verify the default hasn't changed — should be 21 (20 mutations + 1 WT)
   cds <- "ATGGCTGAATAA"
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu) # default include_synonymous = FALSE
 
   expect_equal(nrow(variants), 2 * 21)
@@ -168,7 +168,7 @@ test_that("default mode (no synonymous) produces 21 variants per position", {
 test_that("check_and_fix_new_sites skips WT control variants", {
   # The WT codon is already domesticated, so check_and_fix_new_sites should skip it
   cds <- "ATGGCTGAATAA"
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu)
 
   # Run check — should not modify WT control codons

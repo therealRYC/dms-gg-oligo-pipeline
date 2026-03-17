@@ -17,13 +17,8 @@ test_that("compute_max_tile_size returns positive multiple of 3", {
 
 test_that("partition_tiles covers entire gene with overlap", {
   # Domesticate test gene first
-  cu <- builtin_human_codon_usage()
-  scan_result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
-  cds <- if (nrow(scan_result$domestication) > 0) {
-    apply_domestication(TEST_GENE_SEQ, scan_result$domestication, codon_usage = cu)
-  } else {
-    TEST_GENE_SEQ
-  }
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene()
 
   tile_size <- compute_max_tile_size(300, 12)
   tiles <- partition_tiles(cds, tile_size)
@@ -75,7 +70,7 @@ test_that("partition_tiles handles single-tile gene", {
 
 test_that("assign_variants_to_tiles assigns all variants", {
   cds <- "ATGGCTGAATAA"
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu)
   tiles <- partition_tiles(cds, 300)
   variants <- assign_variants_to_tiles(variants, tiles)
@@ -129,7 +124,7 @@ test_that("clearance scoring produces symmetric N/2 split of overlap codons", {
   cds <- paste0("ATG", paste0(rep("GCT", 26), collapse = ""), "TAA")
   expect_equal(nchar(cds), 84)
 
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   variants <- design_mutations(cds, cu)
 
   # Partition with 20-codon tiles (60 nt mutable) and 6-codon overlap

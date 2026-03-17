@@ -76,7 +76,7 @@ test_that("build_downstream_cassette uppercases element sequences", {
 })
 
 test_that("scan_enzyme_sites detects sites in intergene elements", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   # Use a sequence containing a BsmBI site (CGTCTC)
   bad_element <- list(
     name = "has_bsmbi",
@@ -93,7 +93,7 @@ test_that("scan_enzyme_sites detects sites in intergene elements", {
 })
 
 test_that("scan_enzyme_sites with no intergene elements returns empty intergene_sites", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   result <- scan_enzyme_sites(
     cds = TEST_GENE_SEQ, polIII = TEST_POLIII, codon_usage = cu
   )
@@ -103,7 +103,7 @@ test_that("scan_enzyme_sites with no intergene elements returns empty intergene_
 })
 
 test_that("scan_enzyme_sites with clean intergene elements returns empty intergene_sites", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   clean_element <- list(
     name = "clean",
     sequence = "AAAAATTTTTCCCCC"
@@ -117,17 +117,12 @@ test_that("scan_enzyme_sites with clean intergene elements returns empty interge
 })
 
 test_that("gene blocks include intergene elements in downstream cassette", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   # Use a short clean intergene element
   intergene_seq <- "AAACCCGGGTTTATATATATA"
 
   # Domesticate the test gene
-  scan_result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
-  cds <- if (nrow(scan_result$domestication) > 0) {
-    apply_domestication(TEST_GENE_SEQ, scan_result$domestication, codon_usage = cu)
-  } else {
-    TEST_GENE_SEQ
-  }
+  cds <- domesticate_test_gene()
 
   downstream_cassette <- paste0(intergene_seq, TEST_POLIII)
   tiles <- partition_tiles(cds, 150)
@@ -160,13 +155,8 @@ test_that("gene blocks include intergene elements in downstream cassette", {
 })
 
 test_that("plan_assembly accepts downstream_cassette for block length calculations", {
-  cu <- builtin_human_codon_usage()
-  scan_result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
-  cds <- if (nrow(scan_result$domestication) > 0) {
-    apply_domestication(TEST_GENE_SEQ, scan_result$domestication, codon_usage = cu)
-  } else {
-    TEST_GENE_SEQ
-  }
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene()
 
   tile_size <- compute_max_tile_size(300, 12)
   # Without downstream_cassette (backward compat)
@@ -348,7 +338,7 @@ test_that("scan_downstream_junctions ignores sites fully within one side", {
 })
 
 test_that("scan_enzyme_sites returns junction_sites in result", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   result <- scan_enzyme_sites(
     cds = TEST_GENE_SEQ, polIII = TEST_POLIII, codon_usage = cu
   )

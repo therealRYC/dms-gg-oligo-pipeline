@@ -33,6 +33,29 @@ source(file.path(pipeline_dir, "R", "11_output.R"))
 source(file.path(pipeline_dir, "R", "12_report.R"))
 source(file.path(pipeline_dir, "R", "13_gg_simulator.R"))
 
+# --- Shared test helpers ---
+# Cache codon usage table once (loaded from data/human_codon_usage.rds at source time)
+TEST_CODON_USAGE <- builtin_human_codon_usage()
+
+#' Domesticate TEST_GENE_SEQ for use in tests
+#'
+#' Scans for endogenous enzyme sites and applies silent mutations.
+#' Saves repeating the same 5-line block across many test files.
+#'
+#' @param gene_seq Gene sequence to domesticate (default: TEST_GENE_SEQ)
+#' @param polIII PolIII promoter sequence for scanning (default: "")
+#' @param cu Codon usage table (default: TEST_CODON_USAGE)
+#' @return Domesticated gene sequence (character string)
+domesticate_test_gene <- function(gene_seq = TEST_GENE_SEQ, polIII = "",
+                                   cu = TEST_CODON_USAGE) {
+  scan_result <- scan_enzyme_sites(gene_seq, polIII, cu)
+  if (nrow(scan_result$domestication) > 0) {
+    apply_domestication(gene_seq, scan_result$domestication, codon_usage = cu)
+  } else {
+    gene_seq
+  }
+}
+
 # --- Test fixtures ---
 # A short synthetic test gene (100 codons = 300 nt)
 # Starts ATG, ends with stop (TAA), no internal stops

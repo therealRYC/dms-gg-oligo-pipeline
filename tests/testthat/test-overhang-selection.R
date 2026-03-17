@@ -45,13 +45,8 @@ test_that("load_high_fidelity_set legacy fallback still works", {
 })
 
 test_that("plan_assembly returns complete assembly plan", {
-  cu <- builtin_human_codon_usage()
-  scan_result <- scan_enzyme_sites(TEST_GENE_SEQ, "", cu)
-  cds <- if (nrow(scan_result$domestication) > 0) {
-    apply_domestication(TEST_GENE_SEQ, scan_result$domestication, codon_usage = cu)
-  } else {
-    TEST_GENE_SEQ
-  }
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene()
 
   tile_size <- compute_max_tile_size(300, 12)
   plan <- plan_assembly(cds, TEST_POLIII, tile_size)
@@ -90,7 +85,7 @@ test_that("manual oh3/oh4 are validated by validate_fixed_overhangs", {
 })
 
 test_that("plan_assembly handles long gene with superblocking", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_LONG_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {
@@ -122,7 +117,7 @@ test_that("plan_assembly handles long gene with superblocking", {
 # =============================================================================
 
 test_that("oh3 and oh4 are never homopolymers (short gene)", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {
@@ -141,7 +136,7 @@ test_that("oh3 and oh4 are never homopolymers (short gene)", {
 })
 
 test_that("oh3 and oh4 are never homopolymers (long gene)", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_LONG_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {
@@ -164,7 +159,7 @@ test_that("oh3 and oh4 are never homopolymers (long gene)", {
 # =============================================================================
 
 test_that("global boundaries produce shared splits across tiles", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_LONG_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {
@@ -273,7 +268,7 @@ test_that("convert_partition_to_splits generates correct bsmbi_3wt and bsai_5wt 
 })
 
 test_that("convert_partition_to_splits round-trips through plan_assembly correctly", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_LONG_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {
@@ -426,7 +421,7 @@ test_that("precompute_boundary_scores works with eff_lookup parameter", {
 })
 
 test_that("plan_assembly uses oogga_two_pass by default", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {
@@ -576,7 +571,7 @@ test_that("search_oh_R returns NULL for empty cassette", {
 })
 
 test_that("plan_assembly includes oh_R_result and full_seq in output", {
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_GENE_SEQ
   scan_result <- scan_enzyme_sites(cds, "", cu)
   if (nrow(scan_result$domestication) > 0) {

@@ -239,13 +239,8 @@ test_that("ligate_fragments errors when no start fragment", {
 
 test_that("TEST_GENE_SEQ full assembly simulation succeeds", {
   # Run the pipeline up to gene blocks, then simulate assembly
-  cu <- builtin_human_codon_usage()
-  scan_result <- scan_enzyme_sites(TEST_GENE_SEQ, TEST_POLIII, cu)
-  cds <- if (nrow(scan_result$domestication) > 0) {
-    apply_domestication(TEST_GENE_SEQ, scan_result$domestication, codon_usage = cu)
-  } else {
-    TEST_GENE_SEQ
-  }
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene(polIII = TEST_POLIII)
 
   tile_size <- compute_max_tile_size(300, 12)
   plan <- plan_assembly(cds, TEST_POLIII, tile_size)
@@ -316,7 +311,7 @@ test_that("TEST_LONG_GENE_SEQ assembly simulation runs with collision-aware boun
   # With oogga_two_pass, the collision-aware algorithm avoids overhang identity
   # collisions, so ambiguous ligation errors should not occur. This test verifies
   # the simulator runs and produces results for a long gene with superblocking.
-  cu <- builtin_human_codon_usage()
+  cu <- TEST_CODON_USAGE
   cds <- TEST_LONG_GENE_SEQ
 
   tile_size <- compute_max_tile_size(300, 12)
