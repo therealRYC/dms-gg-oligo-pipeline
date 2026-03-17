@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-14 — Clearance-based variant assignment (distance from junction)
+# Last updated: 2026-03-17 — Add handle_overhead parameter for PCR handles
 # 05_tiling.R — Partition gene into tiles for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -13,16 +13,18 @@
 #' Compute the maximum mutable region size in nucleotides
 #'
 #' Universal oligo structure (all tile types):
-#'   BsaI_recog+spacer (7nt) + oh1_WT_flank (4nt) + [mutable region] +
-#'   BsmBI_rev_oh2 (11nt) + BsmBI_fwd_oh3 (11nt) + barcode + BsaI_rev_oh4 (11nt)
+#'   [fwd_handle] + BsaI_recog+spacer (7nt) + oh1_WT_flank (4nt) + [mutable region] +
+#'   BsmBI_rev_oh2 (11nt) + BsmBI_fwd_oh3 (11nt) + barcode + BsaI_rev_oh4 (11nt) + [rev_handle]
 #'
-#' Total fixed overhead = 7 + 4 + 11 + 11 + barcode + 11 = 44 + barcode
+#' Total fixed overhead = 7 + 4 + 11 + 11 + barcode + 11 + handle_overhead = 44 + barcode + handles
 #'
 #' @param max_oligo_length Maximum oligo length (default 300)
 #' @param barcode_length Barcode length in nt (default 12)
+#' @param handle_overhead Total PCR handle length in nt (fwd + rev, default 0)
 #' @return Integer max mutable region size in nucleotides (rounded to codon boundary)
 compute_max_tile_size <- function(max_oligo_length = 300L,
-                                  barcode_length = 12L) {
+                                  barcode_length = 12L,
+                                  handle_overhead = 0L) {
   # BsaI site = recognition(6) + spacer(1) = 7 nt (5' end, forward)
   bsai_5prime <- nchar(ENZYMES$BsaI$recog) + ENZYMES$BsaI$spacer_len  # 7
 
@@ -38,18 +40,19 @@ compute_max_tile_size <- function(max_oligo_length = 300L,
   bsai_site_len <- nchar(ENZYMES$BsaI$recog) + ENZYMES$BsaI$spacer_len +
                    ENZYMES$BsaI$oh_len  # 11
 
-  # Total fixed overhead: BsaI_5'(7) + oh1(4) + BsmBI_oh2(11) + BsmBI_oh3(11) + barcode + BsaI_oh4(11)
+  # Total fixed overhead: BsaI_5'(7) + oh1(4) + BsmBI_oh2(11) + BsmBI_oh3(11) + barcode + BsaI_oh4(11) + handles
   overhead <- bsai_5prime + oh1_len + bsmbi_site_len + bsmbi_site_len +
-              barcode_length + bsai_site_len
+              barcode_length + bsai_site_len + handle_overhead
 
   mutable_size <- max_oligo_length - overhead
 
   # Round down to nearest multiple of 3 (codon boundary)
   mutable_size <- (mutable_size %/% 3L) * 3L
 
+  handle_msg <- if (handle_overhead > 0L) paste0(" (incl. ", handle_overhead, " nt PCR handles)") else ""
   cli::cli_alert_info(paste0(
     "Max mutable region: ", mutable_size, " nt (",
-    mutable_size %/% 3L, " codons) | Fixed overhead: ", overhead, " nt"
+    mutable_size %/% 3L, " codons) | Fixed overhead: ", overhead, " nt", handle_msg
   ))
 
   mutable_size
