@@ -1,6 +1,6 @@
 # Created: 2025-02-01
-# Last updated: 2026-02-22 — Replace greedy prefix generation with GF(4) linear code + DNABarcodes lexicode;
-#   vectorize suffix generation; skip validation for algebraically-guaranteed codes
+# Last updated: 2026-03-17 — Add enhanced barcode filters (GGC, hairpin, dinuc, polyG, Tm);
+#   dynamic filter_pass_rate; Tm post-filter in design_barcodes
 # 07_barcode_design.R — Programmed barcodes with unified hierarchical prefix-suffix design
 # DMS Golden Gate Oligo Pipeline
 #
@@ -151,6 +151,16 @@ auto_size_barcode_length <- function(n_variants, prefix_length, barcodes_per_var
 #' @param barcodes_per_variant Number of barcodes per variant (default 10)
 #' @param junction_left_context Left junction context for barcode filtering (default "")
 #' @param junction_right_context Right junction context for barcode filtering (default "")
+#' @param filter_poliii_term Logical; filter PolIII terminator (default TRUE)
+#' @param filter_ggc Logical; filter GGC Illumina error hotspot (default FALSE)
+#' @param filter_hairpin Logical; filter self-complementary hairpins (default TRUE)
+#' @param max_hairpin_stem Max hairpin stem length before rejection (default 3)
+#' @param filter_dinuc_repeats Logical; filter dinucleotide repeats (default TRUE)
+#' @param max_dinuc_repeat_units Max dinuc repeat units before rejection (default 4)
+#' @param filter_polyg Logical; strict poly-G filter (default FALSE)
+#' @param max_polyg Max consecutive G's when filter enabled (default 2)
+#' @param filter_tm_uniformity Logical; post-hoc Tm uniformity filter (default FALSE)
+#' @param tm_tolerance Tm tolerance in degrees C (default 2.0)
 #' @return List with barcodes, barcode_assignments, barcode_length, prefix_length,
 #'   effective_hamming, min_hamming_dist, code_type
 design_barcodes <- function(n_variants,
@@ -162,14 +172,32 @@ design_barcodes <- function(n_variants,
                             barcodes_per_variant = DEFAULT_BARCODES_PER_VARIANT,
                             junction_left_context = "",
                             junction_right_context = "",
-                            filter_poliii_term = TRUE) {
+                            filter_poliii_term = TRUE,
+                            filter_ggc = DEFAULT_FILTER_GGC,
+                            filter_hairpin = DEFAULT_FILTER_HAIRPIN,
+                            max_hairpin_stem = DEFAULT_MAX_HAIRPIN_STEM,
+                            filter_dinuc_repeats = DEFAULT_FILTER_DINUC_REPEATS,
+                            max_dinuc_repeat_units = DEFAULT_MAX_DINUC_REPEAT_UNITS,
+                            filter_polyg = DEFAULT_FILTER_POLYG,
+                            max_polyg = DEFAULT_MAX_POLYG,
+                            filter_tm_uniformity = DEFAULT_FILTER_TM_UNIFORMITY,
+                            tm_tolerance = DEFAULT_TM_TOLERANCE) {
 
   n_total <- n_variants * barcodes_per_variant
+
+  # Dynamic filter pass rate for capacity estimation
+  filter_pass_rate <- estimate_filter_pass_rate(
+    gc_range = gc_range, filter_ggc = filter_ggc,
+    filter_hairpin = filter_hairpin, filter_dinuc_repeats = filter_dinuc_repeats,
+    filter_polyg = filter_polyg, filter_tm_uniformity = filter_tm_uniformity,
+    barcode_length = if (identical(barcode_length, "auto")) 20L else barcode_length
+  )
 
   # 1. Auto-size barcode_length if "auto"
   if (identical(barcode_length, "auto")) {
     barcode_length <- auto_size_barcode_length(
-      n_variants, prefix_length, barcodes_per_variant, min_hamming
+      n_variants, prefix_length, barcodes_per_variant, min_hamming,
+      filter_pass_rate = filter_pass_rate
     )
   }
   suffix_length <- barcode_length - prefix_length
@@ -193,7 +221,9 @@ design_barcodes <- function(n_variants,
 
   # 2. Feasibility check + auto-adjust min_hamming if needed
   effective_hamming <- check_prefix_feasibility(
-    n_variants, prefix_length, min_hamming, min_hamming_floor = DEFAULT_MIN_HAMMING_FLOOR
+    n_variants, prefix_length, min_hamming,
+    min_hamming_floor = DEFAULT_MIN_HAMMING_FLOOR,
+    filter_pass_rate = filter_pass_rate
   )
 
   # 3. Generate n_variants unique prefixes via algebraic code or lexicode
@@ -201,7 +231,14 @@ design_barcodes <- function(n_variants,
   prefix_result <- generate_prefixes(
     prefix_length, effective_hamming, n_variants, max_homopolymer,
     junction_left_context, junction_right_context,
-    filter_poliii_term = filter_poliii_term
+    filter_poliii_term = filter_poliii_term,
+    filter_ggc = filter_ggc,
+    filter_hairpin = filter_hairpin,
+    max_hairpin_stem = max_hairpin_stem,
+    filter_dinuc_repeats = filter_dinuc_repeats,
+    max_dinuc_repeat_units = max_dinuc_repeat_units,
+    filter_polyg = filter_polyg,
+    max_polyg = max_polyg
   )
   prefixes <- prefix_result$prefixes
   code_type <- prefix_result$code_type
@@ -222,8 +259,84 @@ design_barcodes <- function(n_variants,
     prefixes, suffix_length, barcodes_per_variant, gc_range, max_homopolymer,
     junction_left_context = junction_left_context,
     junction_right_context = junction_right_context,
-    filter_poliii_term = filter_poliii_term
+    filter_poliii_term = filter_poliii_term,
+    filter_ggc = filter_ggc,
+    filter_hairpin = filter_hairpin,
+    max_hairpin_stem = max_hairpin_stem,
+    filter_dinuc_repeats = filter_dinuc_repeats,
+    max_dinuc_repeat_units = max_dinuc_repeat_units,
+    filter_polyg = filter_polyg,
+    max_polyg = max_polyg
   )
+
+  # 4b. Tm uniformity post-filter (needs full set to compute median)
+  if (filter_tm_uniformity) {
+    cli::cli_alert("Applying Tm uniformity filter (tolerance=+/-{tm_tolerance} C)...")
+    tm_vals <- nn_tm_vec(barcodes)
+    median_tm <- median(tm_vals)
+    tm_ok <- abs(tm_vals - median_tm) <= tm_tolerance
+
+    # Replace out-of-range barcodes with retry
+    n_bad_tm <- sum(!tm_ok)
+    if (n_bad_tm > 0) {
+      cli::cli_alert_info(paste0(
+        "Tm filter: ", n_bad_tm, " / ", length(barcodes),
+        " barcodes outside +/-", tm_tolerance, " C of median (",
+        round(median_tm, 1), " C). Retrying..."
+      ))
+      # For each variant with rejected barcodes, regenerate
+      variant_ids <- rep(seq_len(n_variants), each = barcodes_per_variant)
+      bases <- c("A", "C", "G", "T")
+      for (v in unique(variant_ids[!tm_ok])) {
+        v_idx <- which(variant_ids == v)
+        v_bad <- v_idx[!tm_ok[v_idx]]
+        if (length(v_bad) == 0L) next
+        prefix <- prefixes[v]
+        # Generate replacement candidates
+        n_candidates <- length(v_bad) * 200L
+        retry_mat <- matrix(sample(bases, suffix_length * n_candidates, replace = TRUE),
+                            nrow = n_candidates, ncol = suffix_length)
+        retry_suffixes <- do.call(paste0, as.data.frame(retry_mat, stringsAsFactors = FALSE))
+        retry_bcs <- paste0(prefix, retry_suffixes)
+        retry_keep <- filter_barcodes_batch(
+          retry_bcs, max_homopolymer, gc_range,
+          junction_left_context, junction_right_context,
+          filter_poliii_term = filter_poliii_term,
+          filter_ggc = filter_ggc,
+          filter_hairpin = filter_hairpin,
+          max_hairpin_stem = max_hairpin_stem,
+          filter_dinuc_repeats = filter_dinuc_repeats,
+          max_dinuc_repeat_units = max_dinuc_repeat_units,
+          filter_polyg = filter_polyg,
+          max_polyg = max_polyg
+        )
+        retry_valid <- unique(retry_bcs[retry_keep])
+        # Filter for Tm
+        if (length(retry_valid) > 0) {
+          retry_tms <- nn_tm_vec(retry_valid)
+          retry_tm_ok <- abs(retry_tms - median_tm) <= tm_tolerance
+          retry_valid <- retry_valid[retry_tm_ok]
+        }
+        if (length(retry_valid) >= length(v_bad)) {
+          barcodes[v_bad] <- retry_valid[seq_len(length(v_bad))]
+        } else {
+          cli::cli_alert_warning(paste0(
+            "Tm filter: could only replace ", length(retry_valid), " / ",
+            length(v_bad), " barcodes for variant ", v,
+            ". Keeping original barcodes for remaining."
+          ))
+          if (length(retry_valid) > 0) {
+            barcodes[v_bad[seq_len(length(retry_valid))]] <- retry_valid
+          }
+        }
+      }
+    }
+    tm_final <- nn_tm_vec(barcodes)
+    cli::cli_alert_success(paste0(
+      "Tm distribution: median=", round(median(tm_final), 1),
+      " C, range=[", round(min(tm_final), 1), ", ", round(max(tm_final), 1), "] C"
+    ))
+  }
 
   # 5. Validate prefix distances — skip for algebraically-guaranteed codes
   if (code_type %in% c("linear", "lexicode")) {
@@ -298,7 +411,14 @@ generate_prefixes <- function(k, min_hamming, n_needed,
                                max_homopolymer = DEFAULT_MAX_HOMOPOLYMER,
                                junction_left_context = "",
                                junction_right_context = "",
-                               filter_poliii_term = TRUE) {
+                               filter_poliii_term = TRUE,
+                               filter_ggc = DEFAULT_FILTER_GGC,
+                               filter_hairpin = DEFAULT_FILTER_HAIRPIN,
+                               max_hairpin_stem = DEFAULT_MAX_HAIRPIN_STEM,
+                               filter_dinuc_repeats = DEFAULT_FILTER_DINUC_REPEATS,
+                               max_dinuc_repeat_units = DEFAULT_MAX_DINUC_REPEAT_UNITS,
+                               filter_polyg = DEFAULT_FILTER_POLYG,
+                               max_polyg = DEFAULT_MAX_POLYG) {
   code_type <- NULL
   prefixes <- NULL
 
@@ -316,9 +436,16 @@ generate_prefixes <- function(k, min_hamming, n_needed,
       code_type <- "linear"
 
       # Stage 1 prefix filtering: enzyme sites, homopolymers, PolIII terminator,
-      # and junction context
-      prefixes <- filter_prefixes(prefixes, max_homopolymer, filter_poliii_term,
-                                   junction_left_context, junction_right_context)
+      # enhanced filters, and junction context
+      prefixes <- filter_prefixes(
+        prefixes, max_homopolymer, filter_poliii_term,
+        junction_left_context, junction_right_context,
+        filter_ggc = filter_ggc, filter_hairpin = filter_hairpin,
+        max_hairpin_stem = max_hairpin_stem,
+        filter_dinuc_repeats = filter_dinuc_repeats,
+        max_dinuc_repeat_units = max_dinuc_repeat_units,
+        filter_polyg = filter_polyg, max_polyg = max_polyg
+      )
 
       if (length(prefixes) >= n_needed) {
         cli::cli_alert_success(paste0(
@@ -349,8 +476,15 @@ generate_prefixes <- function(k, min_hamming, n_needed,
       code_type <- "lexicode"
 
       # Stage 1 prefix filtering
-      prefixes <- filter_prefixes(prefixes, max_homopolymer, filter_poliii_term,
-                                   junction_left_context, junction_right_context)
+      prefixes <- filter_prefixes(
+        prefixes, max_homopolymer, filter_poliii_term,
+        junction_left_context, junction_right_context,
+        filter_ggc = filter_ggc, filter_hairpin = filter_hairpin,
+        max_hairpin_stem = max_hairpin_stem,
+        filter_dinuc_repeats = filter_dinuc_repeats,
+        max_dinuc_repeat_units = max_dinuc_repeat_units,
+        filter_polyg = filter_polyg, max_polyg = max_polyg
+      )
 
       if (length(prefixes) >= n_needed) {
         cli::cli_alert_success(paste0(
@@ -442,7 +576,14 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
                                           oversample_factor = 20L,
                                           junction_left_context = "",
                                           junction_right_context = "",
-                                          filter_poliii_term = TRUE) {
+                                          filter_poliii_term = TRUE,
+                                          filter_ggc = DEFAULT_FILTER_GGC,
+                                          filter_hairpin = DEFAULT_FILTER_HAIRPIN,
+                                          max_hairpin_stem = DEFAULT_MAX_HAIRPIN_STEM,
+                                          filter_dinuc_repeats = DEFAULT_FILTER_DINUC_REPEATS,
+                                          max_dinuc_repeat_units = DEFAULT_MAX_DINUC_REPEAT_UNITS,
+                                          filter_polyg = DEFAULT_FILTER_POLYG,
+                                          max_polyg = DEFAULT_MAX_POLYG) {
   n_variants <- length(prefixes)
   n_total <- n_variants * barcodes_per_variant
 
@@ -478,7 +619,12 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
   keep <- filter_barcodes_batch(
     all_barcodes, max_homopolymer, gc_range,
     junction_left_context, junction_right_context,
-    filter_poliii_term = filter_poliii_term
+    filter_poliii_term = filter_poliii_term,
+    filter_ggc = filter_ggc, filter_hairpin = filter_hairpin,
+    max_hairpin_stem = max_hairpin_stem,
+    filter_dinuc_repeats = filter_dinuc_repeats,
+    max_dinuc_repeat_units = max_dinuc_repeat_units,
+    filter_polyg = filter_polyg, max_polyg = max_polyg
   )
   valid_barcodes <- all_barcodes[keep]
   valid_variant_ids <- variant_ids[keep]
@@ -520,7 +666,12 @@ generate_barcodes_per_prefix <- function(prefixes, suffix_length,
       retry_keep <- filter_barcodes_batch(
         retry_bcs, max_homopolymer, gc_range,
         junction_left_context, junction_right_context,
-        filter_poliii_term = filter_poliii_term
+        filter_poliii_term = filter_poliii_term,
+        filter_ggc = filter_ggc, filter_hairpin = filter_hairpin,
+        max_hairpin_stem = max_hairpin_stem,
+        filter_dinuc_repeats = filter_dinuc_repeats,
+        max_dinuc_repeat_units = max_dinuc_repeat_units,
+        filter_polyg = filter_polyg, max_polyg = max_polyg
       )
       retry_valid <- unique(retry_bcs[retry_keep])
 
@@ -565,6 +716,212 @@ has_enzyme_sites_vec <- function(seqs) {
   bad
 }
 
+# ============================================================================
+# Enhanced barcode filter helpers
+# ============================================================================
+
+#' Check for GGC motif (Illumina error hotspot)
+#'
+#' GGC trinucleotides are associated with 16% of substitution errors on
+#' Illumina platforms (Schirmer et al. 2016, BMC Bioinformatics).
+#'
+#' @param seqs Character vector of DNA sequences
+#' @return Logical vector (TRUE = sequence contains GGC)
+has_ggc_motif_vec <- function(seqs) {
+  grepl("GGC", seqs, fixed = TRUE)
+}
+
+#' Check for self-complementary hairpin stems
+#'
+#' Detects sequences containing a k-mer whose reverse complement appears
+#' elsewhere in the same sequence (separated by >= 1 nt loop). Hairpin
+#' stems reduce PCR efficiency 40-90% and impair padlock probe hybridization.
+#'
+#' @param seqs Character vector of DNA sequences
+#' @param max_stem Maximum allowed stem length (bp). Sequences with stems
+#'   longer than this are flagged. Default: 3 (rejects stems >= 4 bp).
+#' @return Logical vector (TRUE = sequence has a hairpin stem > max_stem)
+has_hairpin_vec <- function(seqs, max_stem = DEFAULT_MAX_HAIRPIN_STEM) {
+  n_seqs <- length(seqs)
+  if (n_seqs == 0L) return(logical(0))
+
+  stem_len <- max_stem + 1L  # reject stems LONGER than max_stem
+  min_loop <- 1L             # minimum loop size for a physical hairpin
+  comp <- c(A = "T", C = "G", G = "C", T = "A")
+
+  vapply(seqs, function(s) {
+    n <- nchar(s)
+    # Need room for stem + loop + stem
+    if (n < stem_len * 2L + min_loop) return(FALSE)
+    chars <- strsplit(s, "")[[1]]
+    # For each possible first-stem position, check if RC appears downstream
+    for (i in seq_len(n - stem_len * 2L - min_loop + 1L)) {
+      rc_str <- paste0(rev(comp[chars[i:(i + stem_len - 1L)]]), collapse = "")
+      # Search region starts after stem + loop gap
+      search_start <- i + stem_len + min_loop
+      remaining <- substring(s, search_start, n)
+      if (nchar(remaining) >= stem_len && grepl(rc_str, remaining, fixed = TRUE)) {
+        return(TRUE)
+      }
+    }
+    FALSE
+  }, logical(1), USE.NAMES = FALSE)
+}
+
+#' Check for excessive dinucleotide repeats
+#'
+#' Repeated dinucleotide motifs (e.g., ACACAC) cause indel errors during
+#' sequencing via polymerase slippage. Only checks non-homopolymer
+#' dinucleotides (AA, CC, GG, TT are caught by the homopolymer filter).
+#'
+#' @param seqs Character vector of DNA sequences
+#' @param max_units Maximum allowed repeat units before rejection.
+#'   Default: 4 (so ACACACAC = 4 units is OK, ACACACACAC = 5 units is rejected).
+#' @return Logical vector (TRUE = sequence has excessive dinuc repeats)
+has_dinuc_repeat_vec <- function(seqs, max_units = DEFAULT_MAX_DINUC_REPEAT_UNITS) {
+  bases <- c("A", "C", "G", "T")
+  bad <- rep(FALSE, length(seqs))
+  threshold <- max_units + 1L
+  for (b1 in bases) {
+    for (b2 in bases) {
+      if (b1 == b2) next  # homopolymers handled by separate filter
+      pattern <- paste0("(", b1, b2, "){", threshold, ",}")
+      bad <- bad | grepl(pattern, seqs)
+    }
+  }
+  bad
+}
+
+#' Check for poly-G runs (strict)
+#'
+#' Poly-G has the highest error rate among homopolymers on Illumina two-channel
+#' chemistry and causes T7 polymerase slippage. This filter applies a stricter
+#' threshold specifically for G runs, independent of the general homopolymer filter.
+#'
+#' @param seqs Character vector of DNA sequences
+#' @param max_g Maximum allowed consecutive G's. Default: 2 (rejects GGG+).
+#' @return Logical vector (TRUE = sequence has too many consecutive G's)
+has_polyg_vec <- function(seqs, max_g = DEFAULT_MAX_POLYG) {
+  pattern <- paste0("G{", max_g + 1L, ",}")
+  grepl(pattern, seqs)
+}
+
+#' Compute nearest-neighbor melting temperature for a DNA oligo
+#'
+#' Uses the SantaLucia (1998) unified nearest-neighbor thermodynamic parameters
+#' (Proc Natl Acad Sci USA 95:1460-1465). Assumes non-self-complementary duplex.
+#'
+#' @param seq DNA sequence string (5' -> 3')
+#' @param Na Sodium ion concentration in M (default 0.05 = 50 mM)
+#' @param oligo_conc Total oligo strand concentration in M (default 250 nM)
+#' @return Melting temperature in degrees Celsius
+nn_tm <- function(seq, Na = 0.05, oligo_conc = 250e-9) {
+  # SantaLucia 1998 unified nearest-neighbor parameters
+  # All 16 dinucleotides indexed by top-strand 5'->3' reading
+  # dH in cal/mol, dS in cal/(mol*K)
+  nn_dH <- c(
+    AA = -7900, AC = -8400, AG = -7800, AT = -7200,
+    CA = -8500, CC = -8000, CG = -10600, CT = -7800,
+    GA = -8200, GC = -9800, GG = -8000, GT = -8400,
+    TA = -7200, TC = -8200, TG = -8500, TT = -7900
+  )
+  nn_dS <- c(
+    AA = -22.2, AC = -22.4, AG = -21.0, AT = -20.4,
+    CA = -22.7, CC = -19.9, CG = -27.2, CT = -21.0,
+    GA = -22.2, GC = -24.4, GG = -19.9, GT = -22.4,
+    TA = -21.3, TC = -22.2, TG = -22.7, TT = -22.2
+  )
+
+  chars <- strsplit(toupper(seq), "")[[1]]
+  n <- length(chars)
+  if (n < 2L) return(NA_real_)
+
+  # Sum nearest-neighbor parameters
+  total_dH <- 0
+  total_dS <- 0
+  for (i in seq_len(n - 1L)) {
+    dinuc <- paste0(chars[i], chars[i + 1L])
+    total_dH <- total_dH + nn_dH[dinuc]
+    total_dS <- total_dS + nn_dS[dinuc]
+  }
+
+  # Initiation parameters depend on terminal base pairs (SantaLucia 1998)
+  # Terminal G/C: dH = +100 cal/mol, dS = -2.8 cal/(mol*K)
+  # Terminal A/T: dH = +2300 cal/mol, dS = +4.1 cal/(mol*K)
+  for (terminal in c(chars[1], chars[n])) {
+    if (terminal %in% c("G", "C")) {
+      total_dH <- total_dH + 100
+      total_dS <- total_dS - 2.8
+    } else {
+      total_dH <- total_dH + 2300
+      total_dS <- total_dS + 4.1
+    }
+  }
+
+  # Salt correction: dS_corrected = dS + 0.368 * (n-1) * ln([Na+])
+  total_dS <- total_dS + 0.368 * (n - 1L) * log(Na)
+
+  # Tm = dH / (dS + R * ln(Ct/4)) - 273.15
+  R <- 1.987  # gas constant in cal/(mol*K)
+  Tm <- total_dH / (total_dS + R * log(oligo_conc / 4)) - 273.15
+  Tm
+}
+
+#' Vectorized nearest-neighbor Tm computation
+#'
+#' @param seqs Character vector of DNA sequences
+#' @param Na Sodium ion concentration in M (default 0.05)
+#' @param oligo_conc Total strand concentration in M (default 250 nM)
+#' @return Numeric vector of Tm values in degrees Celsius
+nn_tm_vec <- function(seqs, Na = 0.05, oligo_conc = 250e-9) {
+  vapply(seqs, nn_tm, numeric(1), Na = Na, oligo_conc = oligo_conc,
+         USE.NAMES = FALSE)
+}
+
+#' Estimate barcode filter pass rate based on enabled filters
+#'
+#' Provides a dynamic estimate of what fraction of random barcode candidates
+#' will pass all enabled filters. Used for capacity planning (prefix feasibility,
+#' auto-sizing, oversampling). Replaces the hardcoded 0.50 pass rate.
+#'
+#' Model: base rate from enzyme + homopolymer + PolIII filters, adjusted by
+#' GC range (normal approximation for binomial GC distribution), then
+#' multiplicative penalties for each additional filter based on estimated
+#' rejection rates from literature.
+#'
+#' @param gc_range GC content range c(min, max)
+#' @param filter_ggc Logical; GGC motif filter enabled
+#' @param filter_hairpin Logical; hairpin filter enabled
+#' @param filter_dinuc_repeats Logical; dinucleotide repeat filter enabled
+#' @param filter_polyg Logical; strict poly-G filter enabled
+#' @param filter_tm_uniformity Logical; Tm uniformity filter enabled
+#' @param barcode_length Barcode length for GC distribution estimate (default 20)
+#' @return Numeric estimated pass rate (floored at 0.01)
+estimate_filter_pass_rate <- function(gc_range = DEFAULT_GC_RANGE,
+                                      filter_ggc = DEFAULT_FILTER_GGC,
+                                      filter_hairpin = DEFAULT_FILTER_HAIRPIN,
+                                      filter_dinuc_repeats = DEFAULT_FILTER_DINUC_REPEATS,
+                                      filter_polyg = DEFAULT_FILTER_POLYG,
+                                      filter_tm_uniformity = DEFAULT_FILTER_TM_UNIFORMITY,
+                                      barcode_length = 20L) {
+  # Base rate: enzyme sites + homopolymers + PolIII on random sequences
+  base_rate <- 0.55
+
+  # GC pass fraction: normal approximation to binomial GC distribution
+  gc_sd <- sqrt(0.25 / barcode_length)
+  gc_pass <- pnorm(gc_range[2], 0.5, gc_sd) - pnorm(gc_range[1], 0.5, gc_sd)
+  rate <- base_rate * gc_pass
+
+  # Multiplicative penalties (estimated rejection rates from literature)
+  if (filter_ggc)            rate <- rate * 0.75   # ~25% rejection
+  if (filter_hairpin)        rate <- rate * 0.875  # ~12.5% rejection
+  if (filter_dinuc_repeats)  rate <- rate * 0.98   # ~2% rejection
+  if (filter_polyg)          rate <- rate * 0.94   # ~6% rejection
+  if (filter_tm_uniformity)  rate <- rate * 0.85   # ~15% rejection
+
+  max(rate, 0.01)
+}
+
 #' Apply all biological filters to prefix candidates
 #'
 #' Runs enzyme site, homopolymer, PolIII terminator, and junction context
@@ -577,9 +934,22 @@ has_enzyme_sites_vec <- function(seqs) {
 #' @param junction_right_context Right context for junction check
 #' @return Filtered character vector of prefixes
 filter_prefixes <- function(prefixes, max_homopolymer, filter_poliii_term,
-                             junction_left_context, junction_right_context) {
-  prefixes <- filter_sequences_fast(prefixes, max_homopolymer,
-                                    filter_poliii_term = filter_poliii_term)
+                             junction_left_context, junction_right_context,
+                             filter_ggc = DEFAULT_FILTER_GGC,
+                             filter_hairpin = DEFAULT_FILTER_HAIRPIN,
+                             max_hairpin_stem = DEFAULT_MAX_HAIRPIN_STEM,
+                             filter_dinuc_repeats = DEFAULT_FILTER_DINUC_REPEATS,
+                             max_dinuc_repeat_units = DEFAULT_MAX_DINUC_REPEAT_UNITS,
+                             filter_polyg = DEFAULT_FILTER_POLYG,
+                             max_polyg = DEFAULT_MAX_POLYG) {
+  prefixes <- filter_sequences_fast(
+    prefixes, max_homopolymer, filter_poliii_term = filter_poliii_term,
+    filter_ggc = filter_ggc, filter_hairpin = filter_hairpin,
+    max_hairpin_stem = max_hairpin_stem,
+    filter_dinuc_repeats = filter_dinuc_repeats,
+    max_dinuc_repeat_units = max_dinuc_repeat_units,
+    filter_polyg = filter_polyg, max_polyg = max_polyg
+  )
   if (nchar(junction_left_context) > 0 || nchar(junction_right_context) > 0) {
     n_before <- length(prefixes)
     prefixes <- filter_barcode_junctions(
@@ -609,7 +979,14 @@ filter_prefixes <- function(prefixes, max_homopolymer, filter_poliii_term,
 filter_barcodes_batch <- function(barcodes, max_homopolymer, gc_range,
                                    junction_left_context = "",
                                    junction_right_context = "",
-                                   filter_poliii_term = TRUE) {
+                                   filter_poliii_term = TRUE,
+                                   filter_ggc = DEFAULT_FILTER_GGC,
+                                   filter_hairpin = DEFAULT_FILTER_HAIRPIN,
+                                   max_hairpin_stem = DEFAULT_MAX_HAIRPIN_STEM,
+                                   filter_dinuc_repeats = DEFAULT_FILTER_DINUC_REPEATS,
+                                   max_dinuc_repeat_units = DEFAULT_MAX_DINUC_REPEAT_UNITS,
+                                   filter_polyg = DEFAULT_FILTER_POLYG,
+                                   max_polyg = DEFAULT_MAX_POLYG) {
   n <- length(barcodes)
   if (n == 0L) return(logical(0))
 
@@ -636,6 +1013,12 @@ filter_barcodes_batch <- function(barcodes, max_homopolymer, gc_range,
     bad <- bad | has_enzyme_sites_vec(junction_seqs)
   }
 
+  # --- Enhanced filters ---
+  if (filter_ggc)           bad <- bad | has_ggc_motif_vec(barcodes)
+  if (filter_hairpin)       bad <- bad | has_hairpin_vec(barcodes, max_hairpin_stem)
+  if (filter_dinuc_repeats) bad <- bad | has_dinuc_repeat_vec(barcodes, max_dinuc_repeat_units)
+  if (filter_polyg)         bad <- bad | has_polyg_vec(barcodes, max_polyg)
+
   !bad
 }
 
@@ -649,7 +1032,14 @@ filter_barcodes_batch <- function(barcodes, max_homopolymer, gc_range,
 #' @param max_homopolymer Maximum allowed homopolymer run
 #' @return Filtered character vector
 filter_sequences_fast <- function(seqs, max_homopolymer = 4L,
-                                   filter_poliii_term = TRUE) {
+                                   filter_poliii_term = TRUE,
+                                   filter_ggc = DEFAULT_FILTER_GGC,
+                                   filter_hairpin = DEFAULT_FILTER_HAIRPIN,
+                                   max_hairpin_stem = DEFAULT_MAX_HAIRPIN_STEM,
+                                   filter_dinuc_repeats = DEFAULT_FILTER_DINUC_REPEATS,
+                                   max_dinuc_repeat_units = DEFAULT_MAX_DINUC_REPEAT_UNITS,
+                                   filter_polyg = DEFAULT_FILTER_POLYG,
+                                   max_polyg = DEFAULT_MAX_POLYG) {
   bad <- has_enzyme_sites_vec(seqs)
   homo_pattern <- paste0("([ACGT])\\1{", max_homopolymer, ",}")
   bad <- bad | grepl(homo_pattern, seqs)
@@ -657,6 +1047,11 @@ filter_sequences_fast <- function(seqs, max_homopolymer = 4L,
   if (filter_poliii_term) {
     bad <- bad | grepl(POLIII_TERM_SEQ, seqs, fixed = TRUE)
   }
+  # Enhanced filters
+  if (filter_ggc)           bad <- bad | has_ggc_motif_vec(seqs)
+  if (filter_hairpin)       bad <- bad | has_hairpin_vec(seqs, max_hairpin_stem)
+  if (filter_dinuc_repeats) bad <- bad | has_dinuc_repeat_vec(seqs, max_dinuc_repeat_units)
+  if (filter_polyg)         bad <- bad | has_polyg_vec(seqs, max_polyg)
   seqs[!bad]
 }
 

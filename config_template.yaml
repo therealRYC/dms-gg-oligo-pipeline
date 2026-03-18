@@ -105,11 +105,50 @@ barcode_prefix_length: 12                  # Prefix length — the Hamming-const
                                            # Must be >= min_hamming_distance and < barcode_length
                                            # (unless barcodes_per_variant == 1).
 
-barcode_gc_range: [0.25, 0.75]             # Acceptable GC content range for barcodes.
+barcode_gc_range: [0.35, 0.65]             # Acceptable GC content range for barcodes.
+                                           # Tightened from [0.25, 0.75] — captures most Tm
+                                           # benefit with ~15% additional rejection.
 barcode_max_homopolymer: 4                 # Max homopolymer run in barcodes.
 barcodes_per_variant: 10                   # Number of unique barcodes per variant. Default 10.
                                            # Increase for higher-confidence fitness estimates, or
                                            # set to 1 for single-barcode-per-variant designs.
+
+# --- Enhanced Barcode Filters ---
+# Literature-motivated filters that are only possible with programmed barcodes.
+# Each filter has a boolean toggle and a threshold parameter.
+# Conservative defaults: low-rejection filters ON, high-rejection OFF.
+# Estimated yield with defaults: ~38% pass rate (~100K usable prefixes at k=12).
+
+barcode_filter_ggc: false                  # Reject barcodes containing GGC trinucleotide.
+                                           # Illumina error hotspot: 16% of substitution errors
+                                           # linked to GG motifs (Schirmer et al. 2016).
+                                           # ~25% rejection. Enable for Illumina-heavy workflows.
+
+barcode_filter_hairpin: true               # Reject barcodes with self-complementary hairpin stems.
+                                           # Hairpins reduce PCR efficiency 40-90% and impair
+                                           # padlock probe hybridization. ~10-15% rejection.
+barcode_max_hairpin_stem: 3                # Max hairpin stem length (bp) before rejection.
+                                           # Stems > 3 bp rejected (i.e., 4+ bp stems filtered).
+
+barcode_filter_dinuc_repeats: true         # Reject barcodes with excessive dinucleotide repeats
+                                           # (e.g., ACACAC). Cause indel errors via polymerase
+                                           # slippage during sequencing. ~2% rejection.
+barcode_max_dinuc_repeat_units: 4          # Max repeat units allowed. 4 = ACACACAC OK,
+                                           # 5 = ACACACACAC rejected.
+
+barcode_filter_polyg: false                # Strict poly-G filter. G homopolymers have the highest
+                                           # error rate on Illumina two-channel chemistry and cause
+                                           # T7 polymerase slippage. ~6% rejection.
+                                           # Note: general homopolymer filter already catches runs > 4.
+barcode_max_polyg: 2                       # Max consecutive G's when filter is enabled.
+                                           # 2 = GGG rejected, GG OK.
+
+barcode_filter_tm_uniformity: false        # Post-hoc filter: keep barcodes within +/- tm_tolerance
+                                           # of the set median Tm. Ensures consistent padlock probe
+                                           # ligation efficiency. ~10-20% rejection. Applied after
+                                           # all other filters (needs full set to compute median).
+barcode_tm_tolerance: 2.0                  # Tm tolerance in degrees C. Barcodes outside
+                                           # median +/- this value are replaced.
 
 # --- Tile Boundary Optimization ---
 boundary_method: "oogga_two_pass"             # OOGGA two-pass: collision-aware SB + tile DP (only supported method).

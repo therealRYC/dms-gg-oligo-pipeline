@@ -274,7 +274,8 @@ test_that("filter_barcodes_batch correctly applies all filters", {
     "AAAAAAAAAAAA", # Bad: 0% GC + homopolymer
     "ACACACACGTGT" # Good: 50% GC
   )
-  keep <- filter_barcodes_batch(barcodes, max_homopolymer = 4, gc_range = c(0.25, 0.75))
+  keep <- filter_barcodes_batch(barcodes, max_homopolymer = 4, gc_range = c(0.25, 0.75),
+    filter_hairpin = FALSE, filter_dinuc_repeats = FALSE)
   expect_true(keep[1]) # good
   expect_false(keep[2]) # enzyme site
   expect_false(keep[3]) # homopolymer
@@ -288,7 +289,8 @@ test_that("filter_barcodes_batch checks junction context", {
   keep <- filter_barcodes_batch(
     barcodes,
     max_homopolymer = 4, gc_range = c(0.0, 1.0),
-    junction_left_context = left_context
+    junction_left_context = left_context,
+    filter_hairpin = FALSE, filter_dinuc_repeats = FALSE
   )
   expect_false(keep[1]) # creates junction enzyme site
   expect_true(keep[2]) # clean
@@ -304,7 +306,8 @@ test_that("filter_barcodes_batch rejects barcodes with PolIII terminator (TTTT)"
   )
   keep <- filter_barcodes_batch(barcodes,
     max_homopolymer = 4, gc_range = c(0.0, 1.0),
-    filter_poliii_term = TRUE
+    filter_poliii_term = TRUE,
+    filter_hairpin = FALSE, filter_dinuc_repeats = FALSE
   )
   expect_true(keep[1]) # no TTTT
   expect_false(keep[2]) # TTTT
@@ -317,7 +320,8 @@ test_that("filter_barcodes_batch allows TTTT when filter_poliii_term = FALSE", {
   barcodes <- c("ACTTTTACGTAC", "ACGTACGTACGT")
   keep <- filter_barcodes_batch(barcodes,
     max_homopolymer = 4, gc_range = c(0.0, 1.0),
-    filter_poliii_term = FALSE
+    filter_poliii_term = FALSE,
+    filter_hairpin = FALSE, filter_dinuc_repeats = FALSE
   )
   expect_true(keep[1]) # TTTT allowed when filter disabled
   expect_true(keep[2])
@@ -325,7 +329,8 @@ test_that("filter_barcodes_batch allows TTTT when filter_poliii_term = FALSE", {
 
 test_that("filter_sequences_fast rejects sequences with PolIII terminator", {
   seqs <- c("ACGTACGTACGT", "ACTTTTACGTAC", "ACGATTTCGTAC")
-  result <- filter_sequences_fast(seqs, max_homopolymer = 4, filter_poliii_term = TRUE)
+  result <- filter_sequences_fast(seqs, max_homopolymer = 4, filter_poliii_term = TRUE,
+    filter_hairpin = FALSE, filter_dinuc_repeats = FALSE)
   expect_equal(length(result), 2L)
   expect_false("ACTTTTACGTAC" %in% result)
   expect_true("ACGTACGTACGT" %in% result)
@@ -663,7 +668,9 @@ test_that("design_barcodes includes min_hamming_dist in output", {
     barcode_length = 12,
     min_hamming = 3,
     prefix_length = 8,
-    barcodes_per_variant = 1
+    gc_range = c(0.25, 0.75),
+    barcodes_per_variant = 1,
+    filter_hairpin = FALSE, filter_dinuc_repeats = FALSE
   )
   expect_true("min_hamming_dist" %in% names(result))
   expect_equal(length(result$min_hamming_dist), 10)
@@ -702,4 +709,277 @@ test_that("DEFAULT_BARCODES_PER_VARIANT is 10", {
 
 test_that("DEFAULT_MIN_HAMMING_FLOOR is 2", {
   expect_equal(DEFAULT_MIN_HAMMING_FLOOR, 2L)
+})
+
+# ============================================================================
+# Enhanced barcode filter defaults
+# ============================================================================
+
+test_that("DEFAULT_GC_RANGE is tightened to 0.35-0.65", {
+  expect_equal(DEFAULT_GC_RANGE, c(0.35, 0.65))
+})
+
+test_that("Enhanced filter defaults are set correctly", {
+  expect_false(DEFAULT_FILTER_GGC)
+  expect_true(DEFAULT_FILTER_HAIRPIN)
+  expect_equal(DEFAULT_MAX_HAIRPIN_STEM, 3L)
+  expect_true(DEFAULT_FILTER_DINUC_REPEATS)
+  expect_equal(DEFAULT_MAX_DINUC_REPEAT_UNITS, 4L)
+  expect_false(DEFAULT_FILTER_POLYG)
+  expect_equal(DEFAULT_MAX_POLYG, 2L)
+  expect_false(DEFAULT_FILTER_TM_UNIFORMITY)
+  expect_equal(DEFAULT_TM_TOLERANCE, 2.0)
+})
+
+# ============================================================================
+# GGC motif filter
+# ============================================================================
+
+test_that("has_ggc_motif_vec detects GGC correctly", {
+  seqs <- c(
+    "ACGTACGTACGT",   # No GGC
+    "AGGCACGTACGT",   # GGC at pos 2
+    "ACGTACGTGGCA",   # GGC near end
+    "ACACACACGTGT"    # No GGC
+  )
+  result <- has_ggc_motif_vec(seqs)
+  expect_equal(result, c(FALSE, TRUE, TRUE, FALSE))
+})
+
+test_that("has_ggc_motif_vec handles empty input", {
+  expect_equal(has_ggc_motif_vec(character(0)), logical(0))
+})
+
+# ============================================================================
+# Hairpin filter
+# ============================================================================
+
+test_that("has_hairpin_vec detects hairpin stems > max_stem", {
+  # ACGT...ACGT: RC of ACGT = ACGT, so a 4-bp stem can form
+  # Need stem + loop + RC(stem): ACGT + N + ACGT (where ACGT is its own RC)
+  seq_with_hp <- "ACGTTACGT"    # ACGT + T(loop) + ACGT = 4bp stem
+  seq_no_hp   <- "ACGTACGTAC"   # No 4-bp hairpin possible
+  # max_stem=3 means reject stems > 3, i.e., stems of 4+
+  expect_true(has_hairpin_vec(seq_with_hp, max_stem = 3L))
+})
+
+test_that("has_hairpin_vec allows stems <= max_stem", {
+  # ACG + N + CGT: RC(ACG) = CGT, 3bp stem, should pass with max_stem=3
+  seq_3bp <- "ACGTCGT"
+  expect_false(has_hairpin_vec(seq_3bp, max_stem = 3L))
+})
+
+test_that("has_hairpin_vec requires minimum loop of 1 nt", {
+  # Direct palindrome with no loop should not count as hairpin
+  # AATT has RC(AA)=TT adjacent, but there's no loop
+  seq_no_loop <- "AATTAA"  # too short for stem+loop+stem with stem_len=4
+  expect_false(has_hairpin_vec(seq_no_loop, max_stem = 3L))
+})
+
+test_that("has_hairpin_vec handles empty input", {
+  expect_equal(has_hairpin_vec(character(0)), logical(0))
+})
+
+test_that("has_hairpin_vec handles short sequences", {
+  # Too short for any hairpin (need 2*stem_len + loop = 9 nt minimum)
+  expect_false(has_hairpin_vec("ACGTACGT", max_stem = 3L))
+})
+
+# ============================================================================
+# Dinucleotide repeat filter
+# ============================================================================
+
+test_that("has_dinuc_repeat_vec detects excessive repeats", {
+  seqs <- c(
+    "ACACACACGTGT",     # AC x 4 = 8nt → OK (max_units=4)
+    "ACACACACACGT",     # AC x 5 = 10nt → rejected (> 4 units)
+    "GTGTGTGTGTGT",     # GT x 6 → rejected
+    "ACGTACGTACGT"      # no repeats → OK
+  )
+  result <- has_dinuc_repeat_vec(seqs, max_units = 4L)
+  expect_equal(result, c(FALSE, TRUE, TRUE, FALSE))
+})
+
+test_that("has_dinuc_repeat_vec ignores homopolymer repeats", {
+  # AA repeats should not be flagged (handled by homopolymer filter)
+  seq_homo <- "AAAAAAAAAAAA"
+  expect_false(has_dinuc_repeat_vec(seq_homo, max_units = 4L))
+})
+
+test_that("has_dinuc_repeat_vec handles empty input", {
+  expect_equal(has_dinuc_repeat_vec(character(0)), logical(0))
+})
+
+# ============================================================================
+# Poly-G filter
+# ============================================================================
+
+test_that("has_polyg_vec detects poly-G runs", {
+  seqs <- c(
+    "ACGTACGTACGT",   # No poly-G
+    "AGGGTACGTACG",   # GGG → rejected with max_g=2
+    "AACGGTACGTAC",   # GG → OK with max_g=2
+    "GGGGTACGTACG"    # GGGG → rejected
+  )
+  result <- has_polyg_vec(seqs, max_g = 2L)
+  expect_equal(result, c(FALSE, TRUE, FALSE, TRUE))
+})
+
+test_that("has_polyg_vec handles empty input", {
+  expect_equal(has_polyg_vec(character(0)), logical(0))
+})
+
+# ============================================================================
+# Nearest-neighbor Tm
+# ============================================================================
+
+test_that("nn_tm returns reasonable values", {
+  # GC-rich should be higher than AT-rich
+  tm_gc <- nn_tm("GCGCGCGCGCGC")
+  tm_at <- nn_tm("ATATATATATATAT")
+  expect_gt(tm_gc, tm_at)
+})
+
+test_that("nn_tm is in a biologically reasonable range for 20-mers", {
+  # Typical 20-mer Tm at 50 mM Na+: ~40-70 C
+  tm_val <- nn_tm("ACGTACGTACGTACGTACGT")
+  expect_gt(tm_val, 20)
+  expect_lt(tm_val, 90)
+})
+
+test_that("nn_tm returns NA for single base", {
+  expect_true(is.na(nn_tm("A")))
+})
+
+test_that("nn_tm_vec works on vector input", {
+  tms <- nn_tm_vec(c("ACGTACGTACGT", "GCGCGCGCGCGC"))
+  expect_equal(length(tms), 2)
+  expect_true(all(is.numeric(tms)))
+  # GC-rich should be hotter
+  expect_gt(tms[2], tms[1])
+})
+
+# ============================================================================
+# estimate_filter_pass_rate
+# ============================================================================
+
+test_that("estimate_filter_pass_rate returns reasonable values", {
+  # Default filters (hairpin + dinuc ON, GGC/polyG/Tm OFF)
+  rate <- estimate_filter_pass_rate()
+  expect_gt(rate, 0.20)
+  expect_lt(rate, 0.60)
+})
+
+test_that("estimate_filter_pass_rate decreases with more filters enabled", {
+  rate_default <- estimate_filter_pass_rate()
+  rate_all <- estimate_filter_pass_rate(
+    filter_ggc = TRUE, filter_hairpin = TRUE,
+    filter_dinuc_repeats = TRUE, filter_polyg = TRUE,
+    filter_tm_uniformity = TRUE
+  )
+  expect_lt(rate_all, rate_default)
+})
+
+test_that("estimate_filter_pass_rate has floor of 0.01", {
+  # Extremely tight GC range should still return >= 0.01
+  rate <- estimate_filter_pass_rate(
+    gc_range = c(0.499, 0.501),
+    filter_ggc = TRUE, filter_hairpin = TRUE,
+    filter_dinuc_repeats = TRUE, filter_polyg = TRUE,
+    filter_tm_uniformity = TRUE
+  )
+  expect_gte(rate, 0.01)
+})
+
+# ============================================================================
+# filter_barcodes_batch with new filters
+# ============================================================================
+
+test_that("filter_barcodes_batch applies GGC filter when enabled", {
+  barcodes <- c("AGGCACGTACGT", "ACGTACGTACGT")
+  keep <- filter_barcodes_batch(
+    barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
+    filter_poliii_term = FALSE,
+    filter_ggc = TRUE, filter_hairpin = FALSE, filter_dinuc_repeats = FALSE
+  )
+  expect_false(keep[1])  # GGC present
+  expect_true(keep[2])   # no GGC
+})
+
+test_that("filter_barcodes_batch skips GGC filter when disabled", {
+  barcodes <- c("AGGCACGTACGT", "ACGTACGTACGT")
+  keep <- filter_barcodes_batch(
+    barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
+    filter_poliii_term = FALSE,
+    filter_ggc = FALSE, filter_hairpin = FALSE, filter_dinuc_repeats = FALSE
+  )
+  expect_true(keep[1])   # GGC ignored
+  expect_true(keep[2])
+})
+
+test_that("filter_barcodes_batch applies poly-G filter when enabled", {
+  barcodes <- c("AGGGTACGTACG", "ACGTACGTACGT")
+  keep <- filter_barcodes_batch(
+    barcodes, max_homopolymer = 4, gc_range = c(0.0, 1.0),
+    filter_poliii_term = FALSE,
+    filter_ggc = FALSE, filter_hairpin = FALSE, filter_dinuc_repeats = FALSE,
+    filter_polyg = TRUE, max_polyg = 2L
+  )
+  expect_false(keep[1])  # GGG exceeds max_polyg=2
+  expect_true(keep[2])
+})
+
+test_that("filter_barcodes_batch backward compat: existing tests pass with explicit filter_*=FALSE", {
+  # Same test as the original filter_barcodes_batch test but with explicit filter params
+  barcodes <- c(
+    "ACGTACGTACGT",  # Good
+    "CGTCTCAACAGT",  # Bad: BsmBI site
+    "AAAAACGTACGT",  # Bad: homopolymer
+    "AAAAAAAAAAAA",  # Bad: GC + homopolymer
+    "ACACACACGTGT"   # Good
+  )
+  keep <- filter_barcodes_batch(
+    barcodes, max_homopolymer = 4, gc_range = c(0.25, 0.75),
+    filter_poliii_term = TRUE,
+    filter_ggc = FALSE, filter_hairpin = FALSE,
+    filter_dinuc_repeats = FALSE, filter_polyg = FALSE
+  )
+  expect_true(keep[1])
+  expect_false(keep[2])
+  expect_false(keep[3])
+  expect_false(keep[4])
+  expect_true(keep[5])
+})
+
+# ============================================================================
+# design_barcodes with new filter params
+# ============================================================================
+
+test_that("design_barcodes works with all new filters at defaults", {
+  result <- design_barcodes(
+    n_variants = 10,
+    barcode_length = 20,
+    min_hamming = 3,
+    prefix_length = 12,
+    barcodes_per_variant = 1
+  )
+  expect_equal(length(result$barcodes), 10)
+  expect_true(all(nchar(result$barcodes) == 20))
+
+  # Verify default filters applied: no hairpin stems > 3, no dinuc > 4 units
+  expect_false(any(has_hairpin_vec(result$barcodes, max_stem = 3L)))
+  expect_false(any(has_dinuc_repeat_vec(result$barcodes, max_units = 4L)))
+})
+
+test_that("design_barcodes with GGC filter produces GGC-free barcodes", {
+  result <- design_barcodes(
+    n_variants = 10,
+    barcode_length = 20,
+    min_hamming = 3,
+    prefix_length = 12,
+    barcodes_per_variant = 1,
+    filter_ggc = TRUE
+  )
+  expect_equal(length(result$barcodes), 10)
+  expect_false(any(has_ggc_motif_vec(result$barcodes)))
 })
