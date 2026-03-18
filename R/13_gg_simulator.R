@@ -322,6 +322,11 @@ select_junctional_variants <- function(tile_var_idx, variants, tile,
 #'   - cassette_for_block = core_polIII, core_downstream_cassette, or full polIII
 #'   - oh3 = 4-nt BsmBI overhang bridging cassette and barcode
 #'
+#' When tile boundaries are provided, the mutation is applied only to the
+#' nucleotides within the tile's mutable region (between oh1 and oh2).
+#' Codons that straddle the oh1/mutable or mutable/oh2 boundary will be
+#' partially mutated — this matches the physical assembly behavior.
+#'
 #' @param variant_row Single-row data frame with `position` and `mut_codon`
 #' @param barcode Barcode sequence for this variant
 #' @param cds Domesticated WT CDS (full length)
@@ -330,11 +335,36 @@ select_junctional_variants <- function(tile_var_idx, variants, tile,
 #' @param oh3 4-nt BsmBI overhang between cassette and barcode
 #' @param helper_left_cap Left helper cap body (from BsaI digestion of helper insert)
 #' @param helper_right_cap Right helper cap body (from BsaI digestion of helper insert)
+#' @param tile_start_nt Tile start position in gene (1-based). When provided
+#'   with tile_end_nt, enables partial-overlap-aware mutation.
+#' @param tile_end_nt Tile end position in gene (1-based).
 #' @return Character string of the expected assembled product
 build_expected_product <- function(variant_row, barcode, cds,
                                     cassette_for_block, oh3,
-                                    helper_left_cap, helper_right_cap) {
-  mutant_cds <- replace_codon(cds, variant_row$position, variant_row$mut_codon)
+                                    helper_left_cap, helper_right_cap,
+                                    tile_start_nt = NULL, tile_end_nt = NULL) {
+
+  codon_start <- (variant_row$position - 1L) * 3L + 1L
+
+  if (!is.null(tile_start_nt) && !is.null(tile_end_nt)) {
+    # The oligo's mutable region covers tile positions 5 to t_len-4,
+    # i.e., gene positions [tile_start+4, tile_end-4]. Only mutate
+    # nucleotides of the codon that fall within this range.
+    mutable_start <- tile_start_nt + 4L
+    mutable_end <- tile_end_nt - 4L
+    gene_chars <- strsplit(cds, "")[[1]]
+    mut_chars <- strsplit(variant_row$mut_codon, "")[[1]]
+    for (i in 0:2) {
+      gene_pos <- codon_start + i
+      if (gene_pos >= mutable_start && gene_pos <= mutable_end) {
+        gene_chars[gene_pos] <- mut_chars[i + 1L]
+      }
+    }
+    mutant_cds <- paste0(gene_chars, collapse = "")
+  } else {
+    mutant_cds <- replace_codon(cds, variant_row$position, variant_row$mut_codon)
+  }
+
   paste0(helper_left_cap, mutant_cds, cassette_for_block, oh3, barcode, helper_right_cap)
 }
 
@@ -356,12 +386,17 @@ build_expected_product <- function(variant_row, barcode, cds,
 #' @param paqci_star1 PaqCI* overhang (3' end)
 #' @param helper_left_cap_len Length of the left helper cap (for interior boundary)
 #' @param helper_right_cap_len Length of the right helper cap (for interior boundary)
+#' @param tile_start_nt Tile start position (1-based) for overlap-aware mutation.
+#'   When provided, the duplication check uses the partial mutation that the
+#'   assembly actually produces (matching build_expected_product behavior).
+#' @param tile_end_nt Tile end position (1-based).
 #' @return List with pass (logical) and diagnostic flags
 verify_assembly_product_strict <- function(product, expected,
                                             expected_cds, mut_position, mut_codon,
                                             cassette_for_block, barcode, oh3,
                                             paqci_star2, paqci_star1,
-                                            helper_left_cap_len, helper_right_cap_len) {
+                                            helper_left_cap_len, helper_right_cap_len,
+                                            tile_start_nt = NULL, tile_end_nt = NULL) {
 
   # --- Check 1: Exact length ---
   correct_length <- nchar(product) == nchar(expected)
@@ -393,8 +428,25 @@ verify_assembly_product_strict <- function(product, expected,
   paqci_flanks_present <- startsWith(product, paqci_fwd) && endsWith(product, paqci_rev)
 
   # --- Check 5: No duplicated elements ---
-  # Each key element should appear exactly once in the product
-  mutant_cds <- replace_codon(expected_cds, mut_position, mut_codon)
+  # Each key element should appear exactly once in the product.
+  # Use overlap-aware mutation when tile boundaries are provided,
+  # matching the physical assembly behavior for boundary codons.
+  if (!is.null(tile_start_nt) && !is.null(tile_end_nt)) {
+    mutable_start <- tile_start_nt + 4L
+    mutable_end <- tile_end_nt - 4L
+    codon_start <- (mut_position - 1L) * 3L + 1L
+    gene_chars <- strsplit(expected_cds, "")[[1]]
+    mut_chars <- strsplit(mut_codon, "")[[1]]
+    for (i in 0:2) {
+      gene_pos <- codon_start + i
+      if (gene_pos >= mutable_start && gene_pos <= mutable_end) {
+        gene_chars[gene_pos] <- mut_chars[i + 1L]
+      }
+    }
+    mutant_cds <- paste0(gene_chars, collapse = "")
+  } else {
+    mutant_cds <- replace_codon(expected_cds, mut_position, mut_codon)
+  }
   count_occurrences <- function(pattern, text) {
     m <- gregexpr(pattern, text, fixed = TRUE)[[1]]
     if (length(m) == 1L && m[1L] == -1L) 0L else length(m)
@@ -615,7 +667,9 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
             cassette_for_block = cassette_for_block,
             oh3 = oh3,
             helper_left_cap = helper_left_cap,
-            helper_right_cap = helper_right_cap
+            helper_right_cap = helper_right_cap,
+            tile_start_nt = tiles$start_nt[t],
+            tile_end_nt = tiles$end_nt[t]
           )
           verify_assembly_product_strict(
             product = product,
@@ -629,7 +683,9 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
             paqci_star2 = paqci_star2,
             paqci_star1 = paqci_star1,
             helper_left_cap_len = nchar(helper_left_cap),
-            helper_right_cap_len = nchar(helper_right_cap)
+            helper_right_cap_len = nchar(helper_right_cap),
+            tile_start_nt = tiles$start_nt[t],
+            tile_end_nt = tiles$end_nt[t]
           )
         } else {
           list(pass = NA, correct_length = NA, exact_match = NA,

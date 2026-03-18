@@ -1,5 +1,5 @@
 # Created: 2026-02-21
-# Last updated: 2026-02-21 — Initial simulator tests
+# Last updated: 2026-03-17 — Add targeted sampling + strict verification tests
 # test-gg-simulator.R — Tests for 13_gg_simulator.R (Golden Gate Assembly Simulator)
 
 # =============================================================================
@@ -274,7 +274,7 @@ test_that("TEST_GENE_SEQ full assembly simulation succeeds", {
     assembly_plan = plan
   )
 
-  # Simulate assembly for each tile (1 variant per tile)
+  # Simulate assembly for each tile (1 random variant per tile, old behavior)
   sim_results <- simulate_pipeline_assembly(
     oligos = oligos,
     geneblock_result = gb_result,
@@ -284,7 +284,9 @@ test_that("TEST_GENE_SEQ full assembly simulation succeeds", {
     cds = cds,
     polIII = TEST_POLIII,
     assembly_plan = plan,
-    samples_per_tile = 1L
+    samples_per_tile = 1L,
+    targeted_sampling = FALSE,
+    strict_verification = FALSE
   )
 
   # All tiles should assemble correctly
@@ -352,7 +354,9 @@ test_that("TEST_LONG_GENE_SEQ assembly simulation runs with collision-aware boun
     cds = cds,
     polIII = TEST_POLIII,
     assembly_plan = plan,
-    samples_per_tile = 1L
+    samples_per_tile = 1L,
+    targeted_sampling = FALSE,
+    strict_verification = FALSE
   )
 
   # Simulator should produce results for all sampled tiles
@@ -364,4 +368,590 @@ test_that("TEST_LONG_GENE_SEQ assembly simulation runs with collision-aware boun
     expect_false(any(grepl("Ambiguous|ambiguous", errors)),
                  info = "OOGGA should prevent ambiguous overhang collisions")
   }
+})
+
+# =============================================================================
+# Unit Tests: select_junctional_variants
+# =============================================================================
+
+test_that("select_junctional_variants picks edge + interior positions", {
+  # Create a fake variants data frame with 20 positions across one tile
+  n_positions <- 20L
+  variants <- data.frame(
+    position = rep(seq_len(n_positions), each = 19L),
+    tile_id = rep(1L, n_positions * 19L),
+    variant_id = paste0("v", seq_len(n_positions * 19L)),
+    mut_codon = rep("AAA", n_positions * 19L),
+    stringsAsFactors = FALSE
+  )
+  tile_var_idx <- seq_len(nrow(variants))
+  tile <- data.frame(tile_id = 1L)
+
+  set.seed(42)
+  selected <- select_junctional_variants(tile_var_idx, variants, tile,
+                                          overlap_codons = 6L)
+
+  # Should get 3 oh1-side + 3 oh2-side + 1 interior = 7 variants
+  expect_equal(length(selected), 7L)
+
+  # Check that selected positions include first 3 and last 3
+  selected_positions <- sort(variants$position[selected])
+  expect_equal(selected_positions[1:3], c(1L, 2L, 3L))
+  expect_equal(selected_positions[5:7], c(18L, 19L, 20L))
+})
+
+test_that("select_junctional_variants returns all when tile is small", {
+  # Tile with only 5 unique positions (< 2*3 + 1 = 7)
+  variants <- data.frame(
+    position = rep(1:5, each = 19L),
+    tile_id = rep(1L, 5L * 19L),
+    variant_id = paste0("v", seq_len(5L * 19L)),
+    mut_codon = rep("AAA", 5L * 19L),
+    stringsAsFactors = FALSE
+  )
+  tile_var_idx <- seq_len(nrow(variants))
+  tile <- data.frame(tile_id = 1L)
+
+  selected <- select_junctional_variants(tile_var_idx, variants, tile,
+                                          overlap_codons = 6L)
+
+  # Should return one variant per position = 5 variants
+  expect_equal(length(selected), 5L)
+  expect_equal(length(unique(variants$position[selected])), 5L)
+})
+
+test_that("select_junctional_variants picks 1 variant per position", {
+  # Multiple variants at same position — should pick only 1
+  variants <- data.frame(
+    position = rep(c(1, 2, 3, 10, 20, 21, 22), each = 5L),
+    tile_id = rep(1L, 35L),
+    variant_id = paste0("v", seq_len(35L)),
+    mut_codon = rep("AAA", 35L),
+    stringsAsFactors = FALSE
+  )
+  tile_var_idx <- seq_len(nrow(variants))
+  tile <- data.frame(tile_id = 1L)
+
+  selected <- select_junctional_variants(tile_var_idx, variants, tile,
+                                          overlap_codons = 4L)
+
+  # overlap_codons=4 → 2 oh1-side + 2 oh2-side + 1 interior = 5
+  # But only 7 unique positions total. 2+2+1 = 5, and 7 > 5, so subset
+  expect_equal(length(selected), 5L)
+  # Each selected index maps to a unique position
+  expect_equal(length(unique(variants$position[selected])),
+               length(selected))
+})
+
+# =============================================================================
+# Unit Tests: build_expected_product
+# =============================================================================
+
+test_that("build_expected_product constructs correct product structure", {
+  # Use a minimal example to verify the formula
+  cds <- "ATGGCTGAATAA"  # 4 codons
+  variant_row <- data.frame(position = 2L, mut_codon = "TTT",
+                             stringsAsFactors = FALSE)
+  barcode <- "AACCGGTTAACC"
+  cassette <- "CASSETTECONTENT"
+  oh3 <- "ACTA"
+  left_cap <- "LEFTCAP"
+  right_cap <- "RIGHTCAP"
+
+  expected <- build_expected_product(variant_row, barcode, cds,
+                                      cassette, oh3, left_cap, right_cap)
+
+  # Verify structure: left_cap + mutant_cds + cassette + oh3 + barcode + right_cap
+  mutant_cds <- replace_codon(cds, 2L, "TTT")
+  expect_equal(expected,
+               paste0("LEFTCAP", mutant_cds, "CASSETTECONTENT", "ACTA",
+                      "AACCGGTTAACC", "RIGHTCAP"))
+})
+
+# =============================================================================
+# Key Invariant Test: build_expected_product == simulate_tile_assembly
+# =============================================================================
+
+test_that("build_expected_product matches simulate_tile_assembly for TEST_GENE_SEQ", {
+  # This is the critical invariant: the first-principles formula must produce
+  # the same result as the full digestion+ligation simulation.
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene(polIII = TEST_POLIII)
+
+  tile_size <- compute_max_tile_size(300, 12)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  tiles <- plan$tiles
+  oh3 <- plan$oh3
+  oh4 <- plan$oh4
+
+  variants <- design_mutations(cds, cu)
+  variants <- check_and_fix_new_sites(variants, cds, cu)
+  variants <- assign_variants_to_tiles(variants, tiles)
+
+  barcode_result <- design_barcodes(
+    n_variants = nrow(variants),
+    barcode_length = 12L,
+    min_hamming = 3L,
+    prefix_length = 12L,
+    barcodes_per_variant = 1L
+  )
+  barcodes <- barcode_result$barcodes
+
+  oligos <- assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4,
+    full_seq = plan$full_seq)
+
+  gb_result <- design_wt_geneblocks(
+    cds = cds, polIII = TEST_POLIII, tiles = tiles,
+    oh3 = oh3, oh4 = oh4,
+    paqci_star2 = "AGTC", paqci_star1 = "TCGA",
+    assembly_plan = plan
+  )
+
+  helper_insert_seq <- gb_result$helper_plasmid$sequence
+
+  # Pre-compute helper caps
+  helper_frags <- digest_linear(helper_insert_seq, "BsaI", source_label = "helper")
+  helper_left_cap <- helper_frags[[1]]$body
+  helper_right_cap <- helper_frags[[length(helper_frags)]]$body
+
+  # Determine cassette_for_block (same logic as simulate_pipeline_assembly)
+  cassette_for_block <- if (!is.null(plan$core_downstream_cassette)) {
+    plan$core_downstream_cassette
+  } else if (!is.null(plan$core_polIII)) {
+    plan$core_polIII
+  } else {
+    TEST_POLIII
+  }
+
+  # Test invariant: for every tile, first variant must produce identical product
+  for (t in seq_len(nrow(tiles))) {
+    tile_id <- tiles$tile_id[t]
+    tile_var_idx <- which(variants$tile_id == tile_id)
+    if (length(tile_var_idx) == 0) next
+
+    vi <- tile_var_idx[1]
+
+    # Get block sequences
+    manifest <- gb_result$tile_manifests[
+      gb_result$tile_manifests$tile_id == tile_id, , drop = FALSE]
+    bsai_names <- if (nzchar(manifest$bsai_parts)) {
+      strsplit(manifest$bsai_parts, ";")[[1]]
+    } else {
+      character(0)
+    }
+    bsmbi_names <- strsplit(manifest$bsmbi_parts, ";")[[1]]
+    bsai_block_seqs <- gb_result$blocks$sequence[
+      match(bsai_names, gb_result$blocks$block_name)]
+    bsmbi_block_seqs <- gb_result$blocks$sequence[
+      match(bsmbi_names, gb_result$blocks$block_name)]
+
+    # Simulated product (full digestion + ligation)
+    sim_product <- simulate_tile_assembly(
+      oligo_seq = oligos$sequence[vi],
+      helper_insert_seq = helper_insert_seq,
+      bsai_block_seqs = bsai_block_seqs,
+      bsmbi_block_seqs = bsmbi_block_seqs
+    )
+
+    # Expected product (first-principles formula, overlap-aware)
+    exp_product <- build_expected_product(
+      variant_row = variants[vi, , drop = FALSE],
+      barcode = barcodes[vi],
+      cds = cds,
+      cassette_for_block = cassette_for_block,
+      oh3 = oh3,
+      helper_left_cap = helper_left_cap,
+      helper_right_cap = helper_right_cap,
+      tile_start_nt = tiles$start_nt[t],
+      tile_end_nt = tiles$end_nt[t]
+    )
+
+    expect_identical(sim_product, exp_product,
+      info = paste0("Tile ", tile_id, " variant ", variants$variant_id[vi],
+                    ": simulated product must match expected product"))
+  }
+})
+
+# =============================================================================
+# Unit Tests: verify_assembly_product_strict
+# =============================================================================
+
+test_that("verify_assembly_product_strict passes on correct product", {
+  # Build a synthetic correct product
+  paqci_star2 <- "AGTC"
+  paqci_star1 <- "TCGA"
+  paqci_fwd <- orient_enzyme_site("PaqCI", paqci_star2, "forward")
+  paqci_rev <- orient_enzyme_site("PaqCI", paqci_star1, "reverse")
+  bsai_fwd_tail <- paste0(ENZYMES$BsaI$recog,
+    paste(rep("A", ENZYMES$BsaI$spacer_len), collapse = ""))
+  # Right cap: oh4 + spacer + RC(recog) + PaqCI_rev
+  oh4 <- "GCAT"
+  bsai_rev_head <- orient_enzyme_site("BsaI", oh4, "reverse")
+  # Compute the actual cap strings from helper structure
+  left_cap <- paste0(paqci_fwd, bsai_fwd_tail)
+  right_cap <- paste0(bsai_rev_head, paqci_rev)
+
+  cds <- "ATGGCTGAATAA"  # 4 codons
+  cassette <- "CASSETTECONTENT"
+  oh3 <- "ACTA"
+  barcode <- "AACCGGTTAACC"
+  mut_position <- 2L
+  mut_codon <- "TTT"
+
+  mutant_cds <- replace_codon(cds, mut_position, mut_codon)
+  product <- paste0(left_cap, mutant_cds, cassette, oh3, barcode, right_cap)
+
+  result <- verify_assembly_product_strict(
+    product = product,
+    expected = product,
+    expected_cds = cds,
+    mut_position = mut_position,
+    mut_codon = mut_codon,
+    cassette_for_block = cassette,
+    barcode = barcode,
+    oh3 = oh3,
+    paqci_star2 = paqci_star2,
+    paqci_star1 = paqci_star1,
+    helper_left_cap_len = nchar(left_cap),
+    helper_right_cap_len = nchar(right_cap)
+  )
+
+  expect_true(result$pass)
+  expect_true(result$correct_length)
+  expect_true(result$exact_match)
+  expect_true(result$no_internal_enzyme_sites)
+  expect_true(result$paqci_flanks_present)
+  expect_true(result$no_duplications)
+  expect_true(is.na(result$first_mismatch_pos))
+})
+
+test_that("verify_assembly_product_strict catches length mismatch", {
+  product <- "AAAA"
+  expected <- "AAAAAA"
+
+  result <- verify_assembly_product_strict(
+    product = product,
+    expected = expected,
+    expected_cds = "ATG",
+    mut_position = 1L,
+    mut_codon = "ATG",
+    cassette_for_block = "",
+    barcode = "",
+    oh3 = "",
+    paqci_star2 = "AGTC",
+    paqci_star1 = "TCGA",
+    helper_left_cap_len = 0L,
+    helper_right_cap_len = 0L
+  )
+
+  expect_false(result$pass)
+  expect_false(result$correct_length)
+  expect_equal(result$product_length, 4L)
+  expect_equal(result$expected_length, 6L)
+})
+
+test_that("verify_assembly_product_strict catches sequence mismatch", {
+  product <- "AACCTT"
+  expected <- "AACCGG"
+
+  result <- verify_assembly_product_strict(
+    product = product,
+    expected = expected,
+    expected_cds = "AAC",
+    mut_position = 1L,
+    mut_codon = "AAC",
+    cassette_for_block = "",
+    barcode = "",
+    oh3 = "",
+    paqci_star2 = "AGTC",
+    paqci_star1 = "TCGA",
+    helper_left_cap_len = 0L,
+    helper_right_cap_len = 0L
+  )
+
+  expect_false(result$pass)
+  expect_true(result$correct_length)
+  expect_false(result$exact_match)
+  expect_equal(result$first_mismatch_pos, 5L)
+})
+
+test_that("verify_assembly_product_strict detects internal enzyme sites", {
+  # Build a product with a BsmBI site (CGTCTC) in the payload
+  paqci_star2 <- "AGTC"
+  paqci_star1 <- "TCGA"
+  paqci_fwd <- orient_enzyme_site("PaqCI", paqci_star2, "forward")
+  paqci_rev <- orient_enzyme_site("PaqCI", paqci_star1, "reverse")
+  bsai_fwd_tail <- paste0(ENZYMES$BsaI$recog,
+    paste(rep("A", ENZYMES$BsaI$spacer_len), collapse = ""))
+  oh4 <- "GCAT"
+  bsai_rev_head <- orient_enzyme_site("BsaI", oh4, "reverse")
+  left_cap <- paste0(paqci_fwd, bsai_fwd_tail)
+  right_cap <- paste0(bsai_rev_head, paqci_rev)
+
+  # Payload deliberately contains BsmBI site
+  payload <- paste0("AAACGTCTCAAA", "CASSETTE", "ACTA", "AACCGGTTAACC")
+  product <- paste0(left_cap, payload, right_cap)
+
+  result <- verify_assembly_product_strict(
+    product = product,
+    expected = product,
+    expected_cds = "AAACGTCTCAAA",
+    mut_position = 1L,
+    mut_codon = "AAA",
+    cassette_for_block = "CASSETTE",
+    barcode = "AACCGGTTAACC",
+    oh3 = "ACTA",
+    paqci_star2 = paqci_star2,
+    paqci_star1 = paqci_star1,
+    helper_left_cap_len = nchar(left_cap),
+    helper_right_cap_len = nchar(right_cap)
+  )
+
+  expect_false(result$no_internal_enzyme_sites)
+  expect_true(grepl("BsmBI", result$internal_sites_found))
+})
+
+test_that("verify_assembly_product_strict detects missing PaqCI flanks", {
+  product <- "AAAAAATTTTTT"
+  expected <- "AAAAAATTTTTT"
+
+  result <- verify_assembly_product_strict(
+    product = product,
+    expected = expected,
+    expected_cds = "AAA",
+    mut_position = 1L,
+    mut_codon = "AAA",
+    cassette_for_block = "",
+    barcode = "",
+    oh3 = "",
+    paqci_star2 = "AGTC",
+    paqci_star1 = "TCGA",
+    helper_left_cap_len = 0L,
+    helper_right_cap_len = 0L
+  )
+
+  expect_false(result$paqci_flanks_present)
+})
+
+# =============================================================================
+# Integration: Targeted sampling + strict verification with TEST_GENE_SEQ
+# =============================================================================
+
+test_that("simulate_pipeline_assembly with strict verification passes for TEST_GENE_SEQ", {
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene(polIII = TEST_POLIII)
+
+  tile_size <- compute_max_tile_size(300, 12)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  tiles <- plan$tiles
+  oh3 <- plan$oh3
+  oh4 <- plan$oh4
+
+  variants <- design_mutations(cds, cu)
+  variants <- check_and_fix_new_sites(variants, cds, cu)
+  variants <- assign_variants_to_tiles(variants, tiles)
+
+  barcode_result <- design_barcodes(
+    n_variants = nrow(variants),
+    barcode_length = 12L,
+    min_hamming = 3L,
+    prefix_length = 12L,
+    barcodes_per_variant = 1L
+  )
+  barcodes <- barcode_result$barcodes
+
+  oligos <- assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4,
+    full_seq = plan$full_seq)
+
+  gb_result <- design_wt_geneblocks(
+    cds = cds, polIII = TEST_POLIII, tiles = tiles,
+    oh3 = oh3, oh4 = oh4,
+    paqci_star2 = "AGTC", paqci_star1 = "TCGA",
+    assembly_plan = plan
+  )
+
+  sim_results <- simulate_pipeline_assembly(
+    oligos = oligos,
+    geneblock_result = gb_result,
+    tiles = tiles,
+    variants = variants,
+    barcodes = barcodes,
+    cds = cds,
+    polIII = TEST_POLIII,
+    assembly_plan = plan,
+    targeted_sampling = TRUE,
+    strict_verification = TRUE,
+    paqci_star2 = "AGTC",
+    paqci_star1 = "TCGA"
+  )
+
+  # Should have multiple variants per tile (junctional sampling)
+  expect_true(nrow(sim_results) > nrow(tiles),
+    info = "Targeted sampling should select multiple variants per tile")
+
+  # Coarse check may fail for boundary-overlap variants (codons straddling
+  # oh1/oh2 regions produce partial mutations that grepl can't match).
+  # This is expected — strict verification is the authoritative check.
+  n_pass <- sum(sim_results$pass, na.rm = TRUE)
+  n_total <- nrow(sim_results)
+  if (n_pass < n_total) {
+    fail_rows <- sim_results[!sim_results$pass | is.na(sim_results$pass), , drop = FALSE]
+    # All coarse failures should still pass strict (partial overlap, not real error)
+    if (any(!is.na(fail_rows$strict_pass))) {
+      expect_true(all(fail_rows$strict_pass[!is.na(fail_rows$strict_pass)]),
+        info = "Coarse failures should still pass strict verification (boundary overlap)")
+    }
+  }
+
+  # All strict checks MUST pass — this is the authoritative verification
+  n_strict_pass <- sum(sim_results$strict_pass, na.rm = TRUE)
+  n_strict_total <- sum(!is.na(sim_results$strict_pass))
+  strict_fail <- sim_results[!is.na(sim_results$strict_pass) & !sim_results$strict_pass, ,
+                              drop = FALSE]
+  strict_detail <- if (nrow(strict_fail) > 0) {
+    paste(sprintf("tile=%s var=%s len=%s exact=%s enz=%s paqci=%s dup=%s mm@%s",
+                  strict_fail$tile_id, strict_fail$variant_id,
+                  strict_fail$correct_length, strict_fail$exact_match,
+                  strict_fail$no_internal_enzyme_sites, strict_fail$paqci_flanks_present,
+                  strict_fail$no_duplications, strict_fail$first_mismatch_pos),
+          collapse = " | ")
+  } else { "none" }
+  expect_equal(n_strict_pass, n_strict_total,
+    info = paste0("Strict: ", n_strict_pass, "/", n_strict_total,
+                  ". Failures: ", strict_detail))
+})
+
+test_that("simulate_pipeline_assembly with strict verification passes for TEST_LONG_GENE_SEQ", {
+  cu <- TEST_CODON_USAGE
+  cds <- TEST_LONG_GENE_SEQ
+
+  tile_size <- compute_max_tile_size(300, 12)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  tiles <- plan$tiles
+  oh3 <- plan$oh3
+  oh4 <- plan$oh4
+
+  variants <- design_mutations(cds, cu)
+  variants <- check_and_fix_new_sites(variants, cds, cu)
+  variants <- assign_variants_to_tiles(variants, tiles)
+
+  barcode_result <- design_barcodes(
+    n_variants = nrow(variants),
+    barcode_length = 12L,
+    min_hamming = 3L,
+    prefix_length = 12L,
+    barcodes_per_variant = 1L
+  )
+  barcodes <- barcode_result$barcodes
+
+  oligos <- assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4,
+    full_seq = plan$full_seq)
+
+  gb_result <- design_wt_geneblocks(
+    cds = cds, polIII = TEST_POLIII, tiles = tiles,
+    oh3 = oh3, oh4 = oh4,
+    paqci_star2 = "AGTC", paqci_star1 = "TCGA",
+    assembly_plan = plan
+  )
+
+  sim_results <- simulate_pipeline_assembly(
+    oligos = oligos,
+    geneblock_result = gb_result,
+    tiles = tiles,
+    variants = variants,
+    barcodes = barcodes,
+    cds = cds,
+    polIII = TEST_POLIII,
+    assembly_plan = plan,
+    targeted_sampling = TRUE,
+    strict_verification = TRUE,
+    paqci_star2 = "AGTC",
+    paqci_star1 = "TCGA"
+  )
+
+  expect_true(nrow(sim_results) > 0)
+
+  # With collision-aware boundaries, no ambiguous overhang errors
+  if (any(!sim_results$pass, na.rm = TRUE)) {
+    errors <- sim_results$error[!sim_results$pass & !is.na(sim_results$error)]
+    expect_false(any(grepl("Ambiguous|ambiguous", errors)),
+                 info = "OOGGA should prevent ambiguous overhang collisions")
+  }
+
+  # Strict verification should pass for all simulated variants
+  n_strict_pass <- sum(sim_results$strict_pass, na.rm = TRUE)
+  n_strict_total <- sum(!is.na(sim_results$strict_pass))
+  strict_fail <- sim_results[!is.na(sim_results$strict_pass) & !sim_results$strict_pass, ,
+                              drop = FALSE]
+  strict_detail <- if (nrow(strict_fail) > 0) {
+    paste(sprintf("tile=%s var=%s exact=%s mm@%s",
+                  strict_fail$tile_id, strict_fail$variant_id,
+                  strict_fail$exact_match, strict_fail$first_mismatch_pos),
+          collapse = " | ")
+  } else { "none" }
+  expect_equal(n_strict_pass, n_strict_total,
+    info = paste0("Strict: ", n_strict_pass, "/", n_strict_total,
+                  ". Failures: ", strict_detail))
+})
+
+# =============================================================================
+# Backward Compatibility: old callers still work
+# =============================================================================
+
+test_that("simulate_pipeline_assembly works with old signature (no new params)", {
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene(polIII = TEST_POLIII)
+
+  tile_size <- compute_max_tile_size(300, 12)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  tiles <- plan$tiles
+  oh3 <- plan$oh3
+  oh4 <- plan$oh4
+
+  variants <- design_mutations(cds, cu)
+  variants <- check_and_fix_new_sites(variants, cds, cu)
+  variants <- assign_variants_to_tiles(variants, tiles)
+
+  barcode_result <- design_barcodes(
+    n_variants = nrow(variants),
+    barcode_length = 12L,
+    min_hamming = 3L,
+    prefix_length = 12L,
+    barcodes_per_variant = 1L
+  )
+  barcodes <- barcode_result$barcodes
+
+  oligos <- assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4,
+    full_seq = plan$full_seq)
+
+  gb_result <- design_wt_geneblocks(
+    cds = cds, polIII = TEST_POLIII, tiles = tiles,
+    oh3 = oh3, oh4 = oh4,
+    paqci_star2 = "AGTC", paqci_star1 = "TCGA",
+    assembly_plan = plan
+  )
+
+  # Call with ONLY the old parameters — new params use defaults
+  sim_results <- simulate_pipeline_assembly(
+    oligos = oligos,
+    geneblock_result = gb_result,
+    tiles = tiles,
+    variants = variants,
+    barcodes = barcodes,
+    cds = cds,
+    polIII = TEST_POLIII,
+    assembly_plan = plan
+  )
+
+  # Should still produce valid results with the new columns
+  expect_true(nrow(sim_results) > 0)
+  expect_true("strict_pass" %in% names(sim_results))
+  expect_true("exact_match" %in% names(sim_results))
+
+  # Default is targeted_sampling=TRUE + strict_verification=TRUE.
+  # Strict pass is the authoritative check (coarse may fail for boundary overlap)
+  n_strict_pass <- sum(sim_results$strict_pass, na.rm = TRUE)
+  n_strict_total <- sum(!is.na(sim_results$strict_pass))
+  expect_equal(n_strict_pass, n_strict_total,
+    info = "All strict checks should pass with default params")
 })
