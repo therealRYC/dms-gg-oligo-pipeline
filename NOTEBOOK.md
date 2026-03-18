@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-17 — Entry 50: Optional PCR handles for pooled oligo amplification -->
+<!-- Last updated: 2026-03-17 — Entries 51-53: Enhanced barcode filters, gene block flanking pads, strict GG verifier -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -49,6 +49,9 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-17 | prevent_runt_tiles opt-in flag (default off) | SB DP product scoring naturally avoids runts; flag available as safety net for edge cases | Entry 48 |
 | 2026-03-17 | PCR handles via CSV file (not inline YAML) | Reusable across experiments, cleaner config, easy to generate from spreadsheets | Entry 50 |
 | 2026-03-17 | Handles outside BsaI sites (stripped during digestion) | No impact on assembly — handles are waste fragments after BsaI cut | Entry 50 |
+| 2026-03-17 | Enhanced barcode filters (GGC, hairpin, dinuc, poly-G, Tm) all off by default | Zero-cost opt-in; most users don't need them; avoids reducing barcode pool | Entry 51 |
+| 2026-03-17 | Gene block flanking pads (default "TTTT") | NEB recommends ≥4 bp for efficient Type IIs cleavage at linear termini | Entry 52 |
+| 2026-03-17 | Strict nucleotide-level GG verification + targeted junctional sampling | Catches off-by-one errors in overhang geometry that coarse grep verification misses | Entry 53 |
 | 2026-03-14 | Reduce SB DP max by overlap_codons*3 | Prevents oversized sub-blocks at boundary tiles after overlap zone extension | Entry 43 |
 | 2026-03-08 | Drop tile MC from production pipeline | Benchmarking: tile MC = DP v2 on 2/3 genes, degraded TRIO; 500-900s wasted | Entry 24 |
 | 2026-03-08 | Document & shelve convergent U6T7 tornado design | Promising but needs wet-lab validation; current pipeline working; can add as config toggle later | Entry 25 |
