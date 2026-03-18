@@ -163,7 +163,7 @@ build_downstream_cassette <- function(cfg) {
   cfg
 }
 
-#' Parse optional PCR handles for tile-specific amplification from pooled oligos
+#' Parse optional PCR handles from a CSV file for tile-specific amplification
 #'
 #' When users order multiple tiles in a single oligo pool, each tile needs unique
 #' PCR handles (forward/reverse) flanking the oligo for selective amplification.
@@ -171,9 +171,11 @@ build_downstream_cassette <- function(cfg) {
 #'
 #'   5'-[fwd_handle]-BsaI_fwd-oh1-[mutable]-...-BsaI_rev_oh4-[rev_handle]-3'
 #'
-#' All fwd handles must be the same length across tiles; all rev handles must be
-#' the same length (fwd_len may differ from rev_len). This is required because
-#' compute_max_tile_size() returns a single value for all tiles.
+#' The config value `pcr_handles` is a path to a CSV file with `fwd` and `rev`
+#' columns (one row per tile, in tile order). All fwd handles must be the same
+#' length; all rev handles must be the same length (fwd_len may differ from
+#' rev_len). This is required because compute_max_tile_size() returns a single
+#' value for all tiles.
 #'
 #' @param cfg Config list (must already have max_oligo_length set)
 #' @return Modified cfg with added fields:
@@ -183,8 +185,7 @@ build_downstream_cassette <- function(cfg) {
 #'   - rev_handle_length: length of each rev handle (0 if no handles)
 parse_pcr_handles <- function(cfg) {
   # When not provided, set defaults and return — pipeline runs as before
-
-  if (is.null(cfg$pcr_handles) || length(cfg$pcr_handles) == 0) {
+  if (is.null(cfg$pcr_handles) || !nzchar(cfg$pcr_handles)) {
     cfg$pcr_handles <- NULL
     cfg$handle_overhead <- 0L
     cfg$fwd_handle_length <- 0L
@@ -192,39 +193,58 @@ parse_pcr_handles <- function(cfg) {
     return(cfg)
   }
 
+  # --- Load CSV file ---
+  handles_path <- cfg$pcr_handles
+  if (!file.exists(handles_path)) {
+    stop("pcr_handles file not found: ", handles_path)
+  }
+  handles_df <- readr::read_csv(handles_path, show_col_types = FALSE)
+
+  # Validate required columns
+  if (!all(c("fwd", "rev") %in% names(handles_df))) {
+    stop(
+      "pcr_handles CSV must have 'fwd' and 'rev' columns. ",
+      "Found: ", paste(names(handles_df), collapse = ", ")
+    )
+  }
+  if (nrow(handles_df) == 0L) {
+    stop("pcr_handles CSV is empty (no rows)")
+  }
+
+  cli::cli_alert_info(paste0(
+    "Loaded ", nrow(handles_df), " PCR handle pair(s) from: ", handles_path
+  ))
+
+  # Convert to list-of-lists (internal representation used by assembly/output)
+  cfg$pcr_handles <- lapply(seq_len(nrow(handles_df)), function(i) {
+    list(fwd = toupper(handles_df$fwd[i]), rev = toupper(handles_df$rev[i]))
+  })
+
+  # --- Validate handle sequences ---
   n_pairs <- length(cfg$pcr_handles)
   errors <- character(0)
 
-  # Validate each pair has fwd and rev fields with DNA sequences
   for (i in seq_len(n_pairs)) {
     pair <- cfg$pcr_handles[[i]]
-    if (is.null(pair$fwd) || !nzchar(pair$fwd)) {
-      errors <- c(errors, paste0("pcr_handles[[", i, "]] is missing a 'fwd' field"))
+    if (is.na(pair$fwd) || !nzchar(pair$fwd)) {
+      errors <- c(errors, paste0("Row ", i, " is missing a 'fwd' value"))
     }
-    if (is.null(pair$rev) || !nzchar(pair$rev)) {
-      errors <- c(errors, paste0("pcr_handles[[", i, "]] is missing a 'rev' field"))
+    if (is.na(pair$rev) || !nzchar(pair$rev)) {
+      errors <- c(errors, paste0("Row ", i, " is missing a 'rev' value"))
     }
     if (length(errors) > 0) next
 
-    # Uppercase and validate DNA-only
-    pair$fwd <- toupper(pair$fwd)
-    pair$rev <- toupper(pair$rev)
     if (grepl("[^ACGT]", pair$fwd)) {
-      errors <- c(errors, paste0(
-        "pcr_handles[[", i, "]] fwd contains non-ACGT characters"
-      ))
+      errors <- c(errors, paste0("Row ", i, " fwd contains non-ACGT characters"))
     }
     if (grepl("[^ACGT]", pair$rev)) {
-      errors <- c(errors, paste0(
-        "pcr_handles[[", i, "]] rev contains non-ACGT characters"
-      ))
+      errors <- c(errors, paste0("Row ", i, " rev contains non-ACGT characters"))
     }
-    cfg$pcr_handles[[i]] <- pair
   }
 
-  # Stop early if basic structure is invalid
   if (length(errors) > 0) {
-    stop("PCR handle errors:\n  - ", paste(errors, collapse = "\n  - "))
+    stop("PCR handle errors in ", handles_path, ":\n  - ",
+         paste(errors, collapse = "\n  - "))
   }
 
   # Extract lengths and enforce uniformity
@@ -269,7 +289,7 @@ parse_pcr_handles <- function(cfg) {
         sites <- find_enzyme_sites(seq, ENZYMES[[enz_name]]$recog)
         if (nrow(sites) > 0) {
           errors <- c(errors, paste0(
-            "pcr_handles[[", i, "]] ", handle_end, " contains ",
+            "Row ", i, " ", handle_end, " contains ",
             enz_name, " recognition site"
           ))
         }
@@ -278,7 +298,8 @@ parse_pcr_handles <- function(cfg) {
   }
 
   if (length(errors) > 0) {
-    stop("PCR handle errors:\n  - ", paste(errors, collapse = "\n  - "))
+    stop("PCR handle errors in ", handles_path, ":\n  - ",
+         paste(errors, collapse = "\n  - "))
   }
 
   # Soft checks: uniqueness, GC, homopolymers (warnings, not errors)
@@ -295,7 +316,6 @@ parse_pcr_handles <- function(cfg) {
       "Duplicate rev handle sequences detected -- tiles sharing handles cannot be selectively amplified"
     )
   }
-  # Check if any fwd equals any rev (primer confusion risk)
   fwd_rev_overlap <- intersect(fwd_seqs, rev_seqs)
   if (length(fwd_rev_overlap) > 0) {
     cli::cli_alert_warning(
@@ -310,13 +330,13 @@ parse_pcr_handles <- function(cfg) {
       gc <- gc_content(seq)
       if (gc < 0.30 || gc > 0.70) {
         cli::cli_alert_warning(paste0(
-          "pcr_handles[[", i, "]] ", handle_end,
+          "Row ", i, " ", handle_end,
           " GC content = ", round(gc * 100, 1), "% (outside 30-70% range)"
         ))
       }
       if (has_homopolymer(seq, max_run = 4L)) {
         cli::cli_alert_warning(paste0(
-          "pcr_handles[[", i, "]] ", handle_end,
+          "Row ", i, " ", handle_end,
           " contains homopolymer run > 4 nt"
         ))
       }
