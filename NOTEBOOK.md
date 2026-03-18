@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-17 — Entry 49: Codebase simplification + branch protection hook -->
+<!-- Last updated: 2026-03-17 — Entry 50: Optional PCR handles for pooled oligo amplification -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -47,6 +47,8 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-14 | Remove tile-to-tile collision checking | Each tile's assembly reaction is independent (separate pot); Bellman DP replaces beam search | Entry 43 |
 | 2026-03-16 | oh_R cassette search for last tile | Scan cassette at 1-nt resolution to push stop codon from oh2 zone to tile interior | Entry 47 |
 | 2026-03-17 | prevent_runt_tiles opt-in flag (default off) | SB DP product scoring naturally avoids runts; flag available as safety net for edge cases | Entry 48 |
+| 2026-03-17 | PCR handles via CSV file (not inline YAML) | Reusable across experiments, cleaner config, easy to generate from spreadsheets | Entry 50 |
+| 2026-03-17 | Handles outside BsaI sites (stripped during digestion) | No impact on assembly — handles are waste fragments after BsaI cut | Entry 50 |
 | 2026-03-14 | Reduce SB DP max by overlap_codons*3 | Prevents oversized sub-blocks at boundary tiles after overlap zone extension | Entry 43 |
 | 2026-03-08 | Drop tile MC from production pipeline | Benchmarking: tile MC = DP v2 on 2/3 genes, degraded TRIO; 500-900s wasted | Entry 24 |
 | 2026-03-08 | Document & shelve convergent U6T7 tornado design | Promising but needs wet-lab validation; current pipeline working; can add as config toggle later | Entry 25 |
@@ -1898,3 +1900,47 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 
 **Next steps**:
 - Verify branch protection hook works in a new session by attempting a commit on main
+
+---
+
+### 2026-03-17 19:29 — Optional PCR handles for pooled oligo amplification
+
+**Type**: session
+**Status**: completed
+**Tags**: [pcr-handles, oligo-design, pooled-ordering, feature]
+
+**Goal**: Add optional per-tile PCR handles so users who order multiple tiles in a single oligo pool can selectively amplify each tile's oligos.
+
+**Approach**: PCR handles flank each oligo outside the BsaI sites — they're stripped as waste during Golden Gate digestion. The user provides a CSV file (`fwd,rev` columns, one row per tile) referenced in the config as `pcr_handles: "path/to/handles.csv"`. Handles eat into the 300 nt Twist synthesis budget, reducing the mutable region and potentially increasing the tile count. The chicken-and-egg problem (handle length → tile count → enough handles?) is resolved by parsing handle length first, computing tile size, then validating the count after tiling.
+
+**Key findings**:
+- 20+20 = 40 nt of handles reduces mutable region from 234 nt (78 codons) to 195 nt (65 codons) with 20 nt barcodes
+- GG simulator confirms handles are correctly stripped — `digest_linear()` produces 3 fragments, terminal handle fragments marked as waste, only the internal insert participates in ligation
+- All 5346 existing tests pass unchanged (full backward compatibility)
+
+**Decisions made**:
+- CSV file input over inline YAML: reusable across experiments, cleaner config, easy to generate from primer plate spreadsheets (over inline YAML list which was clunky for 10+ tiles)
+- Handles outside BsaI sites: no assembly impact, stripped as waste during digestion (over handles inside BsaI sites which would complicate overhang selection)
+- Uniform handle lengths enforced: `compute_max_tile_size()` returns a single value, so all tiles must have the same overhead (over per-tile variable lengths which would require per-tile budget computation)
+- Hard error on enzyme sites in handles: even outside BsaI sites, recognition sequences in the synthesized oligo can cause off-target partial digestion (over soft warning which risks silent assembly failures)
+
+**Artifacts**:
+- `R/00_config.R` — `parse_pcr_handles()` loads CSV, validates sequences, computes overhead
+- `R/05_tiling.R` — `compute_max_tile_size()` now accepts `handle_overhead` parameter
+- `R/08_oligo_assembly.R` — `assemble_oligos()` prepends/appends handles per tile
+- `R/10_qc_checks.R` — defense-in-depth enzyme site check on handles
+- `R/11_output.R` — new `{gene}_pcr_primer_table.csv` output (fwd_handle, rev_handle, rev_primer_to_order)
+- `config_template.yaml` — documented `pcr_handles` section
+- `run_pipeline.R` — wired handles through pipeline with count validation
+- `tests/testthat/test-pcr-handles.R` — 49 tests (config parsing, assembly, GG simulator)
+
+**Related commits**:
+- `f005dd8` — feat: Add PCR handle parsing, tile size overhead, and oligo assembly support
+- `984ad74` — feat: Wire PCR handles through QC, output, config template, and pipeline
+- `85bca01` — test: Add 34 tests for PCR handle feature
+- `00f9473` — test: Add GG simulator tests for PCR handle stripping
+- `afc7eea` — refactor: Switch PCR handles from inline YAML to CSV file input
+- `d6e72de` — Merge branch worktree-260317-pcr-handles
+
+**Next steps**:
+- Provide example `pcr_handles.csv` with validated primer sets for common tile counts
