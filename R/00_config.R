@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-17 — Add enhanced barcode filter config params + PCR handle support
+# Last updated: 2026-03-17 — Add geneblock_flanking_pad config parameter
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -59,7 +59,8 @@ load_config <- function(config_path) {
     auto_domesticate = TRUE,
     simulate_assembly = TRUE,
     simulation_samples_per_tile = 1L,
-    output_dir = "output"
+    output_dir = "output",
+    geneblock_flanking_pad = DEFAULT_GENEBLOCK_FLANKING_PAD
   )
 
   for (key in names(defaults)) {
@@ -102,6 +103,7 @@ load_config <- function(config_path) {
   cfg$include_synonymous <- as.logical(cfg$include_synonymous)
   cfg$simulate_assembly <- as.logical(cfg$simulate_assembly)
   cfg$simulation_samples_per_tile <- as.integer(cfg$simulation_samples_per_tile)
+  cfg$geneblock_flanking_pad <- toupper(as.character(cfg$geneblock_flanking_pad))
 
   # --- Validate oh3 and oh4 ---
   # These are fixed BsmBI/BsaI overhangs used in the 3-enzyme assembly
@@ -539,6 +541,54 @@ validate_config <- function(cfg) {
       "overlap_codons must be even (got ", cfg$overlap_codons,
       "). Odd values create asymmetric mutable/immutable splits at tile boundaries."
     ))
+  }
+
+  # geneblock_flanking_pad validation
+  pad <- cfg$geneblock_flanking_pad
+  if (nchar(pad) > 0L) {
+    if (grepl("[^ACGT]", pad)) {
+      errors <- c(errors, "geneblock_flanking_pad contains non-ACGT characters")
+    } else {
+      # Check pad doesn't contain enzyme recognition sites
+      for (enz_name in c("BsaI", "BsmBI", "PaqCI")) {
+        recog <- ENZYMES[[enz_name]]$recog
+        recog_rc <- ENZYMES[[enz_name]]$recog_rc
+        if (grepl(recog, pad, fixed = TRUE) || grepl(recog_rc, pad, fixed = TRUE)) {
+          errors <- c(errors, paste0(
+            "geneblock_flanking_pad contains ", enz_name, " recognition site"
+          ))
+        }
+      }
+      # Check pad + recognition site junctions don't create enzyme sites
+      for (enz_name in c("BsaI", "BsmBI", "PaqCI")) {
+        recog <- ENZYMES[[enz_name]]$recog
+        recog_rc <- ENZYMES[[enz_name]]$recog_rc
+        # pad at 5' end: pad + recognition_fwd
+        junction_5 <- paste0(pad, recog)
+        # pad at 3' end: recognition_rev_RC + pad
+        junction_3 <- paste0(recog_rc, pad)
+        for (chk_enz in c("BsaI", "BsmBI", "PaqCI")) {
+          chk_recog <- ENZYMES[[chk_enz]]$recog
+          chk_rc <- ENZYMES[[chk_enz]]$recog_rc
+          if (grepl(chk_recog, junction_5, fixed = TRUE) ||
+            grepl(chk_rc, junction_5, fixed = TRUE) ||
+            grepl(chk_recog, junction_3, fixed = TRUE) ||
+            grepl(chk_rc, junction_3, fixed = TRUE)) {
+            # Only flag if the site spans the junction (not entirely within pad or recog)
+            # A site is junction-spanning if it wouldn't be found in pad alone or recog alone
+            pad_has <- grepl(chk_recog, pad, fixed = TRUE) || grepl(chk_rc, pad, fixed = TRUE)
+            recog_has <- grepl(chk_recog, recog, fixed = TRUE) || grepl(chk_rc, recog, fixed = TRUE) ||
+              grepl(chk_recog, recog_rc, fixed = TRUE) || grepl(chk_rc, recog_rc, fixed = TRUE)
+            if (!pad_has && !recog_has) {
+              errors <- c(errors, paste0(
+                "geneblock_flanking_pad creates ", chk_enz,
+                " site at junction with ", enz_name, " recognition sequence"
+              ))
+            }
+          }
+        }
+      }
+    }
   }
 
   # PCR handle budget check: mutable region must remain viable (>= 30 nt = 10 codons)
