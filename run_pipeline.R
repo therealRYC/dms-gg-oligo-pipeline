@@ -288,7 +288,16 @@ barcode_result <- design_barcodes(
   max_homopolymer = cfg$barcode_max_homopolymer,
   barcodes_per_variant = cfg$barcodes_per_variant,
   junction_left_context = junction_left_context,
-  junction_right_context = junction_right_context
+  junction_right_context = junction_right_context,
+  filter_ggc = cfg$barcode_filter_ggc,
+  filter_hairpin = cfg$barcode_filter_hairpin,
+  max_hairpin_stem = cfg$barcode_max_hairpin_stem,
+  filter_dinuc_repeats = cfg$barcode_filter_dinuc_repeats,
+  max_dinuc_repeat_units = cfg$barcode_max_dinuc_repeat_units,
+  filter_polyg = cfg$barcode_filter_polyg,
+  max_polyg = cfg$barcode_max_polyg,
+  filter_tm_uniformity = cfg$barcode_filter_tm_uniformity,
+  tm_tolerance = cfg$barcode_tm_tolerance
 )
 barcodes <- barcode_result$barcodes
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
@@ -377,7 +386,18 @@ qc_result <- run_qc_checks(
   min_block_length = cfg$min_geneblock_length,
   min_hamming = cfg$min_hamming_distance,
   assembly_plan = assembly_plan,
-  pcr_handles = cfg$pcr_handles
+  pcr_handles = cfg$pcr_handles,
+  barcode_filter_config = list(
+    filter_ggc = cfg$barcode_filter_ggc,
+    filter_hairpin = cfg$barcode_filter_hairpin,
+    max_hairpin_stem = cfg$barcode_max_hairpin_stem,
+    filter_dinuc_repeats = cfg$barcode_filter_dinuc_repeats,
+    max_dinuc_repeat_units = cfg$barcode_max_dinuc_repeat_units,
+    filter_polyg = cfg$barcode_filter_polyg,
+    max_polyg = cfg$barcode_max_polyg,
+    filter_tm_uniformity = cfg$barcode_filter_tm_uniformity,
+    tm_tolerance = cfg$barcode_tm_tolerance
+  )
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["10_qc"]] <- step_elapsed

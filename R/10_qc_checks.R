@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-17 — Add PCR handle enzyme site QC check
+# Last updated: 2026-03-17 — Add enhanced barcode filter QC checks + Tm stats + PCR handle QC
 # 10_qc_checks.R — Comprehensive QC validation for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 
@@ -28,7 +28,8 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
                           min_block_length = MIN_GENEBLOCK_LENGTH,
                           min_hamming = DEFAULT_MIN_HAMMING,
                           assembly_plan = NULL,
-                          pcr_handles = NULL) {
+                          pcr_handles = NULL,
+                          barcode_filter_config = NULL) {
   checks <- list()
   blocks <- geneblock_result$blocks
 
@@ -267,6 +268,88 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
       " barcode(s) contain TTTT"
     )
   )
+
+  # --- Enhanced barcode filter QC checks ---
+  # These verify that the output barcodes satisfy the filters that were enabled
+  # during generation. Uses barcode_filter_config if provided, otherwise defaults.
+  bfc <- barcode_filter_config %||% list()
+
+  # 14b. GGC motif check
+  if (isTRUE(bfc$filter_ggc)) {
+    n_ggc <- sum(has_ggc_motif_vec(barcodes))
+    checks[[length(checks) + 1L]] <- qc_check(
+      name = "barcode_ggc_motif",
+      desc = "No barcodes contain GGC motif (Illumina error hotspot)",
+      pass = n_ggc == 0L,
+      detail = paste0(n_ggc, " / ", length(barcodes), " barcode(s) contain GGC")
+    )
+  }
+
+  # 14c. Hairpin check
+  if (isTRUE(bfc$filter_hairpin)) {
+    max_stem <- bfc$max_hairpin_stem %||% DEFAULT_MAX_HAIRPIN_STEM
+    n_hp <- sum(has_hairpin_vec(barcodes, max_stem))
+    checks[[length(checks) + 1L]] <- qc_check(
+      name = "barcode_hairpins",
+      desc = paste0("No barcodes have hairpin stems > ", max_stem, " bp"),
+      pass = n_hp == 0L,
+      detail = paste0(n_hp, " / ", length(barcodes), " barcode(s) have hairpin stems > ", max_stem, " bp")
+    )
+  }
+
+  # 14d. Dinucleotide repeat check
+  if (isTRUE(bfc$filter_dinuc_repeats)) {
+    max_units <- bfc$max_dinuc_repeat_units %||% DEFAULT_MAX_DINUC_REPEAT_UNITS
+    n_dinuc <- sum(has_dinuc_repeat_vec(barcodes, max_units))
+    checks[[length(checks) + 1L]] <- qc_check(
+      name = "barcode_dinuc_repeats",
+      desc = paste0("No barcodes have dinucleotide repeats > ", max_units, " units"),
+      pass = n_dinuc == 0L,
+      detail = paste0(n_dinuc, " / ", length(barcodes), " barcode(s) exceed ", max_units, " dinuc repeat units")
+    )
+  }
+
+  # 14e. Poly-G check
+  if (isTRUE(bfc$filter_polyg)) {
+    max_g <- bfc$max_polyg %||% DEFAULT_MAX_POLYG
+    n_polyg <- sum(has_polyg_vec(barcodes, max_g))
+    checks[[length(checks) + 1L]] <- qc_check(
+      name = "barcode_polyg",
+      desc = paste0("No barcodes have poly-G runs > ", max_g),
+      pass = n_polyg == 0L,
+      detail = paste0(n_polyg, " / ", length(barcodes), " barcode(s) have > ", max_g, " consecutive G's")
+    )
+  }
+
+  # 14f. Tm distribution (always reported, pass/fail only when filter was enabled)
+  tm_vals <- nn_tm_vec(barcodes)
+  tm_median <- round(median(tm_vals), 1)
+  tm_min <- round(min(tm_vals), 1)
+  tm_max <- round(max(tm_vals), 1)
+  tm_sd <- round(sd(tm_vals), 1)
+  if (isTRUE(bfc$filter_tm_uniformity)) {
+    tm_tol <- bfc$tm_tolerance %||% DEFAULT_TM_TOLERANCE
+    n_out <- sum(abs(tm_vals - median(tm_vals)) > tm_tol)
+    checks[[length(checks) + 1L]] <- qc_check(
+      name = "barcode_tm_uniformity",
+      desc = paste0("All barcodes within +/-", tm_tol, " C of median Tm"),
+      pass = n_out == 0L,
+      detail = paste0(
+        n_out, " / ", length(barcodes), " barcode(s) outside range. ",
+        "Tm: median=", tm_median, ", range=[", tm_min, ", ", tm_max, "], sd=", tm_sd, " C"
+      )
+    )
+  } else {
+    # Informational only — always report Tm distribution
+    checks[[length(checks) + 1L]] <- qc_check(
+      name = "barcode_tm_distribution",
+      desc = "Barcode Tm distribution (informational)",
+      pass = TRUE,
+      detail = paste0(
+        "Tm: median=", tm_median, ", range=[", tm_min, ", ", tm_max, "], sd=", tm_sd, " C"
+      )
+    )
+  }
 
   # 15. Gene block minimum length (synthesis minimum, warning only)
   n_under_min <- sum(blocks$length < min_block_length)
