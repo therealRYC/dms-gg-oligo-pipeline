@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Created: 2025-02-01
-# Last updated: 2026-03-07 — oh3/oh4 selected before tile DP (constrained-first ordering)
+# Last updated: 2026-03-17 — Wire PCR handle support through pipeline
 # run_pipeline.R — Master entry point for the DMS Golden Gate Oligo Pipeline
 #
 # 3-Enzyme Architecture: BsaI (Level 1) + BsmBI (Level 1b) + PaqCI (Level 2)
@@ -186,7 +186,8 @@ cli::cli_h2(paste0(
   "Step 6: Planning assembly (boundary_method=", cfg$boundary_method, ")"
 ))
 step_start <- proc.time()
-tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length)
+tile_size <- compute_max_tile_size(cfg$max_oligo_length, cfg$barcode_length,
+                                   handle_overhead = cfg$handle_overhead %||% 0L)
 assembly_plan <- plan_assembly(
   cds = gene$cds,
   polIII = cfg$polIII_promoter,
@@ -207,6 +208,26 @@ assembly_plan <- plan_assembly(
 tiles <- assembly_plan$tiles
 oh3 <- assembly_plan$oh3
 oh4 <- assembly_plan$oh4
+
+# Validate PCR handle count against tile count (chicken-and-egg resolution)
+if (!is.null(cfg$pcr_handles)) {
+  n_handles <- length(cfg$pcr_handles)
+  n_tiles <- nrow(tiles)
+  if (n_handles < n_tiles) {
+    stop(
+      "Not enough PCR handle pairs: ", n_handles, " provided but ",
+      n_tiles, " tiles needed. Add more handle pairs or use shorter handles."
+    )
+  }
+  if (n_handles > n_tiles) {
+    cli::cli_alert_warning(paste0(
+      n_handles - n_tiles, " extra PCR handle pair(s) provided (",
+      n_handles, " pairs, ", n_tiles, " tiles). Extra pairs will be ignored."
+    ))
+    cfg$pcr_handles <- cfg$pcr_handles[seq_len(n_tiles)]
+  }
+}
+
 variants <- assign_variants_to_tiles(variants, tiles)
 
 # Filter out gene-edge variants with partial oh1/oh2 overlap (BUG-6)
@@ -295,7 +316,8 @@ oligos <- assemble_oligos(
   oh3 = oh3,
   oh4 = oh4,
   max_oligo_length = cfg$max_oligo_length,
-  full_seq = assembly_plan$full_seq
+  full_seq = assembly_plan$full_seq,
+  pcr_handles = cfg$pcr_handles
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["8_oligo_assembly"]] <- step_elapsed
@@ -354,7 +376,8 @@ qc_result <- run_qc_checks(
   max_block_length = cfg$max_geneblock_length,
   min_block_length = cfg$min_geneblock_length,
   min_hamming = cfg$min_hamming_distance,
-  assembly_plan = assembly_plan
+  assembly_plan = assembly_plan,
+  pcr_handles = cfg$pcr_handles
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["10_qc"]] <- step_elapsed
@@ -420,7 +443,8 @@ output_paths <- write_outputs(
   protein          = gene$protein,
   gene_description = gene$gene_description,
   gene_fasta       = cfg$gene_fasta,
-  skipped_variants = skipped_variants
+  skipped_variants = skipped_variants,
+  pcr_handles      = cfg$pcr_handles
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["11_output"]] <- step_elapsed
@@ -462,6 +486,12 @@ cli::cli_alert_success(paste0(
 cli::cli_alert_success(paste0("Gene blocks: ", nrow(geneblock_result$blocks)))
 cli::cli_alert_success(paste0("Tiles: ", nrow(tiles)))
 cli::cli_alert_success(paste0("Fixed overhangs: oh3=", oh3, ", oh4=", oh4))
+if (!is.null(cfg$pcr_handles)) {
+  cli::cli_alert_success(paste0(
+    "PCR handles: ", length(cfg$pcr_handles), " pair(s), ",
+    cfg$fwd_handle_length, " nt fwd + ", cfg$rev_handle_length, " nt rev"
+  ))
+}
 if (length(cfg$intergene_elements) > 0) {
   element_names <- vapply(cfg$intergene_elements, function(e) e$name, character(1))
   cli::cli_alert_success(paste0(

@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-03 — Add include_synonymous config parameter
+# Last updated: 2026-03-17 — Add optional PCR handle support
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -93,6 +93,9 @@ load_config <- function(config_path) {
   # --- Intergene elements: parse and build downstream cassette ---
   cfg <- build_downstream_cassette(cfg)
 
+  # --- PCR handles: parse and compute overhead ---
+  cfg <- parse_pcr_handles(cfg)
+
   # --- Validation ---
   validate_config(cfg)
 
@@ -156,6 +159,200 @@ build_downstream_cassette <- function(cfg) {
   # Build full downstream cassette: intergene elements + polIII promoter
   polIII <- cfg$polIII_promoter %||% ""
   cfg$downstream_cassette <- paste0(cfg$intergene_concat, polIII)
+
+  cfg
+}
+
+#' Parse optional PCR handles from a CSV file for tile-specific amplification
+#'
+#' When users order multiple tiles in a single oligo pool, each tile needs unique
+#' PCR handles (forward/reverse) flanking the oligo for selective amplification.
+#' Handles sit outside the BsaI sites and are stripped during digestion:
+#'
+#'   5'-[fwd_handle]-BsaI_fwd-oh1-[mutable]-...-BsaI_rev_oh4-[rev_handle]-3'
+#'
+#' The config value `pcr_handles` is a path to a CSV file with `fwd` and `rev`
+#' columns (one row per tile, in tile order). All fwd handles must be the same
+#' length; all rev handles must be the same length (fwd_len may differ from
+#' rev_len). This is required because compute_max_tile_size() returns a single
+#' value for all tiles.
+#'
+#' @param cfg Config list (must already have max_oligo_length set)
+#' @return Modified cfg with added fields:
+#'   - pcr_handles: validated list of handle pairs (NULL if not provided)
+#'   - handle_overhead: total nt added per oligo (fwd_len + rev_len, or 0)
+#'   - fwd_handle_length: length of each fwd handle (0 if no handles)
+#'   - rev_handle_length: length of each rev handle (0 if no handles)
+parse_pcr_handles <- function(cfg) {
+  # When not provided, set defaults and return — pipeline runs as before
+  if (is.null(cfg$pcr_handles) || !nzchar(cfg$pcr_handles)) {
+    cfg$pcr_handles <- NULL
+    cfg$handle_overhead <- 0L
+    cfg$fwd_handle_length <- 0L
+    cfg$rev_handle_length <- 0L
+    return(cfg)
+  }
+
+  # --- Load CSV file ---
+  handles_path <- cfg$pcr_handles
+  if (!file.exists(handles_path)) {
+    stop("pcr_handles file not found: ", handles_path)
+  }
+  handles_df <- readr::read_csv(handles_path, show_col_types = FALSE)
+
+  # Validate required columns
+  if (!all(c("fwd", "rev") %in% names(handles_df))) {
+    stop(
+      "pcr_handles CSV must have 'fwd' and 'rev' columns. ",
+      "Found: ", paste(names(handles_df), collapse = ", ")
+    )
+  }
+  if (nrow(handles_df) == 0L) {
+    stop("pcr_handles CSV is empty (no rows)")
+  }
+
+  cli::cli_alert_info(paste0(
+    "Loaded ", nrow(handles_df), " PCR handle pair(s) from: ", handles_path
+  ))
+
+  # Convert to list-of-lists (internal representation used by assembly/output)
+  cfg$pcr_handles <- lapply(seq_len(nrow(handles_df)), function(i) {
+    list(fwd = toupper(handles_df$fwd[i]), rev = toupper(handles_df$rev[i]))
+  })
+
+  # --- Validate handle sequences ---
+  n_pairs <- length(cfg$pcr_handles)
+  errors <- character(0)
+
+  for (i in seq_len(n_pairs)) {
+    pair <- cfg$pcr_handles[[i]]
+    if (is.na(pair$fwd) || !nzchar(pair$fwd)) {
+      errors <- c(errors, paste0("Row ", i, " is missing a 'fwd' value"))
+    }
+    if (is.na(pair$rev) || !nzchar(pair$rev)) {
+      errors <- c(errors, paste0("Row ", i, " is missing a 'rev' value"))
+    }
+    if (length(errors) > 0) next
+
+    if (grepl("[^ACGT]", pair$fwd)) {
+      errors <- c(errors, paste0("Row ", i, " fwd contains non-ACGT characters"))
+    }
+    if (grepl("[^ACGT]", pair$rev)) {
+      errors <- c(errors, paste0("Row ", i, " rev contains non-ACGT characters"))
+    }
+  }
+
+  if (length(errors) > 0) {
+    stop("PCR handle errors in ", handles_path, ":\n  - ",
+         paste(errors, collapse = "\n  - "))
+  }
+
+  # Extract lengths and enforce uniformity
+  fwd_lens <- vapply(cfg$pcr_handles, function(p) nchar(p$fwd), integer(1))
+  rev_lens <- vapply(cfg$pcr_handles, function(p) nchar(p$rev), integer(1))
+
+  if (length(unique(fwd_lens)) > 1L) {
+    stop(
+      "All PCR handle fwd sequences must be the same length. ",
+      "Got lengths: ", paste(unique(fwd_lens), collapse = ", ")
+    )
+  }
+  if (length(unique(rev_lens)) > 1L) {
+    stop(
+      "All PCR handle rev sequences must be the same length. ",
+      "Got lengths: ", paste(unique(rev_lens), collapse = ", ")
+    )
+  }
+
+  fwd_len <- fwd_lens[1]
+  rev_len <- rev_lens[1]
+
+  # Minimum length check (handles should be usable as PCR primers)
+  if (fwd_len < 15L) {
+    errors <- c(errors, paste0(
+      "PCR handle fwd length (", fwd_len, " nt) is below minimum of 15 nt"
+    ))
+  }
+  if (rev_len < 15L) {
+    errors <- c(errors, paste0(
+      "PCR handle rev length (", rev_len, " nt) is below minimum of 15 nt"
+    ))
+  }
+
+  # Check for enzyme sites in each handle (hard error — can cause off-target
+  # digestion of the synthesized oligo even though handles are outside BsaI sites)
+  for (i in seq_len(n_pairs)) {
+    pair <- cfg$pcr_handles[[i]]
+    for (handle_end in c("fwd", "rev")) {
+      seq <- pair[[handle_end]]
+      for (enz_name in names(ENZYMES)) {
+        sites <- find_enzyme_sites(seq, ENZYMES[[enz_name]]$recog)
+        if (nrow(sites) > 0) {
+          errors <- c(errors, paste0(
+            "Row ", i, " ", handle_end, " contains ",
+            enz_name, " recognition site"
+          ))
+        }
+      }
+    }
+  }
+
+  if (length(errors) > 0) {
+    stop("PCR handle errors in ", handles_path, ":\n  - ",
+         paste(errors, collapse = "\n  - "))
+  }
+
+  # Soft checks: uniqueness, GC, homopolymers (warnings, not errors)
+  fwd_seqs <- vapply(cfg$pcr_handles, function(p) p$fwd, character(1))
+  rev_seqs <- vapply(cfg$pcr_handles, function(p) p$rev, character(1))
+
+  if (length(unique(fwd_seqs)) < n_pairs) {
+    cli::cli_alert_warning(
+      "Duplicate fwd handle sequences detected -- tiles sharing handles cannot be selectively amplified"
+    )
+  }
+  if (length(unique(rev_seqs)) < n_pairs) {
+    cli::cli_alert_warning(
+      "Duplicate rev handle sequences detected -- tiles sharing handles cannot be selectively amplified"
+    )
+  }
+  fwd_rev_overlap <- intersect(fwd_seqs, rev_seqs)
+  if (length(fwd_rev_overlap) > 0) {
+    cli::cli_alert_warning(
+      "Some fwd handles are identical to rev handles -- this may cause PCR cross-amplification"
+    )
+  }
+
+  for (i in seq_len(n_pairs)) {
+    pair <- cfg$pcr_handles[[i]]
+    for (handle_end in c("fwd", "rev")) {
+      seq <- pair[[handle_end]]
+      gc <- gc_content(seq)
+      if (gc < 0.30 || gc > 0.70) {
+        cli::cli_alert_warning(paste0(
+          "Row ", i, " ", handle_end,
+          " GC content = ", round(gc * 100, 1), "% (outside 30-70% range)"
+        ))
+      }
+      if (has_homopolymer(seq, max_run = 4L)) {
+        cli::cli_alert_warning(paste0(
+          "Row ", i, " ", handle_end,
+          " contains homopolymer run > 4 nt"
+        ))
+      }
+    }
+  }
+
+  # Store computed values
+  cfg$fwd_handle_length <- as.integer(fwd_len)
+  cfg$rev_handle_length <- as.integer(rev_len)
+  cfg$handle_overhead <- as.integer(fwd_len + rev_len)
+
+  cli::cli_alert_info(paste0(
+    "PCR handles: ", n_pairs, " pair(s), ",
+    fwd_len, " nt fwd + ", rev_len, " nt rev = ",
+    cfg$handle_overhead, " nt overhead per oligo"
+  ))
 
   cfg
 }
@@ -310,6 +507,20 @@ validate_config <- function(cfg) {
       "overlap_codons must be even (got ", cfg$overlap_codons,
       "). Odd values create asymmetric mutable/immutable splits at tile boundaries."
     ))
+  }
+
+  # PCR handle budget check: mutable region must remain viable (>= 30 nt = 10 codons)
+  if (!is.null(cfg$pcr_handles) && !identical(cfg$barcode_length, "auto")) {
+    # Fixed overhead = 44 + barcode_length + handle_overhead
+    fixed_overhead <- 44L + cfg$barcode_length + cfg$handle_overhead
+    mutable_remaining <- cfg$max_oligo_length - fixed_overhead
+    if (mutable_remaining < 30L) {
+      errors <- c(errors, paste0(
+        "PCR handles + barcode leave only ", mutable_remaining,
+        " nt for the mutable region (minimum 30 nt = 10 codons). ",
+        "Reduce handle length, barcode length, or increase max_oligo_length."
+      ))
+    }
   }
 
   if (length(errors) > 0) {

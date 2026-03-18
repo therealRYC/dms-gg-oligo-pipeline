@@ -55,6 +55,35 @@ intergene_elements:
 max_oligo_length: 300                      # Twist oligo pool max (nt)
 max_geneblock_length: 1800                 # Gene fragment synthesis max (nt)
 
+# --- PCR Handles (optional) ---
+# Per-tile PCR primer handles for selective amplification from a pooled oligo order.
+# When ordering multiple tiles in a single oligo pool, each tile gets a unique
+# fwd/rev handle pair flanking the oligo. These sit OUTSIDE the BsaI sites:
+#
+#   5'—[fwd_handle]—BsaI_fwd—oh1—[mutable]—...—BsaI_rev_oh4—[rev_handle]—3'
+#
+# Handles are stripped during BsaI digestion and serve only for PCR amplification.
+# Provide a path to a CSV file with 'fwd' and 'rev' columns — one row per tile,
+# in tile order. All fwd handles must be the same length; all rev handles must
+# be the same length (fwd_len may differ from rev_len). Minimum 15 nt per handle.
+#
+# Example CSV (pcr_handles.csv):
+#   fwd,rev
+#   ACGTACGTACGTACGTACGT,TGCATGCATGCATGCATGCA
+#   GCTAGCTAGCTAGCTAGCTA,ATCGATCGATCGATCGATCG
+#
+# To order primers:
+#   Forward primer = fwd handle sequence (as written)
+#   Reverse primer = reverse complement of rev handle (output in pcr_primer_table.csv)
+#
+# If omitted, no handles are added (backward compatible — use when ordering
+# one pool per tile). Provide more rows than expected tiles; extras are ignored.
+#
+# IMPORTANT: Handles eat into the 300 nt oligo budget. Adding 20+20 = 40 nt of
+# handles reduces the mutable region by ~40 nt (~13 codons), resulting in more tiles.
+#
+# pcr_handles: "path/to/pcr_handles.csv"
+
 # --- Barcode Design ---
 # Unified hierarchical prefix-suffix mode:
 #   barcode = prefix(p nt) + suffix(L-p nt)

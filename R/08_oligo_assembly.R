@@ -1,13 +1,14 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-16 — Support oh_R cassette extension (full_seq parameter for last tile)
+# Last updated: 2026-03-17 — Add optional PCR handle support (pcr_handles parameter)
 # 08_oligo_assembly.R — Assemble universal oligo sequences for 3-enzyme architecture
 # DMS Golden Gate Oligo Pipeline
 #
 # Universal oligo structure (ALL tile types — no tile-type-specific logic):
 #
-#   5'—BsaI_fwd(7)—oh1(4)—[mutable region]—BsmBI_rev_oh2(11)—BsmBI_fwd_oh3(11)—barcode(12)—BsaI_rev_oh4(11)—3'
+#   5'—[fwd_handle]—BsaI_fwd(7)—oh1(4)—[mutable region]—BsmBI_rev_oh2(11)—BsmBI_fwd_oh3(11)—barcode(12)—BsaI_rev_oh4(11)—[rev_handle]—3'
 #
 # Where:
+#   fwd_handle = optional PCR handle for tile-specific amplification (0 nt if not used)
 #   BsaI_fwd = GGTCTC + A (recognition + 1nt spacer) = 7 nt
 #   oh1      = 4 nt WT gene sequence at tile's 5' boundary (BsaI overhang)
 #   mutable  = tile interior where mutation occurs
@@ -15,6 +16,7 @@
 #   BsmBI_fwd_oh3 = CGTCTC + A + oh3 = 11 nt
 #   barcode  = 12 nt programmed barcode
 #   BsaI_rev_oh4 = RC(GGTCTC + A + oh4) = 11 nt
+#   rev_handle = optional PCR handle for tile-specific amplification (0 nt if not used)
 
 #' Assemble complete oligo sequences for all variants
 #'
@@ -37,11 +39,16 @@
 #' @param full_seq Full sequence (gene + core cassette) for tiles that extend
 #'   past the gene end (oh_R feature). When NULL, uses cds only (backward
 #'   compatible). Required when the last tile's end_nt exceeds nchar(cds).
+#' @param pcr_handles Optional list of per-tile PCR handle pairs. Each element
+#'   has $fwd and $rev character fields. Handles are prepended/appended outside
+#'   the BsaI sites for tile-specific amplification from pooled oligos. When
+#'   NULL, no handles are added (backward compatible).
 #' @return Data frame with oligo_name, sequence, length, variant_id, tile_id
 assemble_oligos <- function(variants, cds, barcodes, tiles,
                             oh3, oh4,
                             max_oligo_length = MAX_OLIGO_LENGTH,
-                            full_seq = NULL) {
+                            full_seq = NULL,
+                            pcr_handles = NULL) {
   n <- nrow(variants)
 
   # --- (B) Pre-compute invariant enzyme site strings ---
@@ -68,6 +75,16 @@ assemble_oligos <- function(variants, cds, barcodes, tiles,
     wt_tile_seqs[t] <- substring(source, tiles$start_nt[t], tiles$end_nt[t])
     tile_oh2_rev[t] <- orient_enzyme_site("BsmBI", tiles$oh2_seq[t], "reverse")
     tile_lens[t] <- tiles$end_nt[t] - tiles$start_nt[t] + 1L
+  }
+
+  # --- Per-tile PCR handles (empty strings when not provided) ---
+  fwd_handles <- rep("", n_tiles)
+  rev_handles <- rep("", n_tiles)
+  if (!is.null(pcr_handles)) {
+    for (t in seq_len(min(n_tiles, length(pcr_handles)))) {
+      fwd_handles[t] <- pcr_handles[[t]]$fwd
+      rev_handles[t] <- pcr_handles[[t]]$rev
+    }
   }
 
   # --- (C) Pre-allocate output vectors ---
@@ -99,14 +116,17 @@ assemble_oligos <- function(variants, cds, barcodes, tiles,
     mutable_regions <- substring(mutant_tiles, 5L, t_len - 4L)
 
     # (C) Vectorized oligo assembly — single paste0 for all variants in tile
+    # fwd/rev handles are "" when pcr_handles is NULL (zero-cost backward compat)
     sequences[idx] <- paste0(
+      fwd_handles[tid],
       bsai_5prime,
       tile_oh1[tid],
       mutable_regions,
       tile_oh2_rev[tid],
       bsmbi_oh3_str,
       barcodes[idx],
-      bsai_oh4_str
+      bsai_oh4_str,
+      rev_handles[tid]
     )
     # Include barcode_idx in name when barcodes_per_variant > 1 to ensure uniqueness
     if ("barcode_idx" %in% names(variants) && max(variants$barcode_idx) > 1L) {
