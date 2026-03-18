@@ -329,7 +329,8 @@ test_that("filter_barcodes_batch allows TTTT when filter_poliii_term = FALSE", {
 
 test_that("filter_sequences_fast rejects sequences with PolIII terminator", {
   seqs <- c("ACGTACGTACGT", "ACTTTTACGTAC", "ACGATTTCGTAC")
-  result <- filter_sequences_fast(seqs, max_homopolymer = 4, filter_poliii_term = TRUE)
+  result <- filter_sequences_fast(seqs, max_homopolymer = 4, filter_poliii_term = TRUE,
+    filter_hairpin = FALSE, filter_dinuc_repeats = FALSE)
   expect_equal(length(result), 2L)
   expect_false("ACTTTTACGTAC" %in% result)
   expect_true("ACGTACGTACGT" %in% result)
@@ -667,7 +668,9 @@ test_that("design_barcodes includes min_hamming_dist in output", {
     barcode_length = 12,
     min_hamming = 3,
     prefix_length = 8,
-    barcodes_per_variant = 1
+    gc_range = c(0.25, 0.75),
+    barcodes_per_variant = 1,
+    filter_hairpin = FALSE, filter_dinuc_repeats = FALSE
   )
   expect_true("min_hamming_dist" %in% names(result))
   expect_equal(length(result$min_hamming_dist), 10)
