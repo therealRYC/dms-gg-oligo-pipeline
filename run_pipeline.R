@@ -411,27 +411,34 @@ if (isTRUE(cfg$simulate_assembly)) {
   cli::cli_h2("Step 10b: In-silico GG assembly simulation")
   step_start <- proc.time()
   sim_results <- simulate_pipeline_assembly(
-    oligos           = oligos,
-    geneblock_result = geneblock_result,
-    tiles            = tiles,
-    variants         = variants_expanded,
-    barcodes         = barcodes,
-    cds              = gene$cds,
-    polIII           = cfg$downstream_cassette,
-    assembly_plan    = assembly_plan,
-    samples_per_tile = cfg$simulation_samples_per_tile
+    oligos              = oligos,
+    geneblock_result    = geneblock_result,
+    tiles               = tiles,
+    variants            = variants_expanded,
+    barcodes            = barcodes,
+    cds                 = gene$cds,
+    polIII              = cfg$downstream_cassette,
+    assembly_plan       = assembly_plan,
+    samples_per_tile    = cfg$simulation_samples_per_tile,
+    overlap_codons      = cfg$overlap_codons %||% 6L,
+    targeted_sampling   = TRUE,
+    strict_verification = TRUE,
+    paqci_star2         = cfg$paqci_star2,
+    paqci_star1         = cfg$paqci_star1
   )
-  n_pass <- sum(sim_results$pass, na.rm = TRUE)
   n_total <- nrow(sim_results)
+
+  # Report coarse verification results
+  n_pass <- sum(sim_results$pass, na.rm = TRUE)
   step_elapsed <- (proc.time() - step_start)[["elapsed"]]
   step_timings[["10b_simulation"]] <- step_elapsed
   if (n_pass == n_total) {
     cli::cli_alert_success(paste0(
-      "Assembly simulation: ", n_pass, "/", n_total, " tiles passed. [{round(step_elapsed, 1)}s]"
+      "Assembly simulation: ", n_pass, "/", n_total, " passed (coarse). [{round(step_elapsed, 1)}s]"
     ))
   } else {
     cli::cli_alert_warning(paste0(
-      "Assembly simulation: ", n_pass, "/", n_total, " tiles passed (",
+      "Assembly simulation: ", n_pass, "/", n_total, " passed (coarse, ",
       n_total - n_pass, " failures). [{round(step_elapsed, 1)}s]"
     ))
     failed <- sim_results[!sim_results$pass, ]
@@ -440,6 +447,37 @@ if (isTRUE(cfg$simulate_assembly)) {
         "  Tile ", failed$tile_id[i], " variant ", failed$variant_id[i],
         ": ", failed$error[i]
       ))
+    }
+  }
+
+  # Report strict verification results
+  if ("strict_pass" %in% names(sim_results) && any(!is.na(sim_results$strict_pass))) {
+    n_strict_pass <- sum(sim_results$strict_pass, na.rm = TRUE)
+    n_strict_total <- sum(!is.na(sim_results$strict_pass))
+    if (n_strict_pass == n_strict_total) {
+      cli::cli_alert_success(paste0(
+        "Strict verification: ", n_strict_pass, "/", n_strict_total,
+        " passed (nucleotide-exact)"
+      ))
+    } else {
+      cli::cli_alert_warning(paste0(
+        "Strict verification: ", n_strict_pass, "/", n_strict_total,
+        " passed (", n_strict_total - n_strict_pass, " mismatches)"
+      ))
+      strict_fail <- sim_results[!is.na(sim_results$strict_pass) & !sim_results$strict_pass, ]
+      for (i in seq_len(min(5L, nrow(strict_fail)))) {
+        cli::cli_alert_danger(paste0(
+          "  Tile ", strict_fail$tile_id[i],
+          " variant ", strict_fail$variant_id[i],
+          ": len=", strict_fail$correct_length[i],
+          " exact=", strict_fail$exact_match[i],
+          " enzymes=", strict_fail$no_internal_enzyme_sites[i],
+          " paqci=", strict_fail$paqci_flanks_present[i],
+          " nodup=", strict_fail$no_duplications[i],
+          if (!is.na(strict_fail$first_mismatch_pos[i]))
+            paste0(" mismatch@", strict_fail$first_mismatch_pos[i]) else ""
+        ))
+      }
     }
   }
 } else {

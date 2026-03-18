@@ -1,5 +1,5 @@
 # Created: 2026-02-21
-# Last updated: 2026-02-25 — Support downstream_cassette (intergene + polIII) in verification
+# Last updated: 2026-03-17 — Targeted junctional sampling + strict nucleotide-level verification
 # 13_gg_simulator.R — In-silico Golden Gate Assembly Simulator
 # DMS Golden Gate Oligo Pipeline
 #
@@ -12,7 +12,10 @@
 #   mark_stuffer_waste()      — Mark internal fragments (both oh non-NA) as waste
 #   ligate_fragments()        — Assemble fragments by matching overhangs
 #   simulate_tile_assembly()  — Full BsaI + BsmBI simulation for one tile
-#   verify_assembly_product() — Check product matches expected gene + barcode
+#   select_junctional_variants() — Pick boundary-vulnerable variants per tile
+#   build_expected_product()  — Construct expected product from first principles
+#   verify_assembly_product_strict() — Exhaustive nucleotide-level product verification
+#   verify_assembly_product() — Coarse check (grepl-based, backward compat)
 #   simulate_pipeline_assembly() — Orchestrate over all tiles
 
 #' Simulate Type IIS restriction enzyme digestion of a linear DNA sequence
@@ -261,6 +264,227 @@ simulate_tile_assembly <- function(oligo_seq, helper_insert_seq,
   final_product
 }
 
+#' Select junctional variants for targeted assembly simulation
+#'
+#' For each tile, picks variant positions most vulnerable to assembly errors:
+#' the first and last `overlap_codons/2` codon positions (near oh1 and oh2
+#' overhangs), plus 1 random interior position. One representative variant
+#' per selected position — all AA substitutions at the same position exercise
+#' the same assembly path.
+#'
+#' With default `overlap_codons = 6`: 3 + 3 + 1 = 7 variants per tile.
+#'
+#' @param tile_var_idx Integer vector of row indices into `variants` for this tile
+#' @param variants Data frame of all variants (must have `position` column)
+#' @param tile Single-row data frame for this tile (unused, reserved for future use)
+#' @param overlap_codons Number of overlap codons at tile boundaries (default 6)
+#' @return Integer vector of row indices into `variants` to simulate
+select_junctional_variants <- function(tile_var_idx, variants, tile,
+                                        overlap_codons = 6L) {
+  # Get unique codon positions assigned to this tile, sorted
+  positions <- sort(unique(variants$position[tile_var_idx]))
+  n_positions <- length(positions)
+  n_edge <- overlap_codons %/% 2L  # default: 3
+
+  if (n_positions <= 2L * n_edge + 1L) {
+    # Not enough positions to separate edges from interior — use all
+    selected_positions <- positions
+  } else {
+    oh1_positions <- positions[seq_len(n_edge)]
+    oh2_positions <- positions[seq(n_positions - n_edge + 1L, n_positions)]
+    interior <- setdiff(positions, c(oh1_positions, oh2_positions))
+    random_interior <- if (length(interior) > 0L) sample(interior, 1L) else integer(0)
+    selected_positions <- c(oh1_positions, oh2_positions, random_interior)
+  }
+
+  # For each selected position, pick 1 representative variant
+  selected_idx <- integer(length(selected_positions))
+  for (i in seq_along(selected_positions)) {
+    pos_idx <- tile_var_idx[variants$position[tile_var_idx] == selected_positions[i]]
+    selected_idx[i] <- pos_idx[1L]
+  }
+
+  selected_idx
+}
+
+#' Build expected assembly product from first principles
+#'
+#' Constructs the exact nucleotide sequence the GG assembly should produce
+#' by concatenating known components, without re-simulating digestion/ligation.
+#' This serves as an independent oracle for verifying simulate_tile_assembly().
+#'
+#' Product structure:
+#'   helper_left_cap + mutant_CDS + cassette_for_block + oh3 + barcode + helper_right_cap
+#'
+#' Where:
+#'   - helper_left_cap = PaqCI_fwd(star2) + BsaI_fwd recognition + spacer
+#'   - helper_right_cap = oh4 + BsaI_rev spacer + recognition + PaqCI_rev(star1)
+#'   - cassette_for_block = core_polIII, core_downstream_cassette, or full polIII
+#'   - oh3 = 4-nt BsmBI overhang bridging cassette and barcode
+#'
+#' When tile boundaries are provided, the mutation is applied only to the
+#' nucleotides within the tile's mutable region (between oh1 and oh2).
+#' Codons that straddle the oh1/mutable or mutable/oh2 boundary will be
+#' partially mutated — this matches the physical assembly behavior.
+#'
+#' @param variant_row Single-row data frame with `position` and `mut_codon`
+#' @param barcode Barcode sequence for this variant
+#' @param cds Domesticated WT CDS (full length)
+#' @param cassette_for_block Cassette content as it appears in gene blocks
+#'   (core_polIII when oh3 is derived, or full polIII otherwise)
+#' @param oh3 4-nt BsmBI overhang between cassette and barcode
+#' @param helper_left_cap Left helper cap body (from BsaI digestion of helper insert)
+#' @param helper_right_cap Right helper cap body (from BsaI digestion of helper insert)
+#' @param tile_start_nt Tile start position in gene (1-based). When provided
+#'   with tile_end_nt, enables partial-overlap-aware mutation.
+#' @param tile_end_nt Tile end position in gene (1-based).
+#' @return Character string of the expected assembled product
+build_expected_product <- function(variant_row, barcode, cds,
+                                    cassette_for_block, oh3,
+                                    helper_left_cap, helper_right_cap,
+                                    tile_start_nt = NULL, tile_end_nt = NULL) {
+
+  codon_start <- (variant_row$position - 1L) * 3L + 1L
+
+  if (!is.null(tile_start_nt) && !is.null(tile_end_nt)) {
+    # The oligo's mutable region covers tile positions 5 to t_len-4,
+    # i.e., gene positions [tile_start+4, tile_end-4]. Only mutate
+    # nucleotides of the codon that fall within this range.
+    mutable_start <- tile_start_nt + 4L
+    mutable_end <- tile_end_nt - 4L
+    gene_chars <- strsplit(cds, "")[[1]]
+    mut_chars <- strsplit(variant_row$mut_codon, "")[[1]]
+    for (i in 0:2) {
+      gene_pos <- codon_start + i
+      if (gene_pos >= mutable_start && gene_pos <= mutable_end) {
+        gene_chars[gene_pos] <- mut_chars[i + 1L]
+      }
+    }
+    mutant_cds <- paste0(gene_chars, collapse = "")
+  } else {
+    mutant_cds <- replace_codon(cds, variant_row$position, variant_row$mut_codon)
+  }
+
+  paste0(helper_left_cap, mutant_cds, cassette_for_block, oh3, barcode, helper_right_cap)
+}
+
+#' Strict nucleotide-level verification of an assembled product
+#'
+#' Performs exhaustive checks beyond the coarse grepl-based verify_assembly_product().
+#' Catches off-by-one errors, duplicated elements, residual enzyme sites, PaqCI
+#' flank issues, and length mismatches.
+#'
+#' @param product Character string of the actual assembled product
+#' @param expected Character string of the expected product (from build_expected_product)
+#' @param expected_cds Domesticated WT CDS
+#' @param mut_position Codon position of the mutation (1-based)
+#' @param mut_codon Mutant codon sequence
+#' @param cassette_for_block Cassette content as it appears in gene blocks
+#' @param barcode Barcode sequence
+#' @param oh3 4-nt BsmBI overhang between cassette and barcode
+#' @param paqci_star2 PaqCI** overhang (5' end)
+#' @param paqci_star1 PaqCI* overhang (3' end)
+#' @param helper_left_cap_len Length of the left helper cap (for interior boundary)
+#' @param helper_right_cap_len Length of the right helper cap (for interior boundary)
+#' @param tile_start_nt Tile start position (1-based) for overlap-aware mutation.
+#'   When provided, the duplication check uses the partial mutation that the
+#'   assembly actually produces (matching build_expected_product behavior).
+#' @param tile_end_nt Tile end position (1-based).
+#' @return List with pass (logical) and diagnostic flags
+verify_assembly_product_strict <- function(product, expected,
+                                            expected_cds, mut_position, mut_codon,
+                                            cassette_for_block, barcode, oh3,
+                                            paqci_star2, paqci_star1,
+                                            helper_left_cap_len, helper_right_cap_len,
+                                            tile_start_nt = NULL, tile_end_nt = NULL) {
+
+  # --- Check 1: Exact length ---
+  correct_length <- nchar(product) == nchar(expected)
+
+  # --- Check 2: Exact sequence match ---
+  exact_match <- identical(product, expected)
+
+  # --- Check 3: No internal enzyme sites ---
+  # Check the biological payload (gene + cassette + oh3 + barcode),
+  # excluding helper cap regions which contain structural BsaI sites.
+  product_len <- nchar(product)
+  internal_sites_found <- character(0)
+  if (product_len > helper_left_cap_len + helper_right_cap_len) {
+    payload <- substring(product,
+                          helper_left_cap_len + 1L,
+                          product_len - helper_right_cap_len)
+    for (enz_name in c("BsaI", "BsmBI", "PaqCI")) {
+      sites <- find_enzyme_sites(payload, ENZYMES[[enz_name]]$recog)
+      if (nrow(sites) > 0L) {
+        internal_sites_found <- c(internal_sites_found, enz_name)
+      }
+    }
+  }
+  no_internal_enzyme_sites <- length(internal_sites_found) == 0L
+
+  # --- Check 4: PaqCI flanks correct ---
+  paqci_fwd <- orient_enzyme_site("PaqCI", paqci_star2, "forward")
+  paqci_rev <- orient_enzyme_site("PaqCI", paqci_star1, "reverse")
+  paqci_flanks_present <- startsWith(product, paqci_fwd) && endsWith(product, paqci_rev)
+
+  # --- Check 5: No duplicated elements ---
+  # Each key element should appear exactly once in the product.
+  # Use overlap-aware mutation when tile boundaries are provided,
+  # matching the physical assembly behavior for boundary codons.
+  if (!is.null(tile_start_nt) && !is.null(tile_end_nt)) {
+    mutable_start <- tile_start_nt + 4L
+    mutable_end <- tile_end_nt - 4L
+    codon_start <- (mut_position - 1L) * 3L + 1L
+    gene_chars <- strsplit(expected_cds, "")[[1]]
+    mut_chars <- strsplit(mut_codon, "")[[1]]
+    for (i in 0:2) {
+      gene_pos <- codon_start + i
+      if (gene_pos >= mutable_start && gene_pos <= mutable_end) {
+        gene_chars[gene_pos] <- mut_chars[i + 1L]
+      }
+    }
+    mutant_cds <- paste0(gene_chars, collapse = "")
+  } else {
+    mutant_cds <- replace_codon(expected_cds, mut_position, mut_codon)
+  }
+  count_occurrences <- function(pattern, text) {
+    m <- gregexpr(pattern, text, fixed = TRUE)[[1]]
+    if (length(m) == 1L && m[1L] == -1L) 0L else length(m)
+  }
+  cds_count <- count_occurrences(mutant_cds, product)
+  cassette_count <- count_occurrences(cassette_for_block, product)
+  barcode_count <- count_occurrences(barcode, product)
+  no_duplications <- (cds_count == 1L) && (cassette_count == 1L) && (barcode_count == 1L)
+
+  # --- Check 6: First mismatch position (diagnostic) ---
+  first_mismatch_pos <- NA_integer_
+  if (!exact_match) {
+    min_len <- min(nchar(product), nchar(expected))
+    if (min_len > 0L) {
+      prod_chars <- strsplit(substring(product, 1, min_len), "")[[1]]
+      exp_chars <- strsplit(substring(expected, 1, min_len), "")[[1]]
+      diffs <- which(prod_chars != exp_chars)
+      first_mismatch_pos <- if (length(diffs) > 0L) diffs[1] else min_len + 1L
+    }
+  }
+
+  pass <- correct_length && exact_match && no_internal_enzyme_sites &&
+          paqci_flanks_present && no_duplications
+
+  list(
+    pass = pass,
+    correct_length = correct_length,
+    exact_match = exact_match,
+    no_internal_enzyme_sites = no_internal_enzyme_sites,
+    paqci_flanks_present = paqci_flanks_present,
+    no_duplications = no_duplications,
+    product_length = nchar(product),
+    expected_length = nchar(expected),
+    first_mismatch_pos = first_mismatch_pos,
+    internal_sites_found = paste(internal_sites_found, collapse = ",")
+  )
+}
+
 #' Verify an assembled product matches the expected sequence
 #'
 #' Checks that the product contains the expected mutant CDS, the PolIII
@@ -310,7 +534,10 @@ verify_assembly_product <- function(product, expected_cds, mut_position, mut_cod
 #' Simulate assembly for multiple tiles across the pipeline
 #'
 #' For each tile, samples variant(s) and runs simulate_tile_assembly +
-#' verify_assembly_product. Reports results per tile.
+#' verify_assembly_product. When strict_verification is TRUE (default),
+#' also runs build_expected_product + verify_assembly_product_strict for
+#' exhaustive nucleotide-level checks. When targeted_sampling is TRUE
+#' (default), selects junctional variants instead of random sampling.
 #'
 #' @param oligos Data frame from assemble_oligos()
 #' @param geneblock_result List from design_wt_geneblocks()
@@ -320,12 +547,26 @@ verify_assembly_product <- function(product, expected_cds, mut_position, mut_cod
 #' @param cds Domesticated CDS
 #' @param polIII PolIII promoter sequence
 #' @param assembly_plan Assembly plan from plan_assembly()
-#' @param samples_per_tile Number of variants to test per tile (default 1)
-#' @return Data frame with tile_id, variant_id, pass, and detail columns
+#' @param samples_per_tile Number of random variants per tile (when targeted_sampling=FALSE)
+#' @param overlap_codons Number of overlap codons at tile boundaries for
+#'   junctional variant selection (default 6, gives 3+3+1=7 per tile)
+#' @param targeted_sampling Logical; if TRUE (default), use select_junctional_variants()
+#'   instead of random sampling
+#' @param strict_verification Logical; if TRUE (default), run verify_assembly_product_strict()
+#'   in addition to the original verify_assembly_product()
+#' @param paqci_star2 PaqCI** overhang (5' end). If NULL, extracted from helper_plasmid.
+#' @param paqci_star1 PaqCI* overhang (3' end). If NULL, extracted from helper_plasmid.
+#' @return Data frame with tile_id, variant_id, pass, detail columns, and
+#'   strict verification columns when enabled
 simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants,
                                         barcodes, cds, polIII,
                                         assembly_plan = NULL,
-                                        samples_per_tile = 1L) {
+                                        samples_per_tile = 1L,
+                                        overlap_codons = 6L,
+                                        targeted_sampling = TRUE,
+                                        strict_verification = TRUE,
+                                        paqci_star2 = NULL,
+                                        paqci_star1 = NULL) {
 
   blocks <- geneblock_result$blocks
   manifests <- geneblock_result$tile_manifests
@@ -341,6 +582,29 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
     NULL
   }
 
+  # --- Pre-compute strict verification components (once, before tile loop) ---
+  cassette_for_block <- NULL
+  helper_left_cap <- NULL
+  helper_right_cap <- NULL
+  oh3 <- NULL
+
+  if (strict_verification) {
+    # Cassette content as it appears in gene blocks:
+    # core_downstream_cassette (intergene+derived) > core_polIII (derived) > polIII (non-derived)
+    cassette_for_block <- core_polIII %||% polIII
+
+    oh3 <- if (!is.null(assembly_plan)) assembly_plan$oh3 else NULL
+
+    # Pre-compute helper caps by BsaI digestion of helper insert
+    helper_frags <- digest_linear(helper_insert_seq, "BsaI", source_label = "helper")
+    helper_left_cap <- helper_frags[[1]]$body
+    helper_right_cap <- helper_frags[[length(helper_frags)]]$body
+
+    # Get PaqCI overhangs from helper plasmid if not provided
+    if (is.null(paqci_star2)) paqci_star2 <- geneblock_result$helper_plasmid$paqci_star2
+    if (is.null(paqci_star1)) paqci_star1 <- geneblock_result$helper_plasmid$paqci_star1
+  }
+
   results <- list()
 
   for (t in seq_len(nrow(tiles))) {
@@ -350,12 +614,12 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
     tile_var_idx <- which(variants$tile_id == tile_id)
     if (length(tile_var_idx) == 0L) next
 
-    # Sample variants
-    n_sample <- min(samples_per_tile, length(tile_var_idx))
-    sampled_idx <- if (n_sample == length(tile_var_idx)) {
-      tile_var_idx
+    # Select variants: targeted junctional sampling or random
+    sampled_idx <- if (targeted_sampling) {
+      select_junctional_variants(tile_var_idx, variants, tiles[t, ], overlap_codons)
     } else {
-      sample(tile_var_idx, n_sample)
+      n_sample <- min(samples_per_tile, length(tile_var_idx))
+      if (n_sample == length(tile_var_idx)) tile_var_idx else sample(tile_var_idx, n_sample)
     }
 
     # Get BsaI and BsmBI block sequences for this tile from the manifest
@@ -382,6 +646,8 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
           bsai_block_seqs = bsai_block_seqs,
           bsmbi_block_seqs = bsmbi_block_seqs
         )
+
+        # Original (coarse) verification
         verify <- verify_assembly_product(
           product = product,
           expected_cds = cds,
@@ -391,13 +657,58 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
           barcode = barcode,
           core_polIII = core_polIII
         )
+
+        # Strict (nucleotide-level) verification
+        strict <- if (strict_verification && !is.null(oh3)) {
+          expected_product <- build_expected_product(
+            variant_row = variants[vi, , drop = FALSE],
+            barcode = barcode,
+            cds = cds,
+            cassette_for_block = cassette_for_block,
+            oh3 = oh3,
+            helper_left_cap = helper_left_cap,
+            helper_right_cap = helper_right_cap,
+            tile_start_nt = tiles$start_nt[t],
+            tile_end_nt = tiles$end_nt[t]
+          )
+          verify_assembly_product_strict(
+            product = product,
+            expected = expected_product,
+            expected_cds = cds,
+            mut_position = variants$position[vi],
+            mut_codon = variants$mut_codon[vi],
+            cassette_for_block = cassette_for_block,
+            barcode = barcode,
+            oh3 = oh3,
+            paqci_star2 = paqci_star2,
+            paqci_star1 = paqci_star1,
+            helper_left_cap_len = nchar(helper_left_cap),
+            helper_right_cap_len = nchar(helper_right_cap),
+            tile_start_nt = tiles$start_nt[t],
+            tile_end_nt = tiles$end_nt[t]
+          )
+        } else {
+          list(pass = NA, correct_length = NA, exact_match = NA,
+               no_internal_enzyme_sites = NA, paqci_flanks_present = NA,
+               no_duplications = NA, product_length = NA_integer_,
+               expected_length = NA_integer_, first_mismatch_pos = NA_integer_,
+               internal_sites_found = NA_character_)
+        }
+
         list(
           pass = verify$pass,
           has_mut_gene = verify$has_mut_gene,
           has_polIII = verify$has_polIII,
           has_barcode = verify$has_barcode,
           correct_order = verify$correct_order,
-          error = NA_character_
+          error = NA_character_,
+          strict_pass = strict$pass,
+          correct_length = strict$correct_length,
+          exact_match = strict$exact_match,
+          no_internal_enzyme_sites = strict$no_internal_enzyme_sites,
+          paqci_flanks_present = strict$paqci_flanks_present,
+          no_duplications = strict$no_duplications,
+          first_mismatch_pos = strict$first_mismatch_pos
         )
       }, error = function(e) {
         list(
@@ -406,7 +717,14 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
           has_polIII = NA,
           has_barcode = NA,
           correct_order = NA,
-          error = conditionMessage(e)
+          error = conditionMessage(e),
+          strict_pass = NA,
+          correct_length = NA,
+          exact_match = NA,
+          no_internal_enzyme_sites = NA,
+          paqci_flanks_present = NA,
+          no_duplications = NA,
+          first_mismatch_pos = NA_integer_
         )
       })
 
@@ -419,6 +737,13 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
         has_barcode = result$has_barcode,
         correct_order = result$correct_order,
         error = result$error,
+        strict_pass = result$strict_pass,
+        correct_length = result$correct_length,
+        exact_match = result$exact_match,
+        no_internal_enzyme_sites = result$no_internal_enzyme_sites,
+        paqci_flanks_present = result$paqci_flanks_present,
+        no_duplications = result$no_duplications,
+        first_mismatch_pos = result$first_mismatch_pos,
         stringsAsFactors = FALSE
       )
     }
@@ -430,6 +755,10 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
       pass = logical(0), has_mut_gene = logical(0),
       has_polIII = logical(0), has_barcode = logical(0),
       correct_order = logical(0), error = character(0),
+      strict_pass = logical(0), correct_length = logical(0),
+      exact_match = logical(0), no_internal_enzyme_sites = logical(0),
+      paqci_flanks_present = logical(0), no_duplications = logical(0),
+      first_mismatch_pos = integer(0),
       stringsAsFactors = FALSE
     ))
   }
