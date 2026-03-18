@@ -116,11 +116,11 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 4. **Codon table** (`03_codon_table.R`) -- Human codon usage table, preferred codon lookup
 5. **Mutation design** (`04_mutation_design.R`) -- Generate 19 missense + 1 nonsense + 1 WT control per position (+ optional synonymous) using preferred human codons
 6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- Reaction-aware boundary optimization: SB boundaries placed first via simulated annealing MC (maximizing min set fidelity across all reactions), then tile boundaries within SB segments via max-min DP + joint refinement; oh3/oh4 auto-selection by score ranking; oh_R cassette search extends last tile into downstream cassette for stop codon mutability
-7. **Barcode design** (`07_barcode_design.R`) -- Unified hierarchical prefix-suffix barcodes with Hamming distance guarantee on prefixes
-8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles; last tile includes invariant cassette prefix from oh_R extension)
-9. **Gene block design** (`09_wt_geneblock_design.R`) -- WT gene blocks with correct flanking enzyme sites; superblock splitting for fragments >1800 bp
-10. **QC** (`10_qc_checks.R`) -- Validates oligo lengths, enzyme site absence, barcode uniqueness, tile coverage, gene block sizes
-10b. **In-silico GG simulation** (`13_gg_simulator.R`, optional) -- Simulates BsaI + BsmBI digestion and ligation for sampled oligos; verifies assembled products match expected sequences
+7. **Barcode design** (`07_barcode_design.R`) -- Unified hierarchical prefix-suffix barcodes with Hamming distance guarantee on prefixes; optional enhanced filters (GGC motif, hairpin, dinucleotide repeats, poly-G, Tm uniformity)
+8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles; last tile includes invariant cassette prefix from oh_R extension; optional per-tile PCR handles for pooled amplification)
+9. **Gene block design** (`09_wt_geneblock_design.R`) -- WT gene blocks with flanking pads for efficient Type IIs cleavage; superblock splitting for fragments >1800 bp
+10. **QC** (`10_qc_checks.R`) -- Validates oligo lengths, enzyme site absence, barcode uniqueness, tile coverage, gene block sizes, PCR handle integrity, enhanced barcode filter compliance
+10b. **In-silico GG simulation** (`13_gg_simulator.R`, optional) -- Simulates BsaI + BsmBI digestion and ligation with targeted junctional sampling; strict nucleotide-level verification of assembled products
 11. **Output** (`11_output.R`) -- Write CSV and FASTA files (including skipped gene-edge variants)
 12. **Report** (`12_report.R`) -- Generate wetlab-compatible Markdown assembly report with per-tile guides
 
@@ -131,6 +131,12 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 **Boundary optimization**: The `dp` mode uses dynamic programming to place tile boundaries across the gene, maximizing overhang quality (fidelity × efficiency from BsmBI cycling data, Pryor et al. 2020). Multi-K search explores different tile counts and stops early when gains diminish. Superblock boundaries are then assigned at tile junctions with iterative collision blacklisting.
 
 **Barcode design**: Unified hierarchical prefix-suffix mode -- each variant gets a unique high-Hamming-distance prefix (12 nt), extended with filtered random suffixes to the full barcode length (20 nt). Cross-variant Hamming distance is guaranteed by the prefix; within-variant replicates differ only in their suffix. Configurable `barcodes_per_variant` (default 10) for experimental replication. Prefixes that create enzyme sites at junction boundaries are automatically filtered. For `min_hamming <= 3`, prefixes are generated using GF(4) linear codes (algebraically guaranteed distance, deterministic). For `min_hamming >= 4`, prefixes are generated using DNABarcodes lexicodes (Conway/Ashlock heuristics).
+
+**PCR handles**: Optional per-tile PCR handles flank each oligo outside the BsaI sites for tile-specific amplification from pooled oligo orders. Specified via a CSV file (`fwd,rev` columns, one row per tile) referenced in config as `pcr_handles: "path/to/handles.csv"`. Handles reduce the mutable region budget (eating into the 300 nt Twist max), potentially increasing tile count. The pipeline validates handle count ≥ tile count after assembly planning.
+
+**Enhanced barcode filters**: Five opt-in filters beyond the standard enzyme site, homopolymer, and GC checks: GGC motif (Illumina error hotspot), hairpin stems, dinucleotide repeats, poly-G runs (two-color chemistry), and Tm uniformity. All default to off. Enable via config flags (`barcode_filter_ggc: true`, etc.).
+
+**Gene block flanking pads**: Gene blocks include flanking DNA (default "TTTT", 4 nt) outside the Type IIs recognition sites at both termini. NEB recommends ≥4 bp for efficient cleavage of linear fragments. Configurable via `geneblock_flanking_pad` in config.
 
 **Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split into superblocks at tile boundaries with iterative collision blacklisting. SB junction overhangs are gene-derived 4-mers at the split positions. For very long downstream cassettes (>~1700 nt), the cassette itself is split across multiple BsmBI-connected fragments — no user action required.
 

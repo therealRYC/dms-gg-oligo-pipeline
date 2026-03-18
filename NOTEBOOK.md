@@ -1947,3 +1947,81 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 
 **Next steps**:
 - Provide example `pcr_handles.csv` with validated primer sets for common tile counts
+
+---
+
+### 2026-03-17 22:38 — Enhanced barcode filters (GGC, hairpin, dinuc repeats, poly-G, Tm)
+
+**Type**: session
+**Status**: completed
+**Tags**: [barcode, filtering, sequencing-quality, illumina, hairpin]
+
+**Goal**: Add biologically-informed barcode filters beyond the existing enzyme site, homopolymer, and GC content checks.
+
+**Approach**: Added 5 new opt-in filters to `design_barcodes()` in `07_barcode_design.R`, each with vectorized helper functions for batch filtering. All default to off — users enable via config flags. QC checks in `10_qc_checks.R` report filter status when enabled.
+
+**New filters**:
+- `filter_ggc`: Remove barcodes containing GGC motif (Illumina sequencing error hotspot)
+- `filter_hairpin`: Remove barcodes with hairpin stems > `max_hairpin_stem` bp (default 4)
+- `filter_dinuc_repeats`: Remove barcodes with dinucleotide repeats > `max_dinuc_repeat_units` (default 3)
+- `filter_polyg`: Remove barcodes with poly-G runs > `max_polyg` (default 3, two-color chemistry issue)
+- `filter_tm_uniformity`: Remove barcodes with Tm > `tm_tolerance` °C from median (default 3.0°C)
+
+**Artifacts**:
+- `R/07_barcode_design.R` — filter helpers (`has_ggc_motif_vec`, `has_hairpin_vec`, `has_dinuc_repeat_vec`, `has_polyg_vec`, `nn_tm_vec`) + integration into `filter_sequences_fast()`
+- `R/constants.R` — `DEFAULT_MAX_HAIRPIN_STEM`, `DEFAULT_MAX_DINUC_REPEAT_UNITS`, `DEFAULT_MAX_POLYG`, `DEFAULT_TM_TOLERANCE`
+- `R/10_qc_checks.R` — QC checks 14b-14f for each filter + Tm distribution
+
+**Related commits**:
+- `75e9131` — feat: Add enhanced barcode filter constants and config params
+- `f4236ec` — feat: Add filter helpers and wire into barcode pipeline
+- `e17f345` — feat: Pipeline integration, QC checks, and config docs
+- `53ceefa` — test: Add tests for enhanced barcode filters
+
+---
+
+### 2026-03-17 22:38 — Gene block flanking pads for Type IIs cleavage efficiency
+
+**Type**: session
+**Status**: completed
+**Tags**: [gene-blocks, flanking-pad, type-iis, assembly-efficiency]
+
+**Goal**: Add flanking DNA outside enzyme recognition sites on gene blocks to improve Type IIs digestion efficiency at linear fragment termini.
+
+**Approach**: NEB recommends ≥4 bp flanking for reliable cleavage (see `Brainstorm/260317_geneblock-flanking-overhangs.md`). Added `flanking_pad` parameter to `create_bsai_block()` and `create_bsmbi_block()` in `09_wt_geneblock_design.R`. The pad is prepended and appended outside the enzyme sites: `pad + BsaI_fwd + gene + BsaI_rev + pad`. Default "TTTT" (4 nt). Configurable via `geneblock_flanking_pad` in config. Pad overhead counted in block length calculations.
+
+**Artifacts**:
+- `R/09_wt_geneblock_design.R` — `flanking_pad` threaded through all block construction paths
+- `Brainstorm/260317_geneblock-flanking-overhangs.md` — Research notes on flanking requirements
+
+**Related commits**:
+- `8fb2713` — brainstorm: Gene block flanking overhangs research
+- `50bc384` — feat: Add flanking pads to gene blocks
+
+---
+
+### 2026-03-17 22:38 — Strict nucleotide-level GG verification + targeted junctional sampling
+
+**Type**: session
+**Status**: completed
+**Tags**: [gg-simulator, verification, assembly-correctness, testing]
+
+**Goal**: Add nucleotide-exact verification to the GG assembly simulator, beyond the existing grep-based coarse checks (has_mut_gene, has_polIII, has_barcode).
+
+**Approach**: Extended `simulate_pipeline_assembly()` in `13_gg_simulator.R` with strict verification that reconstructs the expected full-length product nucleotide-by-nucleotide and compares to the actual ligation product. Also added targeted junctional sampling that preferentially tests variants near tile boundaries (where assembly errors are most likely) rather than random sampling.
+
+**Key checks in strict mode**:
+- Exact nucleotide match between expected and actual assembled product
+- Correct product length
+- No internal enzyme sites in the assembled product
+- PaqCI flanks present at expected positions
+- No duplicated segments from incorrect ligation
+- First mismatch position reported for debugging
+
+**Artifacts**:
+- `R/13_gg_simulator.R` — `strict_verification` and `targeted_sampling` parameters
+- `run_pipeline.R` — Strict verification results reported in pipeline output
+
+**Related commits**:
+- `bdb2250` — feat: Add targeted junctional sampling + strict nucleotide-level GG verification
+- `c5704e1` — fix: Handle partial oh1/oh2 overlap in strict GG verifier
