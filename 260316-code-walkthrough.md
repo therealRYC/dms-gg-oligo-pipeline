@@ -1,7 +1,7 @@
 # DMS GG Oligo Pipeline — Code Walkthrough
 
 *Code review and implementation guide for the `dms-gg-oligo-pipeline`*
-*Generated: 2026-03-07, updated 2026-03-16*
+*Generated: 2026-03-07, updated 2026-03-17*
 
 ---
 
@@ -53,10 +53,11 @@ The pipeline uses three Type IIS restriction enzymes in a hierarchical assembly:
 Every oligo in the pool has the same layout, regardless of where the mutation falls in the gene:
 
 ```
-5'—BsaI_fwd(7)—oh1(4)—[mutable region]—BsmBI_rev_oh2(11)—BsmBI_fwd_oh3(11)—barcode—BsaI_rev_oh4(11)—3'
+5'—[fwd_handle]—BsaI_fwd(7)—oh1(4)—[mutable region]—BsmBI_rev_oh2(11)—BsmBI_fwd_oh3(11)—barcode—BsaI_rev_oh4(11)—[rev_handle]—3'
 ```
 
 Where:
+- `fwd_handle` = optional PCR handle for tile-specific amplification — **0 nt** if not used
 - `BsaI_fwd` = `GGTCTCA` (recognition + 1nt spacer) — **7 nt**
 - `oh1` = 4 nt WT gene sequence at tile's 5' boundary (BsaI overhang)
 - `[mutable region]` = tile interior where the mutation is placed — **~230 nt**
@@ -64,8 +65,9 @@ Where:
 - `BsmBI_fwd_oh3` = CGTCTC + A + oh3 — **11 nt** (same for all tiles)
 - `barcode` = programmed barcode — **20 nt** (default)
 - `BsaI_rev_oh4` = RC of (GGTCTC + A + oh4) — **11 nt** (same for all tiles)
+- `rev_handle` = optional PCR handle for tile-specific amplification — **0 nt** if not used
 
-**Total fixed overhead** = 7 + 4 + 11 + 11 + 20 + 11 = **64 nt**, leaving **236 nt** (~78 codons) for the mutable region at the 300 nt Twist max.
+**Total fixed overhead** = 7 + 4 + 11 + 11 + 20 + 11 = **64 nt** (without handles), leaving **236 nt** (~78 codons) for the mutable region at the 300 nt Twist max. When PCR handles are used, they reduce the mutable region budget accordingly.
 
 ### Data Flow Summary
 
@@ -686,7 +688,7 @@ Constraints:
 
 ### `07_barcode_design.R` — Unified hierarchical prefix-suffix barcodes
 
-**File**: `R/07_barcode_design.R` (~600 lines)
+**File**: `R/07_barcode_design.R` (~830 lines)
 
 ### `07b_linear_codes.R` — GF(4) Hamming code construction
 
@@ -780,6 +782,20 @@ filter_sequences_fast <- function(seqs, max_homopolymer, ...) {
 
 This reduces filtering from ~156s to <0.1s.
 
+#### Enhanced Barcode Filters (opt-in)
+
+Five additional filters beyond the standard set, all defaulting to off:
+
+| Config flag | Filter | Rationale |
+|-------------|--------|-----------|
+| `filter_ggc` | GGC motif | Illumina sequencing error hotspot — systematic miscalls at GGC contexts |
+| `filter_hairpin` | Hairpin stems > N bp | Self-complementary stems cause oligo folding, reducing capture efficiency |
+| `filter_dinuc_repeats` | Dinucleotide repeats > N units | Polymerase slippage during PCR or sequencing (e.g., ATATAT) |
+| `filter_polyg` | Poly-G runs > N | Two-color Illumina chemistry (NovaSeq, NextSeq) reads poly-G as no-signal |
+| `filter_tm_uniformity` | Tm deviation > N°C from median | Uniform Tm ensures even hybridization kinetics across barcodes |
+
+Each has a vectorized helper (e.g., `has_ggc_motif_vec()`, `has_hairpin_vec()`, `nn_tm_vec()`) and is wired into `filter_sequences_fast()`. The Tm calculation uses nearest-neighbor thermodynamics (SantaLucia 1998).
+
 #### Capacity Estimation
 
 ```r
@@ -804,9 +820,10 @@ Uses the sphere-packing (Hamming) bound: `max_prefixes = 4^k / V(k, t)` where `V
 
 This module is remarkably concise — the simplicity is a direct benefit of the universal oligo architecture (no tile-type-specific logic).
 
-#### `assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4, max_oligo_length, full_seq)` — Vectorized by Tile
+#### `assemble_oligos(variants, cds, barcodes, tiles, oh3, oh4, max_oligo_length, full_seq, pcr_handles)` — Vectorized by Tile
 
-The `full_seq` parameter (gene + core cassette) is needed when the last tile extends past the gene end via oh_R cassette extension. When NULL (backward compatible), uses `cds` only.
+- `full_seq` (gene + core cassette): needed when the last tile extends past the gene end via oh_R cassette extension. When NULL (backward compatible), uses `cds` only.
+- `pcr_handles`: optional list of per-tile `list(fwd, rev)` pairs. Handles are prepended/appended outside the BsaI sites. When NULL, empty strings are used (zero-cost backward compat).
 
 The function pre-computes invariant elements once, then loops over tiles with vectorized operations:
 
@@ -839,6 +856,19 @@ mutable_regions <- substring(mutant_tiles, 5L, t_len - 4L)
 
 For the last tile with oh_R extension, the tile includes invariant cassette nucleotides between the stop codon and the oh2 zone. These appear on every oligo — mutations only happen at gene codon positions.
 
+The vectorized assembly includes PCR handles when provided:
+```r
+sequences[idx] <- paste0(
+  fwd_handles[tid],      # "" when pcr_handles is NULL
+  bsai_5prime, tile_oh1[tid], mutable_regions,
+  tile_oh2_rev[tid], bsmbi_oh3_str,
+  barcodes[idx], bsai_oh4_str,
+  rev_handles[tid]       # "" when pcr_handles is NULL
+)
+```
+
+**PCR handle mechanics**: Handles flank the oligo outside BsaI sites. During BsaI digestion, handles become waste fragments (cut away from the productive insert). This enables tile-specific PCR amplification from a pooled oligo order — each tile gets a unique primer pair. The handle length eats into the 300 nt Twist budget, reducing the mutable region. Handle pairs are specified via a CSV file (`fwd,rev` columns) referenced in config.
+
 **Performance**: Vectorized approach completes in 0.8-2.5s even for large genes (60K+ oligos).
 
 **Key insight**: `substring()` in R recycles scalar arguments when applied to a vector. So `substring(wt_tile, 1L, cs - 1L)` where `wt_tile` is a scalar and `cs` is a vector produces a vector of results — this is what enables the vectorization.
@@ -849,9 +879,9 @@ For the last tile with oh_R extension, the tile includes invariant cassette nucl
 
 ### `09_wt_geneblock_design.R` — BsaI/BsmBI gene blocks
 
-**File**: `R/09_wt_geneblock_design.R` (~1400 lines)
+**File**: `R/09_wt_geneblock_design.R` (~1250 lines)
 
-This module designs the WT gene blocks that pair with oligos in Golden Gate reactions.
+This module designs the WT gene blocks that pair with oligos in Golden Gate reactions. All blocks include configurable flanking pads outside enzyme sites for efficient Type IIs cleavage at linear termini.
 
 #### Block Types
 
@@ -874,6 +904,17 @@ For each tile:
 6. Build per-tile manifests (which blocks go in which reactions)
 
 **oh_R cassette trimming**: When the last tile extends `cassette_on_oligo` nt into the cassette, the gene block's content is `substring(polIII_for_block, cassette_on_oligo + 1)`. Pre-computed cassette split positions are also adjusted by `-cassette_on_oligo`. After BsmBI ligation, the oligo's cassette prefix + gene block's remaining cassette = full core cassette (seamless reconstruction).
+
+#### Flanking Pads
+
+Gene blocks include flanking DNA outside the enzyme recognition sites:
+
+```
+pad + BsaI_fwd + [gene content] + BsaI_rev + pad    (BsaI blocks)
+pad + BsmBI_fwd + [gene content] + BsmBI_rev + pad   (BsmBI blocks)
+```
+
+Default pad: `"TTTT"` (4 nt). Configurable via `geneblock_flanking_pad` in config. NEB recommends ≥4 bp flanking for efficient Type IIs cleavage at linear fragment termini — the enzyme needs extra DNA to "grip onto" near the ends of linear dsDNA. The pad overhead (2 × pad length) is counted in block length calculations to stay within synthesis limits.
 
 #### Superblock Splitting
 
@@ -934,9 +975,15 @@ It contains:
 | 12 | `helper_plasmid` | Helper plasmid free of unintended BsmBI sites |
 | 13 | `reaction_fidelity` | Per-reaction set-level overhang fidelity (≥0.80) |
 | 14 | `barcode_poliii_term` | No barcodes contain PolIII terminator signal (TTTT) |
+| 14b | `barcode_ggc_motif` | No barcodes contain GGC motif (opt-in) |
+| 14c | `barcode_hairpins` | No barcodes have hairpin stems > threshold (opt-in) |
+| 14d | `barcode_dinuc_repeats` | No barcodes have dinucleotide repeats > threshold (opt-in) |
+| 14e | `barcode_polyg` | No barcodes have poly-G runs > threshold (opt-in) |
+| 14f | `barcode_tm_uniformity` | All barcodes within Tm tolerance of median (opt-in) / Tm distribution (informational) |
 | 15 | `block_min_length` | All gene blocks above synthesis minimum (300 nt) |
 | 16 | `cassette_fragment_lengths` | Cassette fragments within synthesis limits |
 | 17 | `sb_overhang_collisions` | Superblock boundary overhangs are unique |
+| 18 | `pcr_handle_enzyme_sites` | PCR handles free of enzyme recognition sites (when handles provided) |
 
 **Check 3 (barcode junction sites)** is particularly important — it catches the case where enzyme recognition sequences span the junction between the flanking enzyme site and the barcode itself. The check constructs the full junction context (6 nt left + barcode + 6 nt right) and scans for sites.
 
@@ -1058,6 +1105,25 @@ Fragment B: oh_5="GGTA"—body_B...
 ```
 
 The algorithm starts with the fragment that has `oh_5 = NA` (the left-terminal fragment after waste removal), then iteratively finds the fragment whose `oh_5` matches the current last fragment's `oh_3`.
+
+#### Targeted Junctional Sampling
+
+Instead of random variant sampling, `simulate_pipeline_assembly()` can preferentially select variants near tile boundaries (where assembly errors are most likely). When `targeted_sampling = TRUE`, the sampler picks variants whose mutant codon is close to oh1 or oh2 zones.
+
+#### Strict Nucleotide-Level Verification
+
+When `strict_verification = TRUE`, the simulator performs nucleotide-exact product checking beyond the coarse grep-based checks:
+
+| Check | What it verifies |
+|-------|-----------------|
+| `exact_match` | Full assembled product matches expected sequence nucleotide-by-nucleotide |
+| `correct_length` | Product length equals expected |
+| `no_internal_enzyme_sites` | No BsaI/BsmBI/PaqCI sites in the assembled insert |
+| `paqci_flanks_present` | PaqCI overhangs at expected positions for Level 2 cloning |
+| `no_duplications` | No duplicated segments from incorrect ligation |
+| `first_mismatch_pos` | Position of first nucleotide difference (for debugging) |
+
+This catches off-by-one errors in overhang geometry that coarse verification (has_mut_gene, has_polIII, has_barcode) would miss. When PCR handles are present, they're stripped before verification (they're waste after BsaI digestion).
 
 ---
 
