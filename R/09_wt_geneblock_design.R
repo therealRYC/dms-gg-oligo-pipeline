@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-16 — Trim cassette prefix for oh_R extended last tile
+# Last updated: 2026-03-17 — Add flanking pad support for gene block termini
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -144,10 +144,12 @@ find_cassette_split_points <- function(cassette_seq, max_sub_length,
 #' @param sub_offset Integer, sub-block numbering offset (continue from gene sub-blocks)
 #' @param cassette_splits Data frame from find_cassette_split_points()
 #' @param max_block_length Max synthesis length
+#' @param flanking_pad Flanking DNA added outside enzyme sites (default "")
 #' @return List with: blocks (list of data frame rows), part_names (character vector)
 build_cassette_subblocks <- function(cassette_seq, oh_5, oh_3_final,
                                      oh3_spacer, tile_id, sub_offset,
-                                     cassette_splits, max_block_length) {
+                                     cassette_splits, max_block_length,
+                                     flanking_pad = "") {
   split_positions <- c(0L, cassette_splits$split_pos, nchar(cassette_seq))
   junction_ohs <- cassette_splits$junction_oh
   n_cass_sub <- length(split_positions) - 1L
@@ -171,7 +173,8 @@ build_cassette_subblocks <- function(cassette_seq, oh_5, oh_3_final,
     cs_spacer <- if (cs == n_cass_sub) oh3_spacer else NULL
 
     block_name <- paste0("bsmbi_cassette_tile", tile_id, "_sub", sub_offset + cs)
-    block_seq <- create_bsmbi_block(cass_content, cs_oh5, cs_oh3, oh3_spacer = cs_spacer)
+    block_seq <- create_bsmbi_block(cass_content, cs_oh5, cs_oh3, oh3_spacer = cs_spacer,
+                                    flanking_pad = flanking_pad)
 
     cass_blocks[[cs]] <- data.frame(
       block_name = block_name, sequence = block_seq,
@@ -199,6 +202,8 @@ build_cassette_subblocks <- function(cassette_seq, oh_5, oh_3_final,
 #' @param max_block_length Maximum gene block synthesis length (default 1800)
 #' @param assembly_plan assembly_plan from plan_assembly(); provides pre-computed
 #'   superblock splits (gene-derived, HF-optimized)
+#' @param flanking_pad Flanking DNA added outside enzyme sites on gene blocks
+#'   for efficient Type IIs cleavage at linear fragment termini (default "")
 #' @return List with:
 #'   - blocks: data frame of gene blocks to order (deduplicated)
 #'   - tile_manifests: data frame describing per-tile reaction contents
@@ -207,14 +212,17 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                                  oh3, oh4, paqci_star2, paqci_star1,
                                  max_block_length = MAX_GENEBLOCK_LENGTH,
                                  min_block_length = MIN_GENEBLOCK_LENGTH,
-                                 assembly_plan = NULL) {
+                                 assembly_plan = NULL,
+                                 flanking_pad = "") {
   n_tiles <- nrow(tiles)
   gene_len <- nchar(cds)
   blocks <- list()
   manifests <- list()
   # Minimum gene content (nt) for a sub-block to be useful after adding enzyme sites.
   # A sub-block below this threshold would produce a gene fragment too short to synthesize.
-  block_overhead <- 22L # 2 x 11-nt enzyme sites per block
+  # Pads add 2 * nchar(flanking_pad) nt to each block beyond enzyme overhead.
+  pad_overhead <- 2L * nchar(flanking_pad)
+  block_overhead <- 22L + pad_overhead # 2 x 11-nt enzyme sites + 2 x pad per block
   min_sub_content <- max(5L, min_block_length - block_overhead)
 
   # Use core cassette (cassette minus last 5 nt) when oh3 is derived from promoter.
@@ -325,7 +333,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         oh_5 <- substring(cds, wt_5prime_start, wt_5prime_start + 3L)
         oh_3 <- tile$oh1_seq
 
-        block_seq <- create_bsai_block(wt_5prime_seq, oh_5, oh_3)
+        block_seq <- create_bsai_block(wt_5prime_seq, oh_5, oh_3,
+                                       flanking_pad = flanking_pad)
 
         blocks[[length(blocks) + 1]] <- data.frame(
           block_name = block_name, sequence = block_seq,
@@ -411,7 +420,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           block_name <- paste0("bsai_5wt_tile", tile$tile_id, "_sub", s)
           oh_3 <- if (s < n_bsai_sub) internal_oh_bsai[s] else tile$oh1_seq
 
-          block_seq <- create_bsai_block(sub_seq, oh_5, oh_3)
+          block_seq <- create_bsai_block(sub_seq, oh_5, oh_3,
+                                         flanking_pad = flanking_pad)
 
           blocks[[length(blocks) + 1]] <- data.frame(
             block_name = block_name, sequence = block_seq,
@@ -529,7 +539,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                 sub_seq <- substring(wt_3prime_seq, 1L, content_len)
               }
               block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
-              block_seq <- create_bsmbi_block(sub_seq, tile$oh2_seq, oh_3_sub)
+              block_seq <- create_bsmbi_block(sub_seq, tile$oh2_seq, oh_3_sub,
+                                              flanking_pad = flanking_pad)
               blocks[[length(blocks) + 1]] <- data.frame(
                 block_name = block_name, sequence = block_seq,
                 length = nchar(block_seq), enzyme_type = "BsmBI",
@@ -552,7 +563,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                 tile_id = tile$tile_id,
                 sub_offset = 1L,
                 cassette_splits = remaining_splits,
-                max_block_length = max_block_length
+                max_block_length = max_block_length,
+                flanking_pad = flanking_pad
               )
               for (cb in cass_result$blocks) {
                 blocks[[length(blocks) + 1]] <- cb
@@ -562,7 +574,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
               # Greedy fallback: gene sub-block with gene content only
               gene_cass_oh <- substring(polIII_for_block, 1, 4)
               block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
-              block_seq <- create_bsmbi_block(wt_3prime_seq, tile$oh2_seq, gene_cass_oh)
+              block_seq <- create_bsmbi_block(wt_3prime_seq, tile$oh2_seq, gene_cass_oh,
+                                              flanking_pad = flanking_pad)
               blocks[[length(blocks) + 1]] <- data.frame(
                 block_name = block_name, sequence = block_seq,
                 length = nchar(block_seq), enzyme_type = "BsmBI",
@@ -580,7 +593,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
                 tile_id = tile$tile_id,
                 sub_offset = 1L,
                 cassette_splits = cass_splits,
-                max_block_length = max_block_length
+                max_block_length = max_block_length,
+                flanking_pad = flanking_pad
               )
               for (cb in cass_result$blocks) {
                 blocks[[length(blocks) + 1]] <- cb
@@ -591,7 +605,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
               block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
               block_seq <- create_bsmbi_block(paste0(wt_3prime_seq, polIII_for_block),
                 tile$oh2_seq, oh3,
-                oh3_spacer = oh3_spacer
+                oh3_spacer = oh3_spacer,
+                flanking_pad = flanking_pad
               )
               blocks[[length(blocks) + 1]] <- data.frame(
                 block_name = block_name, sequence = block_seq,
@@ -607,7 +622,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             block_name <- paste0("bsmbi_3wt_tile", tile$tile_id)
             block_seq <- create_bsmbi_block(paste0(wt_3prime_seq, polIII_for_block),
               tile$oh2_seq, oh3,
-              oh3_spacer = oh3_spacer
+              oh3_spacer = oh3_spacer,
+              flanking_pad = flanking_pad
             )
             blocks[[length(blocks) + 1]] <- data.frame(
               block_name = block_name, sequence = block_seq,
@@ -816,7 +832,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           }
 
           block_seq <- create_bsmbi_block(sub_seq, oh_5_sub, oh_3_sub,
-            oh3_spacer = spacer_for_sub
+            oh3_spacer = spacer_for_sub,
+            flanking_pad = flanking_pad
           )
 
           gene_region_prefix <- if (s == n_sub && !(needs_cassette_split &&
@@ -854,7 +871,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
               tile_id = tile$tile_id,
               sub_offset = n_sub,
               cassette_splits = remaining_splits_p2,
-              max_block_length = max_block_length
+              max_block_length = max_block_length,
+              flanking_pad = flanking_pad
             )
           } else {
             # Greedy fallback: full cassette with greedy splits
@@ -866,7 +884,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
               tile_id = tile$tile_id,
               sub_offset = n_sub,
               cassette_splits = cassette_splits_df,
-              max_block_length = max_block_length
+              max_block_length = max_block_length,
+              flanking_pad = flanking_pad
             )
           }
           for (cb in cass_result$blocks) {
@@ -929,7 +948,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             tile_id = tile$tile_id,
             sub_offset = 0L,
             cassette_splits = cass_splits,
-            max_block_length = max_block_length
+            max_block_length = max_block_length,
+            flanking_pad = flanking_pad
           )
           for (cb in cass_result$blocks) {
             blocks[[length(blocks) + 1]] <- cb
@@ -939,7 +959,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           # Fallback: couldn't find split points, build as single block (will be flagged by QC)
           block_name <- paste0("bsmbi_polIII_tile", tile$tile_id)
           block_seq <- create_bsmbi_block(remaining_cassette, tile$oh2_seq, oh3,
-            oh3_spacer = oh3_spacer
+            oh3_spacer = oh3_spacer,
+            flanking_pad = flanking_pad
           )
           blocks[[length(blocks) + 1]] <- data.frame(
             block_name = block_name, sequence = block_seq,
@@ -954,7 +975,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         # Cassette fits in one block
         block_name <- paste0("bsmbi_polIII_tile", tile$tile_id)
         block_seq <- create_bsmbi_block(remaining_cassette, tile$oh2_seq, oh3,
-          oh3_spacer = oh3_spacer
+          oh3_spacer = oh3_spacer,
+          flanking_pad = flanking_pad
         )
 
         blocks[[length(blocks) + 1]] <- data.frame(
@@ -1047,13 +1069,15 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
 #' @param gene_seq WT gene sequence for this block (starts with oh_5prime)
 #' @param oh_5prime 4-nt overhang at 5' end
 #' @param oh_3prime 4-nt overhang at 3' end
+#' @param flanking_pad Flanking DNA added outside enzyme sites for efficient
+#'   Type IIs cleavage at linear fragment termini. Default "" (no pad).
 #' @return Complete block sequence with flanking BsaI sites
-create_bsai_block <- function(gene_seq, oh_5prime, oh_3prime) {
+create_bsai_block <- function(gene_seq, oh_5prime, oh_3prime, flanking_pad = "") {
   bsai_fwd <- orient_enzyme_site("BsaI", oh_5prime, "forward")
   bsai_rev <- orient_enzyme_site("BsaI", oh_3prime, "reverse")
   # gene_seq starts with oh_5prime — trim to avoid duplication with bsai_fwd
   gene_interior <- substring(gene_seq, nchar(oh_5prime) + 1L)
-  paste0(bsai_fwd, gene_interior, bsai_rev)
+  paste0(flanking_pad, bsai_fwd, gene_interior, bsai_rev, flanking_pad)
 }
 
 #' Create a BsmBI-flanked gene block
@@ -1066,11 +1090,14 @@ create_bsai_block <- function(gene_seq, oh_5prime, oh_3prime) {
 #' @param oh3_spacer Optional spacer for 3' BsmBI reverse site. When oh3 is
 #'   derived from the PolIII promoter, this is the promoter's terminal nucleotide
 #'   (e.g., "G") instead of the default "A". Only applies to the reverse site.
+#' @param flanking_pad Flanking DNA added outside enzyme sites for efficient
+#'   Type IIs cleavage at linear fragment termini. Default "" (no pad).
 #' @return Complete block sequence with flanking BsmBI sites
-create_bsmbi_block <- function(gene_seq, oh_5prime, oh_3prime, oh3_spacer = NULL) {
+create_bsmbi_block <- function(gene_seq, oh_5prime, oh_3prime, oh3_spacer = NULL,
+                               flanking_pad = "") {
   bsmbi_fwd <- orient_enzyme_site("BsmBI", oh_5prime, "forward")
   bsmbi_rev <- orient_enzyme_site("BsmBI", oh_3prime, "reverse", spacer_seq = oh3_spacer)
-  paste0(bsmbi_fwd, gene_seq, bsmbi_rev)
+  paste0(flanking_pad, bsmbi_fwd, gene_seq, bsmbi_rev, flanking_pad)
 }
 
 #' Design helper plasmid insert sequence

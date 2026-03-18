@@ -54,6 +54,9 @@ intergene_elements:
 # --- Oligo Synthesis ---
 max_oligo_length: 300                      # Twist oligo pool max (nt)
 max_geneblock_length: 1800                 # Gene fragment synthesis max (nt)
+geneblock_flanking_pad: "TGCATG"           # Flanking bases beyond enzyme sites on gene blocks.
+                                           # NEB recommends ≥6 bp for efficient Type IIs cleavage
+                                           # at linear fragment termini. Set to "" to disable.
 
 # --- PCR Handles (optional) ---
 # Per-tile PCR primer handles for selective amplification from a pooled oligo order.

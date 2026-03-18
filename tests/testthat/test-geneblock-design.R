@@ -357,3 +357,141 @@ test_that("min_sub_length uses gene-content semantics (not total block)", {
     expect_true(nrow(splits) > 0, info = "Expected superblock splits for long gene")
   }
 })
+
+# =============================================================================
+# FLANKING PAD TESTS
+# =============================================================================
+
+test_that("create_bsai_block with flanking pad adds pad at both termini", {
+  gene_seq <- "ATGGCTGAA"
+  oh5 <- "ATGG"
+  oh3 <- "CTAA"
+  pad <- "TGCATG"
+
+  block_with_pad <- create_bsai_block(gene_seq, oh5, oh3, flanking_pad = pad)
+  block_no_pad <- create_bsai_block(gene_seq, oh5, oh3)
+
+  # Block with pad should start and end with the pad sequence
+
+  expect_true(startsWith(block_with_pad, pad),
+              info = "Block should start with flanking pad")
+  expect_true(endsWith(block_with_pad, pad),
+              info = "Block should end with flanking pad")
+
+  # Length difference should be exactly 2 * nchar(pad)
+  expect_equal(nchar(block_with_pad), nchar(block_no_pad) + 2L * nchar(pad))
+})
+
+test_that("create_bsmbi_block with flanking pad adds pad at both termini", {
+  gene_seq <- "ATGGCTGAA"
+  oh5 <- "CTAA"
+  oh3 <- "ACTA"
+  pad <- "TGCATG"
+
+  block_with_pad <- create_bsmbi_block(gene_seq, oh5, oh3, flanking_pad = pad)
+  block_no_pad <- create_bsmbi_block(gene_seq, oh5, oh3)
+
+  # Block with pad should start and end with the pad sequence
+  expect_true(startsWith(block_with_pad, pad),
+              info = "Block should start with flanking pad")
+  expect_true(endsWith(block_with_pad, pad),
+              info = "Block should end with flanking pad")
+
+  # Length difference should be exactly 2 * nchar(pad)
+  expect_equal(nchar(block_with_pad), nchar(block_no_pad) + 2L * nchar(pad))
+})
+
+test_that("empty flanking pad preserves original behavior", {
+  gene_seq <- "ATGGCTGAA"
+  oh5 <- "ATGG"
+  oh3 <- "CTAA"
+
+  # BsaI: explicit empty pad should match default (no pad argument)
+  block_default <- create_bsai_block(gene_seq, oh5, oh3)
+  block_empty <- create_bsai_block(gene_seq, oh5, oh3, flanking_pad = "")
+  expect_identical(block_default, block_empty)
+
+  # BsmBI: same check
+  oh5b <- "CTAA"
+  oh3b <- "ACTA"
+  bsmbi_default <- create_bsmbi_block(gene_seq, oh5b, oh3b)
+  bsmbi_empty <- create_bsmbi_block(gene_seq, oh5b, oh3b, flanking_pad = "")
+  expect_identical(bsmbi_default, bsmbi_empty)
+})
+
+test_that("design_wt_geneblocks with flanking pad adds pads to all blocks", {
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene()
+  tiles <- partition_tiles(cds, 150)
+  pad <- "TGCATG"
+
+  result <- design_wt_geneblocks(
+    cds = cds, polIII = TEST_POLIII,
+    tiles = tiles,
+    oh3 = "ACTA", oh4 = "GATA",
+    paqci_star2 = "AGTC", paqci_star1 = "TCGA",
+    flanking_pad = pad
+  )
+
+  blocks <- result$blocks
+
+  # Every block should start and end with the pad
+  for (i in seq_len(nrow(blocks))) {
+    expect_true(startsWith(blocks$sequence[i], pad),
+                info = paste(blocks$block_name[i], "should start with pad"))
+    expect_true(endsWith(blocks$sequence[i], pad),
+                info = paste(blocks$block_name[i], "should end with pad"))
+  }
+})
+
+test_that("block_overhead accounts for flanking pad in design_wt_geneblocks", {
+  # With a 6-nt pad, each block gets 12 nt extra overhead (2 x 6).
+  # Verify that blocks are still within synthesis limits when pad is included.
+  cu <- TEST_CODON_USAGE
+  cds <- domesticate_test_gene()
+  tiles <- partition_tiles(cds, 150)
+  pad <- "TGCATG"
+
+  result <- design_wt_geneblocks(
+    cds = cds, polIII = TEST_POLIII,
+    tiles = tiles,
+    oh3 = "ACTA", oh4 = "GATA",
+    paqci_star2 = "AGTC", paqci_star1 = "TCGA",
+    flanking_pad = pad
+  )
+
+  # All blocks should be within the max gene block length
+  expect_true(all(result$blocks$length <= MAX_GENEBLOCK_LENGTH),
+              info = paste("Max block length with pad:",
+                           max(result$blocks$length), "vs limit:", MAX_GENEBLOCK_LENGTH))
+})
+
+test_that("config rejects flanking pad containing enzyme site", {
+  # Build a minimal valid config, then inject a bad pad
+  # BsmBI recognition site is CGTCTC — embed it in the pad
+  bad_pad <- "CGTCTCAA"
+
+  # validate_config expects a fully populated cfg; create one with all required fields
+  cfg <- list(
+    gene_cds = "ATGGCTGAATAA",
+    polIII_promoter = "ACGTACGTACGT",
+    paqci_star2 = "AGTC",
+    paqci_star1 = "TCGA",
+    max_oligo_length = 300L,
+    max_geneblock_length = 1800L,
+    min_geneblock_length = 300L,
+    barcode_length = 20L,
+    min_hamming_distance = 3L,
+    barcode_prefix_length = 12L,
+    barcode_gc_range = c(0.25, 0.75),
+    barcode_max_homopolymer = 4L,
+    barcodes_per_variant = 10L,
+    overlap_codons = 6L,
+    geneblock_flanking_pad = bad_pad,
+    handle_overhead = 0L,
+    fwd_handle_length = 0L,
+    rev_handle_length = 0L
+  )
+
+  expect_error(validate_config(cfg), "geneblock_flanking_pad.*BsmBI")
+})

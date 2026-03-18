@@ -347,7 +347,8 @@ geneblock_result <- design_wt_geneblocks(
   paqci_star1 = cfg$paqci_star1,
   max_block_length = cfg$max_geneblock_length,
   min_block_length = cfg$min_geneblock_length,
-  assembly_plan = assembly_plan
+  assembly_plan = assembly_plan,
+  flanking_pad = cfg$geneblock_flanking_pad
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["9_geneblocks"]] <- step_elapsed

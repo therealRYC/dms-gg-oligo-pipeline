@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-17 — Add enhanced barcode filter defaults; tighten GC range to 0.35-0.65
+# Last updated: 2026-03-17 — Add DEFAULT_GENEBLOCK_FLANKING_PAD constant
 # constants.R — Enzyme definitions, synthesis limits, amino acid alphabet
 # DMS Golden Gate Oligo Pipeline
 
@@ -44,6 +44,7 @@ ENZYMES <- list(
 MAX_OLIGO_LENGTH <- 300L # Twist Bioscience oligo pool max
 MAX_GENEBLOCK_LENGTH <- 1800L # Gene fragment synthesis max
 MIN_GENEBLOCK_LENGTH <- 300L # Twist gene fragment synthesis minimum
+DEFAULT_GENEBLOCK_FLANKING_PAD <- "TGCATG" # 6 bp flanking pad for gene block termini (NEB recommends ≥6 bp)
 
 # --- Amino Acid Alphabet ---
 AA_STANDARD <- c(
