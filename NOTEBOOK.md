@@ -1035,9 +1035,9 @@ The SB-first architecture places SB boundaries at arbitrary codon positions (Pas
 - `scripts/benchmark_beam_width.R` — Beam width benchmark script
 - `scripts/benchmark_mc_refinement.R` — MC refinement benchmark script
 - `scripts/benchmark_dp_vs_oogga.R` — Legacy DP vs OOGGA benchmark script
-- `benchmarks/260310_beam_width_comparison.md` — Beam width results
-- `benchmarks/260310_mc_refinement_comparison.md` — MC refinement results
-- `benchmarks/260310_dp_vs_oogga_two_pass.md` — Legacy DP vs OOGGA results
+- `archive/benchmarks_260310-260315/260310_beam_width_comparison.md` — Beam width results
+- `archive/benchmarks_260310-260315/260310_mc_refinement_comparison.md` — MC refinement results
+- `archive/benchmarks_260310-260315/260310_dp_vs_oogga_two_pass.md` — Legacy DP vs OOGGA results
 
 **Related commits**:
 - `eb6f3c7` — Add per-segment tile OOGGA DP to fix SB/tile alignment
@@ -1078,8 +1078,8 @@ The SB-first architecture places SB boundaries at arbitrary codon positions (Pas
 - All 8 runs pass assembly simulation — both methods produce valid assemblies
 
 **Artifacts**:
-- `benchmarks/260310_full_pipeline/comparison_summary.md` — full comparison with tables
-- `benchmarks/260310_full_pipeline/{gene}_{method}/` — complete output dirs with assembly reports
+- `archive/benchmarks_260310-260315/260310_full_pipeline/comparison_summary.md` — full comparison with tables
+- `archive/benchmarks_260310-260315/260310_full_pipeline/{gene}_{method}/` — complete output dirs with assembly reports
 - `configs/bench_*.yaml` — 8 benchmark configs
 
 **Related commits**:
@@ -1201,7 +1201,7 @@ The SB DP ran on `gene + cassette` and could place boundaries inside the cassett
 **Artifacts**:
 - `R/06b_oogga_dp.R` — tile overlap + cassette gating fixes
 - `R/06_overhang_selection.R` — `sb_dp_to_partition()` defense-in-depth guard
-- `benchmarks/260312_overlap_fix/grin2a_oogga/` — verification benchmark
+- `archive/benchmarks_260310-260315/260312_overlap_fix/grin2a_oogga/` — verification benchmark
 - `Plans/2026-03-12_two-oh-diagnostic.md` — full diagnostic plan
 
 **Related commits**:
@@ -1320,7 +1320,7 @@ But `end_codon` already included the overlap extension from the inner DP (`searc
 **Known issue**: GRIN2A_ext cassette over-splitting persists — 4 fragments instead of expected 2 (one is 35 nt, below synthesis minimum). Only affects `cassette_needs_splitting=TRUE` cases. The two-OH model's 5 per-position checks leave fewer valid cassette-region candidates. Tracked for follow-up.
 
 **Artifacts**:
-- `benchmarks/260313_two_oh_model/` — Assembly reports for all 4 genes
+- `archive/benchmarks_260310-260315/260313_two_oh_model/` — Assembly reports for all 4 genes
 - PR #40: https://github.com/therealRYC/dms-gg-oligo-pipeline/pull/40
 
 **Related commits** (branch `260313-two-oh-sb-dp`):
@@ -1658,7 +1658,7 @@ Then fixed 2 bugs exposed by the TRIO gene (9294 nt):
 - `R/06_overhang_selection.R` — `sb_max_content` with overlap deduction in `plan_assembly()`, boundary tile skip in `convert_partition_to_splits()`
 - `tests/testthat/test-oogga-dp.R` — Updated signatures, fixed SB DP param names, fixed oh2 overlap test
 - `tests/testthat/test-overhang-selection.R` — Fixed split_nt assertion
-- `benchmarks/260313_post_tile_collision_fix/` — AKAP11 benchmark results
+- `archive/benchmarks_260310-260315/260313_post_tile_collision_fix/` — AKAP11 benchmark results
 
 **Related commits**:
 - `9b76035` — refactor: Reaction-aware tile DP — remove unnecessary collision constraints
@@ -1702,8 +1702,8 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 - Opened BUG-010 and BUG-011 in BUGS.md with full diagnostic data
 
 **Artifacts**:
-- `benchmarks/260314_full_pipeline_run/` — full outputs for all 4 genes
-- `benchmarks/260314_full_pipeline_run/cross_gene_summary.csv` — metrics table
+- `archive/benchmarks_260310-260315/260314_full_pipeline_run/` — full outputs for all 4 genes
+- `archive/benchmarks_260310-260315/260314_full_pipeline_run/cross_gene_summary.csv` — metrics table
 - `BUGS.md` — BUG-010 and BUG-011 documented
 
 **Related commits**:
@@ -1738,7 +1738,7 @@ Pipeline scales linearly with gene length (TRIO = 2.1x GRIN2A → 2.1x tiles, ol
 - `R/06b_oogga_dp.R` — 2-line fix (lines ~1082 and ~1353)
 - `tests/testthat/test-oogga-dp.R` — test expectations updated to match correct geometry
 - `BUGS.md` — BUG-010 and BUG-011 marked FIXED
-- `benchmarks/260315_oh2_fix/grin2a_run.log` — verification pipeline run log
+- `archive/benchmarks_260310-260315/260315_oh2_fix/grin2a_run.log` — verification pipeline run log
 
 **Related commits**:
 - `1369cf4` — fix: Remove oh2 double-counting of overlap_codons (BUG-010 + BUG-011)

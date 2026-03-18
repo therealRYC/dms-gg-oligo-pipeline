@@ -73,20 +73,28 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 |-----------|---------|-------------|
 | `max_oligo_length` | 300 | Twist oligo pool maximum (nt) |
 | `max_geneblock_length` | 1800 | Gene fragment synthesis maximum (nt) |
+| `geneblock_flanking_pad` | `"TGCATG"` | Flanking bases beyond enzyme sites on gene blocks for efficient Type IIs cleavage. Set to `""` to disable. |
+| `pcr_handles` | *(none)* | Path to CSV file with per-tile PCR handle pairs (`fwd,rev` columns). Omit for single-pool-per-tile ordering. |
 | `barcode_length` | 20 | Total barcode length (nt); set to `"auto"` for auto-sizing |
 | `barcode_prefix_length` | 12 | Prefix length for Hamming-constrained region (nt) |
 | `min_hamming_distance` | 3 | Minimum Hamming distance between variant prefixes |
 | `barcodes_per_variant` | 10 | Number of unique barcodes per variant |
-| `barcode_gc_range` | [0.25, 0.75] | Acceptable GC content range for barcodes |
+| `barcode_gc_range` | [0.35, 0.65] | Acceptable GC content range for barcodes |
 | `barcode_max_homopolymer` | 4 | Maximum homopolymer run length in barcodes |
-| `boundary_method` | `"dp"` | `"dp"` (tile-first DP boundary optimizer) or `"greedy"` (local search) |
+| `barcode_filter_hairpin` | `true` | Reject barcodes with hairpin stems > 3 bp |
+| `barcode_filter_dinuc_repeats` | `true` | Reject barcodes with dinucleotide repeats > 4 units |
+| `barcode_filter_ggc` | `false` | Reject barcodes containing GGC (Illumina error hotspot) |
+| `barcode_filter_polyg` | `false` | Reject barcodes with poly-G runs > 2 |
+| `barcode_filter_tm_uniformity` | `false` | Reject barcodes with Tm > 2°C from median |
+| `boundary_method` | `"oogga_two_pass"` | OOGGA collision-aware two-pass DP (only supported method) |
 | `multi_k_search` | `true` | Try multiple tile counts to find best overhang quality |
-| `dp_k_range` | 5 | Search K_ideal +/- this many tile counts; stops early when gain < 0.5% |
+| `dp_k_range` | 5 | Search K_ideal +/- this many tile counts |
 | `paqci_star2` | *(required)* | 4-nt PaqCI overhang at the 5' end of the insert (PaqCI\*\*). **Must match your destination vector.** |
 | `paqci_star1` | *(required)* | 4-nt PaqCI overhang at the 3' end of the insert (PaqCI\*). **Must match your destination vector.** |
 | `auto_domesticate` | `true` | Automatically apply silent mutations to remove enzyme sites |
-| `simulate_assembly` | `false` | Run in-silico GG assembly simulation after design |
-| `simulation_samples_per_tile` | 1 | Variants per tile to simulate (when `simulate_assembly` is true) |
+| `simulate_assembly` | `true` | Run in-silico GG assembly simulation after design. Uses targeted junctional sampling (boundary-vulnerable variants) + strict nucleotide-level verification. |
+| `simulation_samples_per_tile` | 1 | Additional random variants per tile beyond the targeted junctional samples (overlap_codons/2 variants from each boundary) |
+| `include_synonymous` | `false` | Add synonymous codon controls per position |
 
 **PaqCI overhangs**: The `paqci_star2` and `paqci_star1` parameters have no meaningful default — they are determined by the PaqCI sites flanking the cloning site in your destination backbone. The pipeline will error if these are left as the placeholder `"NNNN"`. The values in the example configs (`AATG`/`GCTA`) are arbitrary and should be replaced with the overhangs from your specific vector.
 
@@ -128,7 +136,7 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 
 **Mutation strategy**: Fully specified codons (no degenerate NNK/NNS). Each oligo encodes exactly one mutation using the most-preferred human codon.
 
-**Boundary optimization**: The `dp` mode uses dynamic programming to place tile boundaries across the gene, maximizing overhang quality (fidelity × efficiency from BsmBI cycling data, Pryor et al. 2020). Multi-K search explores different tile counts and stops early when gains diminish. Superblock boundaries are then assigned at tile junctions with iterative collision blacklisting.
+**Boundary optimization**: OOGGA-style collision-aware two-pass DP. Pass 1 places superblock boundaries on the full gene+cassette sequence with beam search to maintain collision-free overhang paths. Pass 2 runs per-segment tile DP with enzyme-aware alien sets (BsaI and BsmBI pots separated). Scoring: P_fid × P_eff from BsmBI cycling data (Pryor et al. 2020). Multi-K search explores different tile counts. Phase 3.5 extends the last tile into the cassette (oh_R search) for stop codon mutability.
 
 **Barcode design**: Unified hierarchical prefix-suffix mode -- each variant gets a unique high-Hamming-distance prefix (12 nt), extended with filtered random suffixes to the full barcode length (20 nt). Cross-variant Hamming distance is guaranteed by the prefix; within-variant replicates differ only in their suffix. Configurable `barcodes_per_variant` (default 10) for experimental replication. Prefixes that create enzyme sites at junction boundaries are automatically filtered. For `min_hamming <= 3`, prefixes are generated using GF(4) linear codes (algebraically guaranteed distance, deterministic). For `min_hamming >= 4`, prefixes are generated using DNABarcodes lexicodes (Conway/Ashlock heuristics).
 
@@ -136,7 +144,7 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 
 **Enhanced barcode filters**: Five opt-in filters beyond the standard enzyme site, homopolymer, and GC checks: GGC motif (Illumina error hotspot), hairpin stems, dinucleotide repeats, poly-G runs (two-color chemistry), and Tm uniformity. All default to off. Enable via config flags (`barcode_filter_ggc: true`, etc.).
 
-**Gene block flanking pads**: Gene blocks include flanking DNA (default "TTTT", 4 nt) outside the Type IIs recognition sites at both termini. NEB recommends ≥4 bp for efficient cleavage of linear fragments. Configurable via `geneblock_flanking_pad` in config.
+**Gene block flanking pads**: Gene blocks include flanking DNA (default `"TGCATG"`, 6 nt) outside the Type IIs recognition sites at both termini. NEB recommends ≥6 bp for efficient cleavage of linear fragments. Configurable via `geneblock_flanking_pad` in config; set to `""` to disable.
 
 **Superblocks**: WT gene blocks exceeding the 1800 bp synthesis limit are automatically split into superblocks at tile boundaries with iterative collision blacklisting. SB junction overhangs are gene-derived 4-mers at the split positions. For very long downstream cassettes (>~1700 nt), the cassette itself is split across multiple BsmBI-connected fragments — no user action required.
 
