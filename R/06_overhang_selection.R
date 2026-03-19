@@ -181,6 +181,333 @@ overhang_score <- function(oh, fid_lookup, eff_lookup) {
 }
 
 # =============================================================================
+# AUTO-SELECT FIXED OVERHANGS (BsaI pair + PaqCI pair)
+# =============================================================================
+
+#' Auto-select BsaI overhang pair {oh_L, oh4} with set fidelity optimization
+#'
+#' Handles three cases:
+#'   - Both "auto": enumerate all valid pairs from top candidates, pick pair
+#'     with BsaI set_fidelity == 1.0 and highest min(P_fid × P_eff).
+#'   - One specified, one "auto": pick the auto one to maximize BsaI set
+#'     fidelity with the specified overhang.
+#'   - Both specified: validate set_fidelity, warn if < 0.95.
+#'
+#' @param oh_L Character, "auto" or user-specified 4-nt overhang
+#' @param oh4 Character, "auto" or user-specified 4-nt overhang
+#' @param blacklist Character vector of overhangs to exclude (oh3 + RC,
+#'   palindromes, homopolymers already excluded internally)
+#' @param bsai_matrix Named 256x256 BsaI pairwise ligation matrix
+#' @return List with oh_L, oh4, set_fidelity, auto_selected (named logical)
+auto_select_bsai_pair <- function(oh_L, oh4, blacklist, bsai_matrix) {
+  oh_L_auto <- is.null(oh_L) || identical(toupper(oh_L), "AUTO")
+  oh4_auto <- is.null(oh4) || identical(toupper(oh4), "AUTO")
+
+  # Build individual BsaI fidelity and efficiency lookups
+  all_ohs <- rownames(bsai_matrix)
+  bsai_fid <- vapply(all_ohs, function(oh) {
+    total <- sum(bsai_matrix[oh, ])
+    if (total > 0) bsai_matrix[oh, oh] / total else 0
+  }, numeric(1))
+  bsai_eff <- diag(bsai_matrix) / max(diag(bsai_matrix))
+  names(bsai_eff) <- all_ohs
+
+  # Expand blacklist with RCs
+  blacklist_expanded <- unique(c(
+    blacklist,
+    vapply(blacklist, reverse_complement, character(1))
+  ))
+
+  # Valid candidate pool: not in blacklist, not palindrome, not homopolymer
+  valid <- all_ohs[!(all_ohs %in% blacklist_expanded)]
+  valid <- valid[!(valid %in% PALINDROMIC_4NT)]
+  valid <- valid[!(valid %in% HOMOPOLYMER_4NT)]
+
+  # Individual scores for ranking
+  scores <- bsai_fid[valid] * bsai_eff[valid]
+
+  if (oh_L_auto && oh4_auto) {
+    # --- Both auto: enumerate all valid pairs, find best set_fidelity ---
+    cli::cli_alert_info(
+      "Auto-selecting both oh_L and oh4 from BsaI set fidelity optimization..."
+    )
+
+    # Pre-filter to top candidates by individual score to reduce search space
+    n_top <- min(60L, length(valid))
+    top_idx <- order(scores, decreasing = TRUE)[seq_len(n_top)]
+    top_ohs <- valid[top_idx]
+
+    best_pair <- NULL
+    best_min_score <- -Inf
+    best_set_fid <- -Inf
+
+    for (i in seq_along(top_ohs)) {
+      a <- top_ohs[i]
+      for (j in seq_along(top_ohs)) {
+        if (j <= i) next # Skip duplicates and self-pairs
+        b <- top_ohs[j]
+        # Ensure non-collision: a != RC(b)
+        if (a == reverse_complement(b)) next
+
+        pair_fid <- compute_set_fidelity(c(a, b), bsai_matrix)
+        sf <- pair_fid$set_fidelity
+        min_score <- min(scores[a], scores[b])
+
+        # Prefer highest set_fidelity, then rank by min individual score
+        if (sf > best_set_fid ||
+          (sf == best_set_fid && min_score > best_min_score)) {
+          best_set_fid <- sf
+          best_min_score <- min_score
+          best_pair <- c(a, b)
+        }
+      }
+    }
+
+    if (is.null(best_pair)) {
+      stop("Cannot find any valid BsaI overhang pair for {oh_L, oh4}.")
+    }
+
+    oh_L <- best_pair[1]
+    oh4 <- best_pair[2]
+    set_fid <- best_set_fid
+
+    if (set_fid < 1.0) {
+      cli::cli_alert_warning(paste0(
+        "Best BsaI pair has set_fidelity=", round(set_fid, 4),
+        " (< 1.0). Using oh_L=", oh_L, ", oh4=", oh4
+      ))
+    }
+    cli::cli_alert_success(paste0(
+      "Auto-selected oh_L=", oh_L, ", oh4=", oh4,
+      " (BsaI set fidelity: ", round(set_fid, 4), ")"
+    ))
+    cli::cli_alert_warning(
+      "Record these overhangs -- your helper plasmid must match!"
+    )
+
+    return(list(
+      oh_L = oh_L, oh4 = oh4, set_fidelity = set_fid,
+      auto_selected = c(oh_L = TRUE, oh4 = TRUE)
+    ))
+
+  } else if (oh_L_auto || oh4_auto) {
+    # --- One specified, one auto ---
+    specified <- if (oh_L_auto) toupper(oh4) else toupper(oh_L)
+    which_auto <- if (oh_L_auto) "oh_L" else "oh4"
+
+    cli::cli_alert_info(paste0(
+      "Auto-selecting ", which_auto,
+      " to maximize BsaI set fidelity with ",
+      if (oh_L_auto) "oh4" else "oh_L", "=", specified
+    ))
+
+    # Remove specified + RC from candidates
+    spec_exclude <- c(specified, reverse_complement(specified))
+    candidates <- valid[!(valid %in% spec_exclude)]
+
+    best_cand <- NULL
+    best_sf <- -Inf
+    best_score <- -Inf
+
+    for (cand in candidates) {
+      pair_fid <- compute_set_fidelity(c(specified, cand), bsai_matrix)
+      sf <- pair_fid$set_fidelity
+      cand_score <- scores[cand]
+
+      if (sf > best_sf || (sf == best_sf && cand_score > best_score)) {
+        best_sf <- sf
+        best_score <- cand_score
+        best_cand <- cand
+      }
+    }
+
+    if (is.null(best_cand)) {
+      stop("Cannot find any valid BsaI overhang for ", which_auto, ".")
+    }
+
+    if (oh_L_auto) {
+      oh_L <- best_cand
+      oh4 <- specified
+    } else {
+      oh_L <- specified
+      oh4 <- best_cand
+    }
+
+    set_fid <- best_sf
+    cli::cli_alert_success(paste0(
+      "Auto-selected ", which_auto, "=", best_cand,
+      " (BsaI set fidelity with pair: ", round(set_fid, 4), ")"
+    ))
+    if (oh_L_auto) {
+      cli::cli_alert_warning(
+        "Record oh_L -- your helper plasmid must match!"
+      )
+    }
+
+    return(list(
+      oh_L = oh_L, oh4 = oh4, set_fidelity = set_fid,
+      auto_selected = c(oh_L = oh_L_auto, oh4 = oh4_auto)
+    ))
+
+  } else {
+    # --- Both specified: validate ---
+    oh_L <- toupper(oh_L)
+    oh4 <- toupper(oh4)
+    pair_fid <- compute_set_fidelity(c(oh_L, oh4), bsai_matrix)
+    set_fid <- pair_fid$set_fidelity
+
+    if (set_fid < 0.95) {
+      cli::cli_alert_warning(paste0(
+        "BsaI set fidelity for {oh_L=", oh_L, ", oh4=", oh4,
+        "} = ", round(set_fid, 4), " (< 0.95). ",
+        "Consider using oh_L: \"auto\" or oh4: \"auto\" for optimized selection."
+      ))
+    } else {
+      cli::cli_alert_info(paste0(
+        "BsaI set fidelity for {oh_L=", oh_L, ", oh4=", oh4,
+        "} = ", round(set_fid, 4)
+      ))
+    }
+
+    return(list(
+      oh_L = oh_L, oh4 = oh4, set_fidelity = set_fid,
+      auto_selected = c(oh_L = FALSE, oh4 = FALSE)
+    ))
+  }
+}
+
+#' Auto-select PaqCI overhang pair {paqci_star2, paqci_star1}
+#'
+#' PaqCI overhangs don't participate in BsaI or BsmBI reactions, so they
+#' only need collision avoidance (no set fidelity scoring). They MUST NOT
+#' collide (exact match or RC match) with oh_L, oh4, oh3, or each other.
+#'
+#' @param paqci_star2 Character, "auto" or user-specified 4-nt overhang
+#' @param paqci_star1 Character, "auto" or user-specified 4-nt overhang
+#' @param blacklist Character vector of overhangs to avoid (oh_L, oh4, oh3 + RCs)
+#' @return List with paqci_star2, paqci_star1, auto_selected (named logical)
+auto_select_paqci_pair <- function(paqci_star2, paqci_star1, blacklist) {
+  star2_auto <- is.null(paqci_star2) || identical(toupper(paqci_star2), "AUTO")
+  star1_auto <- is.null(paqci_star1) || identical(toupper(paqci_star1), "AUTO")
+
+  # Expand blacklist with RCs
+  blacklist_expanded <- unique(c(
+    blacklist,
+    vapply(blacklist, reverse_complement, character(1))
+  ))
+
+  # Generate all 256 4-nt overhangs
+  bases <- c("A", "C", "G", "T")
+  all_ohs <- do.call(paste0, expand.grid(
+    bases, bases, bases, bases, stringsAsFactors = FALSE
+  ))
+
+  # Valid candidates: not in blacklist, not palindrome, not homopolymer
+  valid <- all_ohs[!(all_ohs %in% blacklist_expanded)]
+  valid <- valid[!(valid %in% PALINDROMIC_4NT)]
+  valid <- valid[!(valid %in% HOMOPOLYMER_4NT)]
+
+  # Score by base composition diversity (prefer mixed bases for robustness)
+  score_paqci <- function(oh) {
+    chars <- strsplit(oh, "")[[1]]
+    n_unique <- length(unique(chars))
+    gc <- sum(chars %in% c("G", "C")) / 4
+    # Prefer 3-4 unique bases and balanced GC (0.5 ideal)
+    n_unique / 4 + (1 - abs(gc - 0.5))
+  }
+
+  if (star2_auto && star1_auto) {
+    # Both auto: pick two best non-colliding candidates
+    paqci_scores <- vapply(valid, score_paqci, numeric(1))
+    ranked <- valid[order(paqci_scores, decreasing = TRUE)]
+
+    paqci_star2 <- ranked[1]
+    paqci_star1 <- NULL
+    for (cand in ranked[-1]) {
+      if (cand != paqci_star2 && cand != reverse_complement(paqci_star2)) {
+        paqci_star1 <- cand
+        break
+      }
+    }
+
+    if (is.null(paqci_star1)) {
+      stop("Cannot find two non-colliding PaqCI overhangs.")
+    }
+
+    cli::cli_alert_success(paste0(
+      "Auto-selected paqci_star2=", paqci_star2,
+      ", paqci_star1=", paqci_star1
+    ))
+    cli::cli_alert_warning(
+      "Record these overhangs -- your destination vector must match!"
+    )
+
+    return(list(
+      paqci_star2 = paqci_star2, paqci_star1 = paqci_star1,
+      auto_selected = c(paqci_star2 = TRUE, paqci_star1 = TRUE)
+    ))
+
+  } else if (star2_auto || star1_auto) {
+    # One specified, one auto
+    specified <- if (star2_auto) toupper(paqci_star1) else toupper(paqci_star2)
+    which_auto <- if (star2_auto) "paqci_star2" else "paqci_star1"
+
+    # Exclude specified + RC
+    spec_exclude <- c(specified, reverse_complement(specified))
+    candidates <- valid[!(valid %in% spec_exclude)]
+
+    paqci_scores <- vapply(candidates, score_paqci, numeric(1))
+    best <- candidates[which.max(paqci_scores)]
+
+    if (star2_auto) {
+      paqci_star2 <- best
+      paqci_star1 <- specified
+    } else {
+      paqci_star2 <- specified
+      paqci_star1 <- best
+    }
+
+    cli::cli_alert_success(paste0(
+      "Auto-selected ", which_auto, "=", best
+    ))
+
+    return(list(
+      paqci_star2 = paqci_star2, paqci_star1 = paqci_star1,
+      auto_selected = c(paqci_star2 = star2_auto, paqci_star1 = star1_auto)
+    ))
+
+  } else {
+    # Both specified: validate non-collision
+    paqci_star2 <- toupper(paqci_star2)
+    paqci_star1 <- toupper(paqci_star1)
+
+    if (paqci_star2 == paqci_star1) {
+      stop("paqci_star2 and paqci_star1 must be different sequences.")
+    }
+    if (paqci_star2 == reverse_complement(paqci_star1)) {
+      stop("paqci_star2 and paqci_star1 must not be reverse complements.")
+    }
+
+    # Check collision with blacklist (warning only — PaqCI is separate reaction)
+    for (oh_name in c("paqci_star2", "paqci_star1")) {
+      val <- if (oh_name == "paqci_star2") paqci_star2 else paqci_star1
+      if (val %in% blacklist_expanded) {
+        cli::cli_alert_warning(paste0(
+          oh_name, "=", val,
+          " collides with an existing overhang (oh_L, oh4, or oh3). ",
+          "Acceptable for PaqCI (different reaction) but noted for reference."
+        ))
+      }
+    }
+
+    return(list(
+      paqci_star2 = paqci_star2, paqci_star1 = paqci_star1,
+      auto_selected = c(paqci_star2 = FALSE, paqci_star1 = FALSE)
+    ))
+  }
+}
+
+# =============================================================================
 # oh_R SEARCH — LAST TILE CASSETTE OVERHANG
 # =============================================================================
 
@@ -969,7 +1296,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
 
   # Unpack config with defaults
   manual_oh3 <- config$manual_oh3
-  manual_oh4 <- config$manual_oh4
+  # oh4 is now passed via config$oh4 (can be "auto", NULL, or explicit sequence)
+  # manual_oh4 removed — oh4 goes through auto_select_bsai_pair()
   search_window_K <- config$search_window_K %||% 15L
   dp_k_range <- config$dp_k_range %||% 5L
   boundary_method <- config$boundary_method %||% "oogga_two_pass"
@@ -1005,43 +1333,45 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   eff_lookup <- compute_overhang_efficiency(bsmbi_matrix)
 
   # =========================================================================
-  # Phase 1: Select fixed overhangs (oh_L, oh3, oh4) before any DP
+  # Phase 1: Select fixed overhangs (oh_L, oh3, oh4, PaqCI) before any DP
   # =========================================================================
-  # These are physical constraints — oh_L is user-specified (sits upstream of
-  # ATG in the helper plasmid), oh3 is derived from the PolIII promoter (or
-  # score-selected), oh4 is score-selected.
-  # All three are committed before the tile DP runs so the DP can route around
-  # them. Constrained things first, flexible things second.
-  cli::cli_h3("Phase 1: Selecting fixed overhangs (oh_L, oh3, oh4)")
-  oh_L <- config$oh_L
+  # Order of selection:
+  #   1. oh3 (most constrained — derived from PolIII promoter)
+  #   2. {oh_L, oh4} as BsaI pair (set fidelity optimized)
+  #   3. {paqci_star2, paqci_star1} (collision avoidance only)
+  # All committed before the tile DP so it can route around them.
+  cli::cli_h3("Phase 1: Selecting fixed overhangs (oh3, oh_L, oh4, PaqCI)")
   upstream_cassette <- config$upstream_cassette %||% ""
-  if (is.null(oh_L) || !nzchar(oh_L)) {
-    stop("oh_L must be provided in config (no default — determined by helper plasmid design)")
-  }
-  oh_L <- toupper(oh_L)
-  cli::cli_alert_info(paste0(
-    "oh_L = ", oh_L, " (user-specified, upstream of ATG)",
-    if (nzchar(upstream_cassette)) paste0(", upstream_cassette = '", upstream_cassette, "'") else ""
-  ))
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
   strategy_used <- "promoter_derived"
   core_polIII <- NULL
   oh3_spacer <- NULL
 
-  if (!is.null(manual_oh3) && !is.null(manual_oh4)) {
-    validate_fixed_overhangs(manual_oh3, manual_oh4)
+  # --- Step 1: oh3 (most constrained — PolIII-derived or score-selected) ---
+  # Check if oh3 and oh4 are both explicitly specified (manual mode)
+  oh3_is_manual <- !is.null(manual_oh3) &&
+    !identical(toupper(manual_oh3), "AUTO")
+  oh4_is_manual <- !is.null(config$oh4) &&
+    !identical(toupper(config$oh4), "AUTO")
+
+  if (oh3_is_manual && oh4_is_manual) {
+    validate_fixed_overhangs(manual_oh3, config$oh4)
     oh3 <- toupper(manual_oh3)
-    oh4 <- toupper(manual_oh4)
+    oh4 <- toupper(config$oh4)
+    # In full manual mode, oh_L must also be explicitly specified
+    oh_L <- config$oh_L
+    if (is.null(oh_L) || identical(toupper(oh_L), "AUTO")) {
+      stop("oh_L must be specified when oh3 and oh4 are both manually set.")
+    }
+    oh_L <- toupper(oh_L)
+    # Validate BsaI set fidelity for the user-specified pair
+    bsai_pair <- auto_select_bsai_pair(oh_L, oh4, blacklist = character(0),
+                                        bsai_matrix = bsai_matrix)
     strategy_used <- "manual"
     cli::cli_alert_info(paste0("Using manual overhangs: oh3=", oh3, ", oh4=", oh4))
   } else {
-    # --- oh3: derive from PolIII promoter 3' end ---
-    # In PerturbView/pCROP-Seq-v2 architecture, the promoter's terminal 5 nt
-    # encode oh3 (4 nt overhang) + spacer (1 nt for BsmBI), so the BsmBI
-    # junction seamlessly reconstructs the promoter-barcode boundary.
-    # oh3 is a fixed constraint — it does NOT check against oh2 (which doesn't
-    # exist yet). The tile DP will blacklist oh3 and route around it.
+    # Derive oh3 from PolIII promoter 3' end
     promoter_derived <- derive_oh3_from_promoter(polIII)
 
     if (!is.null(promoter_derived) &&
@@ -1066,7 +1396,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         ))
       }
       strategy_used <- "score_based"
-      # Select by P_fid * P_eff
       oh3_candidates <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.50]
       oh3_candidates <- oh3_candidates[!(oh3_candidates %in% HOMOPOLYMER_4NT)]
       oh3_candidates <- oh3_candidates[!(oh3_candidates %in% PALINDROMIC_4NT)]
@@ -1076,23 +1405,39 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       oh3 <- oh3_candidates[which.max(oh3_scores)]
     }
 
-    # --- oh4: auto-select by P_fid * P_eff ---
-    # oh4 is in the BsaI reaction with oh_L, so it must avoid oh_L collision.
-    # It does NOT check against oh1 (which doesn't exist yet) — the tile DP
-    # will blacklist oh4 and route around it.
-    oh4_exclude <- unique(c(oh_L, reverse_complement(oh_L)))
-    oh4_candidates <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.50]
-    oh4_candidates <- oh4_candidates[!(oh4_candidates %in% oh4_exclude)]
-    oh4_candidates <- oh4_candidates[!(oh4_candidates %in% HOMOPOLYMER_4NT)]
-    oh4_candidates <- oh4_candidates[!(oh4_candidates %in% PALINDROMIC_4NT)]
-
-    if (length(oh4_candidates) == 0) stop("Cannot find any valid oh4 candidate.")
-    oh4_scores <- unname(fid_lookup[oh4_candidates]) * unname(eff_lookup[oh4_candidates])
-    oh4 <- oh4_candidates[which.max(oh4_scores)]
+    # --- Step 2: BsaI pair {oh_L, oh4} with set fidelity optimization ---
+    # oh3 is now known — add to blacklist for BsaI pair selection.
+    bsai_blacklist <- unique(c(oh3, reverse_complement(oh3)))
+    bsai_pair <- auto_select_bsai_pair(
+      oh_L = config$oh_L,
+      oh4 = config$oh4,
+      blacklist = bsai_blacklist,
+      bsai_matrix = bsai_matrix
+    )
+    oh_L <- bsai_pair$oh_L
+    oh4 <- bsai_pair$oh4
   }
 
+  # Log oh_L with upstream cassette info
+  cli::cli_alert_info(paste0(
+    "oh_L = ", oh_L,
+    if (bsai_pair$auto_selected["oh_L"] %||% FALSE) " (auto-selected)" else " (user-specified)",
+    if (nzchar(upstream_cassette)) paste0(", upstream_cassette = '", upstream_cassette, "'") else ""
+  ))
+
+  # --- Step 3: PaqCI pair {paqci_star2, paqci_star1} (collision avoidance) ---
+  paqci_blacklist <- unique(c(oh_L, oh4, oh3))
+  paqci_pair <- auto_select_paqci_pair(
+    paqci_star2 = config$paqci_star2,
+    paqci_star1 = config$paqci_star1,
+    blacklist = paqci_blacklist
+  )
+  paqci_star2 <- paqci_pair$paqci_star2
+  paqci_star1 <- paqci_pair$paqci_star1
+
   cli::cli_alert_success(paste0(
-    "Fixed overhangs: oh3=", oh3, ", oh4=", oh4
+    "Fixed overhangs: oh3=", oh3, ", oh4=", oh4,
+    ", paqci_star2=", paqci_star2, ", paqci_star1=", paqci_star1
   ))
 
   # =========================================================================
@@ -1453,6 +1798,8 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     oh3 = oh3,
     oh4 = oh4,
     oh_L = oh_L,
+    paqci_star2 = paqci_star2,   # auto-selected or user-specified
+    paqci_star1 = paqci_star1,   # auto-selected or user-specified
     upstream_cassette = upstream_cassette, # sequence between oh_L and ATG (may be "")
     core_polIII = core_polIII, # promoter minus last 5 nt (NULL if not derived)
     core_downstream_cassette = core_downstream_cassette, # full cassette minus last 5 nt (NULL if not derived)
