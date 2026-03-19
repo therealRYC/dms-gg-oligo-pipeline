@@ -37,13 +37,6 @@ test_that("POTAPOV_TABLE1_SET3_25 overhangs are mutually orthogonal", {
   }
 })
 
-test_that("load_high_fidelity_set legacy fallback still works", {
-  # Requesting old set name triggers greedy fallback
-  hf_set_legacy <- load_high_fidelity_set("greedy_fidelity_20")
-  expect_equal(length(hf_set_legacy), 20)
-  expect_true(all(nchar(hf_set_legacy) == 4))
-})
-
 test_that("plan_assembly returns complete assembly plan", {
   cu <- TEST_CODON_USAGE
   cds <- domesticate_test_gene()

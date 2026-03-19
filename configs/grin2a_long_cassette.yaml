@@ -40,7 +40,7 @@ intergene_elements:
 
 # 5' gene junction — MUST match your helper plasmid's BsaI overhang.
 # Replace "NNNN" with the actual overhang from your plasmid.
-oh_L: "NNNN"
+oh_L: "TGAA"
 # upstream_cassette: "CC"                    # Sequence between oh_L and ATG (e.g., Kozak tail)
 
 # PaqCI overhangs — MUST match your destination vector's PaqCI sites.

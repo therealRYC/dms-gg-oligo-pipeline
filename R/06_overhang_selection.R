@@ -81,33 +81,12 @@ load_overhang_fidelity <- function(enzyme_name = "BsmBI") {
 #' Load a pre-validated high-fidelity overhang set
 #'
 #' Returns the Potapov 2018 Table 1, Set 3 (25 overhangs, 95.8% predicted set
-#' fidelity) by default. This set was optimized via simulated annealing for SET
-#' fidelity by NEB's GetSet tool. Falls back to greedy generation only if
-#' explicitly requested via set_name.
+#' fidelity). This set was optimized via simulated annealing for SET fidelity
+#' by NEB's GetSet tool. Hard-coded — no external data file needed.
 #'
-#' @param set_name Name of the set. Default "potapov_set3_25" returns the
-#'   hard-coded Potapov Table 1 Set 3. Legacy names like "greedy_fidelity_20"
-#'   will attempt to load from RDS, falling back to greedy generation.
-#' @return Character vector of high-fidelity overhangs
-load_high_fidelity_set <- function(set_name = "potapov_set3_25") {
-  # Default: return the hard-coded Potapov Table 1 Set 3 (25 overhangs)
-  if (set_name == "potapov_set3_25") {
-    return(POTAPOV_TABLE1_SET3_25)
-  }
-
-  # Legacy path: try loading from RDS file for other named sets
-  data_path <- file.path(
-    find_data_dir(), "neb_overhang_fidelity",
-    "high_fidelity_sets.rds"
-  )
-  if (file.exists(data_path)) {
-    sets <- readRDS(data_path)
-    if (set_name %in% names(sets)) {
-      return(sets[[set_name]])
-    }
-  }
-
-  stop("HF set '", set_name, "' not found in RDS or built-in sets.")
+#' @return Character vector of 25 high-fidelity overhangs
+load_high_fidelity_set <- function() {
+  POTAPOV_TABLE1_SET3_25
 }
 
 #' Load 256x256 pairwise ligation matrix
