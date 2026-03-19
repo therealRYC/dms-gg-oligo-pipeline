@@ -26,6 +26,7 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
     "auto_domesticate: true",
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",
+    "oh_L: TGAA",
     paste0("output_dir: \"", gsub("\\\\", "/", output_dir), "\"")
   )
   writeLines(config_lines, tmp_config)
@@ -72,7 +73,9 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
     max_mutable_nt = tile_size,
     max_block_length = cfg$max_geneblock_length,
     config = list(
-      search_window_K = cfg$search_window_K
+      search_window_K = cfg$search_window_K,
+      oh_L = cfg$oh_L,
+      upstream_cassette = cfg$upstream_cassette
     )
   )
   tiles <- assembly_plan$tiles
@@ -245,6 +248,7 @@ test_that("full pipeline runs on long test gene with superblocking", {
     "auto_domesticate: true",
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",
+    "oh_L: TGAA",
     paste0("output_dir: \"", gsub("\\\\", "/", output_dir), "\"")
   )
   writeLines(config_lines, tmp_config)
@@ -289,7 +293,9 @@ test_that("full pipeline runs on long test gene with superblocking", {
     max_mutable_nt = tile_size,
     max_block_length = cfg$max_geneblock_length,
     config = list(
-      search_window_K = cfg$search_window_K
+      search_window_K = cfg$search_window_K,
+      oh_L = cfg$oh_L,
+      upstream_cassette = cfg$upstream_cassette
     )
   )
   tiles <- assembly_plan$tiles
@@ -447,6 +453,7 @@ test_that("full pipeline runs on AKAP11 gene (large gene stress test)", {
     "auto_domesticate: true",
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",
+    "oh_L: TGAA",
     paste0("output_dir: \"", gsub("\\\\", "/", output_dir), "\"")
   )
   writeLines(config_lines, tmp_config)
@@ -495,7 +502,9 @@ test_that("full pipeline runs on AKAP11 gene (large gene stress test)", {
     max_mutable_nt = tile_size,
     max_block_length = cfg$max_geneblock_length,
     config = list(
-      search_window_K = cfg$search_window_K
+      search_window_K = cfg$search_window_K,
+      oh_L = cfg$oh_L,
+      upstream_cassette = cfg$upstream_cassette
     )
   )
   tiles <- assembly_plan$tiles
@@ -641,6 +650,7 @@ test_that("gene_cds config option works as alternative to gene_fasta", {
     "auto_domesticate: true",
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",
+    "oh_L: TGAA",
     paste0("output_dir: \"", gsub("\\\\", "/", output_dir), "\"")
   )
   writeLines(config_lines, tmp_config)
@@ -669,7 +679,8 @@ test_that("config rejects both gene_fasta and gene_cds specified together", {
     'gene_cds: "ATGGCTGAATAA"',
     paste0("polIII_promoter: \"", TEST_POLIII, "\""),
     "paqci_star2: AGTC",
-    "paqci_star1: TCGA"
+    "paqci_star1: TCGA",
+    "oh_L: TGAA"
   )
   writeLines(config_lines, tmp_config)
 
@@ -684,7 +695,8 @@ test_that("config rejects neither gene_fasta nor gene_cds", {
   config_lines <- c(
     paste0("polIII_promoter: \"", TEST_POLIII, "\""),
     "paqci_star2: AGTC",
-    "paqci_star1: TCGA"
+    "paqci_star1: TCGA",
+    "oh_L: TGAA"
   )
   writeLines(config_lines, tmp_config)
 

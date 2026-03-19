@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-17 — Add handle_overhead parameter for PCR handles
+# Last updated: 2026-03-18 — Add handle_overhead (PCR handles) and upstream_cassette_len to tile budget
 # 05_tiling.R — Partition gene into tiles for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -13,18 +13,25 @@
 #' Compute the maximum mutable region size in nucleotides
 #'
 #' Universal oligo structure (all tile types):
-#'   [fwd_handle] + BsaI_recog+spacer (7nt) + oh1_WT_flank (4nt) + [mutable region] +
+#'   [fwd_handle] + BsaI_recog+spacer (7nt) + oh1(4nt) + [upstream_cassette] + [mutable region] +
 #'   BsmBI_rev_oh2 (11nt) + BsmBI_fwd_oh3 (11nt) + barcode + BsaI_rev_oh4 (11nt) + [rev_handle]
 #'
-#' Total fixed overhead = 7 + 4 + 11 + 11 + barcode + 11 + handle_overhead = 44 + barcode + handles
+#' Total fixed overhead = 7 + 4 + upstream_cassette + 11 + 11 + barcode + 11 + handle_overhead
+#'                       = 44 + upstream_cassette + barcode + handles
+#'
+#' The upstream_cassette sits between oh_L and ATG on tile 1 oligos.
+#' We conservatively subtract its length from ALL tiles' mutable space
+#' (avoids tile-specific DP refactoring; cost: 0-2 codons for typical <=6 nt cassettes).
 #'
 #' @param max_oligo_length Maximum oligo length (default 300)
 #' @param barcode_length Barcode length in nt (default 12)
 #' @param handle_overhead Total PCR handle length in nt (fwd + rev, default 0)
+#' @param upstream_cassette_len Length of upstream_cassette in nt (default 0)
 #' @return Integer max mutable region size in nucleotides (rounded to codon boundary)
 compute_max_tile_size <- function(max_oligo_length = 300L,
                                   barcode_length = 12L,
-                                  handle_overhead = 0L) {
+                                  handle_overhead = 0L,
+                                  upstream_cassette_len = 0L) {
   # BsaI site = recognition(6) + spacer(1) = 7 nt (5' end, forward)
   bsai_5prime <- nchar(ENZYMES$BsaI$recog) + ENZYMES$BsaI$spacer_len  # 7
 
@@ -40,19 +47,25 @@ compute_max_tile_size <- function(max_oligo_length = 300L,
   bsai_site_len <- nchar(ENZYMES$BsaI$recog) + ENZYMES$BsaI$spacer_len +
                    ENZYMES$BsaI$oh_len  # 11
 
-  # Total fixed overhead: BsaI_5'(7) + oh1(4) + BsmBI_oh2(11) + BsmBI_oh3(11) + barcode + BsaI_oh4(11) + handles
-  overhead <- bsai_5prime + oh1_len + bsmbi_site_len + bsmbi_site_len +
-              barcode_length + bsai_site_len + handle_overhead
+  # Total fixed overhead: BsaI_5'(7) + oh1(4) + upstream_cassette + BsmBI_oh2(11) +
+  #                       BsmBI_oh3(11) + barcode + BsaI_oh4(11) + handles
+  overhead <- bsai_5prime + oh1_len + as.integer(upstream_cassette_len) +
+              bsmbi_site_len + bsmbi_site_len + barcode_length + bsai_site_len +
+              handle_overhead
 
   mutable_size <- max_oligo_length - overhead
 
   # Round down to nearest multiple of 3 (codon boundary)
   mutable_size <- (mutable_size %/% 3L) * 3L
 
-  handle_msg <- if (handle_overhead > 0L) paste0(" (incl. ", handle_overhead, " nt PCR handles)") else ""
+  extras <- c(
+    if (handle_overhead > 0L) paste0(handle_overhead, " nt PCR handles") else NULL,
+    if (upstream_cassette_len > 0L) paste0(upstream_cassette_len, " nt upstream_cassette") else NULL
+  )
+  extra_msg <- if (length(extras) > 0L) paste0(" (incl. ", paste(extras, collapse = ", "), ")") else ""
   cli::cli_alert_info(paste0(
     "Max mutable region: ", mutable_size, " nt (",
-    mutable_size %/% 3L, " codons) | Fixed overhead: ", overhead, " nt", handle_msg
+    mutable_size %/% 3L, " codons) | Fixed overhead: ", overhead, " nt", extra_msg
   ))
 
   mutable_size
@@ -182,7 +195,13 @@ assign_variants_to_tiles <- function(variants, tiles) {
         # oh1 occupies positions 1-4; oh2 occupies last 4 positions.
         # dist_from_oh1: how far past oh1 the codon starts (0 = immediately after)
         # dist_from_oh2: how far before oh2 the codon ends (0 = immediately before)
-        dist_from_oh1 <- local_start - 4L
+        # Exception: tile 1 (start_nt == 1) has oh1 external (upstream of CDS),
+        # so CDS position 1 has full clearance — use local_start directly.
+        if (tile_start == 1L) {
+          dist_from_oh1 <- local_start  # oh1 is external, no 4-nt offset
+        } else {
+          dist_from_oh1 <- local_start - 4L
+        }
         dist_from_oh2 <- (tile_len - 4L) - local_end
         clearance <- min(dist_from_oh1, dist_from_oh2)
 

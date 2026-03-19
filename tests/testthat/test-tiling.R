@@ -51,7 +51,8 @@ test_that("partition_tiles includes oh1 and oh2 sequences", {
     expect_equal(nchar(tiles$oh2_seq[i]), 4)
   }
 
-  # oh1 should be the first 4 nt of the tile region
+  # oh1 for tile 1 is derived from CDS[1:4] by default in partition_tiles
+  # (plan_assembly overrides this with config$oh_L for the real pipeline)
   expect_equal(tiles$oh1_seq[1], substring(cds, 1, 4))
 
   # oh2 should be the last 4 nt of the tile region
@@ -157,6 +158,7 @@ test_that("overlap_codons must be even", {
     paste0("polIII_promoter: \"", TEST_POLIII, "\""),
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",
+    "oh_L: TGAA",
     "overlap_codons: 5"
   )
   writeLines(config_lines, tmp_config)
@@ -173,6 +175,7 @@ test_that("overlap_codons must be >= 2", {
     paste0("polIII_promoter: \"", TEST_POLIII, "\""),
     "paqci_star2: AGTC",
     "paqci_star1: TCGA",
+    "oh_L: TGAA",
     "overlap_codons: 1"
   )
   writeLines(config_lines, tmp_config)

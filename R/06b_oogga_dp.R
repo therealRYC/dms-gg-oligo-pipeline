@@ -1,4 +1,5 @@
 # Created: 2026-03-09
+# Last updated: 2026-03-15 — Accept oh_L from caller; tile 1 oh1 = oh_L (external)
 # 06b_oogga_dp.R — OOGGA collision-aware boundary selection
 # DMS Golden Gate Oligo Pipeline
 #
@@ -894,7 +895,8 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
                                          alien_ohs_oh1 = character(0),
                                          alien_ohs_oh2 = character(0),
                                          max_identity = 2L,
-                                         n_codons_tile = NULL) {
+                                         n_codons_tile = NULL,
+                                         oh_L = NULL) {
   gene_len <- nchar(cds)
   n_codons <- gene_len %/% 3L
 
@@ -943,7 +945,8 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   precomp <- precompute_boundary_scores(
     cds, oh_fidelity,
     eff_lookup = eff_lookup,
-    overlap_codons = overlap_codons
+    overlap_codons = overlap_codons,
+    oh_L = oh_L
   )
 
   # Compute per-OH scores for multiplicative DP (OOGGA-faithful)
@@ -1070,7 +1073,8 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   )
 
   # Extract oh1/oh2 for each tile boundary
-  oh_L <- substring(cds, 1, 4)
+  # oh_L: user-specified (passed from caller); fallback to CDS[1:4] for legacy
+  if (is.null(oh_L)) oh_L <- substring(cds, 1, 4)
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
   hf_set <- load_high_fidelity_set()
@@ -1088,8 +1092,13 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   tiles$boundary_score <- NA_real_
 
   for (i in seq_len(n_tiles)) {
-    # oh1: first 4 nt of this tile
-    tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
+    # oh1: for tile 1 (start_nt == 1), oh1 is the external oh_L (upstream of CDS).
+    # For all other tiles, oh1 is the gene-derived 4 nt at the tile start.
+    if (tiles$start_nt[i] == 1L) {
+      tiles$oh1_seq[i] <- oh_L
+    } else {
+      tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
+    }
     # oh2: last 4 nt of this tile (end_codon already includes overlap extension
     # from the DP, so no further offset needed). Capped at full CDS length.
     oh2_codon <- min(tiles$end_codon[i], n_codons_cds)
@@ -1165,7 +1174,8 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
                                 bsmbi_base_aliens = character(0),
                                 max_identity = 2L,
                                 multi_k = TRUE, dp_k_range = 5L,
-                                overlap_codons = 4L) {
+                                overlap_codons = 4L,
+                                oh_L = NULL) {
   sb_df <- sb_result$boundaries
   n_sb <- sb_result$n_superblocks
 
@@ -1313,6 +1323,9 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
       # tile boundaries to the original segment length. The extended CDS
       # provides nucleotides for oh2 of the last tile to extend into the
       # overlap zone (codons past the SB boundary).
+      # Pass oh_L to tile DP only for the first gene segment (starts at nt 1).
+      # Mid-gene segments have gene-derived oh1 at their tile starts.
+      seg_oh_L <- if (seg_start == 1L) oh_L else NULL
       seg_tiles <- search_tile_boundaries_oogga(
           cds = seg_cds_extended,
           max_mutable_nt = max_mutable_nt,
@@ -1325,7 +1338,8 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
           alien_ohs_oh1 = oh1_aliens,
           alien_ohs_oh2 = oh2_aliens,
           max_identity = max_identity,
-          n_codons_tile = seg_n_codons
+          n_codons_tile = seg_n_codons,
+          oh_L = seg_oh_L
         )
 
       # Track worst-case max_identity used across segments
@@ -1358,9 +1372,16 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
   # extension from the DP, so no further offset is needed. The min() cap
   # uses total_n_codons (full gene length), correctly handling gene-end
   # boundaries.
+  # oh_L: user-specified (passed from caller); fallback to CDS[1:4] for legacy
+  if (is.null(oh_L)) oh_L <- substring(cds, 1, 4)
   for (i in seq_len(nrow(tiles))) {
-    # oh1: first 4 nt of this tile
-    tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
+    # oh1: for tile 1 (start_nt == 1), oh1 is the external oh_L (upstream of CDS).
+    # For all other tiles, oh1 is the gene-derived 4 nt at the tile start.
+    if (tiles$start_nt[i] == 1L) {
+      tiles$oh1_seq[i] <- oh_L
+    } else {
+      tiles$oh1_seq[i] <- substring(cds, tiles$start_nt[i], tiles$start_nt[i] + 3L)
+    }
     # oh2: last 4 nt of this tile (end_codon already includes overlap extension
     # from the DP, so no further offset needed). Capped at full gene length.
     oh2_codon <- min(tiles$end_codon[i], total_n_codons)

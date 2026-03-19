@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-17 — Add geneblock_flanking_pad config parameter
+# Last updated: 2026-03-18 — Add oh_L (required) and upstream_cassette config parameters
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -54,6 +54,7 @@ load_config <- function(config_path) {
     multi_k_search = TRUE,
     barcodes_per_variant = 10L,
     overlap_codons = 6L,
+    upstream_cassette = "",
     codon_table_path = NULL,
     include_synonymous = FALSE,
     auto_domesticate = TRUE,
@@ -109,6 +110,12 @@ load_config <- function(config_path) {
   # These are fixed BsmBI/BsaI overhangs used in the 3-enzyme assembly
   if (!is.null(cfg$oh3)) cfg$oh3 <- toupper(cfg$oh3)
   if (!is.null(cfg$oh4)) cfg$oh4 <- toupper(cfg$oh4)
+
+  # --- Uppercase oh_L and upstream_cassette ---
+  # oh_L: user-specified BsaI overhang at gene 5' junction (required, no default)
+  if (!is.null(cfg$oh_L)) cfg$oh_L <- toupper(cfg$oh_L)
+  # upstream_cassette: sequence between oh_L and ATG (e.g., Kozak tail)
+  cfg$upstream_cassette <- toupper(cfg$upstream_cassette)
 
   # --- Intergene elements: parse and build downstream cassette ---
   cfg <- build_downstream_cassette(cfg)
@@ -434,6 +441,51 @@ validate_config <- function(cfg) {
   }
   if (is.null(cfg$paqci_star1) || cfg$paqci_star1 == "NNNN") {
     errors <- c(errors, "paqci_star1 overhang must be specified (not NNNN)")
+  }
+
+  # --- oh_L validation (REQUIRED — user must specify based on their helper plasmid) ---
+  if (is.null(cfg$oh_L) || cfg$oh_L == "NNNN") {
+    errors <- c(errors, paste0(
+      "oh_L must be specified (not NNNN). This is the BsaI overhang at the 5' gene ",
+      "junction, determined by your helper plasmid design. It sits upstream of the CDS ",
+      "start codon (ATG), freeing codon 2 for mutagenesis."
+    ))
+  } else {
+    oh_L_val <- cfg$oh_L
+    if (nchar(oh_L_val) != 4L || grepl("[^ACGT]", oh_L_val)) {
+      errors <- c(errors, paste0("oh_L must be exactly 4 ACGT characters, got: ", oh_L_val))
+    } else {
+      # Check oh_L is not a palindrome (self-complementary → ligation ambiguity)
+      if (oh_L_val == reverse_complement(oh_L_val)) {
+        errors <- c(errors, paste0(
+          "oh_L (", oh_L_val, ") is palindromic (self-complementary). ",
+          "This causes ligation ambiguity — choose a non-palindromic overhang."
+        ))
+      }
+      # Check oh_L is not a homopolymer (poor ligation specificity)
+      if (oh_L_val %in% c("AAAA", "CCCC", "GGGG", "TTTT")) {
+        errors <- c(errors, paste0(
+          "oh_L (", oh_L_val, ") is a homopolymer. ",
+          "Homopolymer overhangs have poor ligation specificity — choose a different overhang."
+        ))
+      }
+      # Check oh_L doesn't collide with oh3 or oh4 (if provided)
+      for (oh_name in c("oh3", "oh4")) {
+        if (!is.null(cfg[[oh_name]]) && nchar(cfg[[oh_name]]) == 4L && !grepl("[^ACGT]", cfg[[oh_name]])) {
+          if (oh_L_val == cfg[[oh_name]] || oh_L_val == reverse_complement(cfg[[oh_name]])) {
+            errors <- c(errors, paste0(
+              "oh_L (", oh_L_val, ") collides with ", oh_name, " (", cfg[[oh_name]],
+              "). These overhangs must be distinct (including reverse complements)."
+            ))
+          }
+        }
+      }
+    }
+  }
+
+  # --- upstream_cassette validation (optional, ACGT only) ---
+  if (nzchar(cfg$upstream_cassette) && grepl("[^ACGT]", cfg$upstream_cassette)) {
+    errors <- c(errors, "upstream_cassette contains non-ACGT characters")
   }
 
   # --- oh3 and oh4 validation (optional but validated if provided) ---

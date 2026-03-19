@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-17 — Add flanking pad support for gene block termini
+# Last updated: 2026-03-18 — Flanking pads + oh_L/upstream_cassette for 5'WT blocks
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -225,6 +225,13 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
   block_overhead <- 22L + pad_overhead # 2 x 11-nt enzyme sites + 2 x pad per block
   min_sub_content <- max(5L, min_block_length - block_overhead)
 
+  # oh_L and upstream_cassette: used to construct 5'WT blocks.
+  # oh_L is the user-specified BsaI overhang upstream of ATG.
+  # upstream_cassette is the sequence between oh_L and ATG (may be "").
+  # 5'WT blocks (tiles 2+) are: BsaI(oh_L) + upstream_cassette + CDS[1..tile_boundary] + BsaI(oh1)
+  oh_L <- if (!is.null(assembly_plan)) assembly_plan$oh_L else substring(cds, 1, 4)
+  upstream_cassette <- if (!is.null(assembly_plan)) (assembly_plan$upstream_cassette %||% "") else ""
+
   # Use core cassette (cassette minus last 5 nt) when oh3 is derived from promoter.
   # This avoids duplicating the oh3+spacer sequence that's already encoded in the
   # BsmBI site. After ligation: ...core_cassette + oh3 + barcode (seamless junction).
@@ -293,9 +300,11 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       }
 
       if (length(sb_junction_nt) == 0) {
-        # Check if single block would exceed max_block_length
-        wt_5prime_seq <- substring(cds, wt_5prime_start, wt_5prime_end)
-        tentative_len <- nchar(wt_5prime_seq) + block_overhead
+        # Check if single block would exceed max_block_length.
+        # Include upstream_cassette in the length check since it's prepended to 5'WT blocks.
+        wt_5prime_seq_raw <- substring(cds, wt_5prime_start, wt_5prime_end)
+        tentative_len <- nchar(oh_L) + nchar(upstream_cassette) +
+                         nchar(wt_5prime_seq_raw) + block_overhead
 
         if (tentative_len > max_block_length && use_precomputed_splits &&
           !is.null(assembly_plan$oh_fidelity_used)) {
@@ -307,10 +316,9 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
           ))
           # Exclude ALL tiles' oh1 (not just current tile's) because BsaI
           # sub-blocks are deduplicated and shared across tiles.
-          oh_L_seq <- substring(cds, wt_5prime_start, wt_5prime_start + 3L)
           local_exclude <- unique(c(
-            all_oh1, oh4, oh_L_seq,
-            vapply(c(all_oh1, oh4, oh_L_seq), reverse_complement, character(1))
+            all_oh1, oh4, oh_L,
+            vapply(c(all_oh1, oh4, oh_L), reverse_complement, character(1))
           ))
           local_splits <- optimize_split_points(
             cds = cds,
@@ -326,11 +334,14 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
       }
 
       if (length(sb_junction_nt) == 0) {
-        # Truly a single 5'WT block
-        wt_5prime_seq <- substring(cds, wt_5prime_start, wt_5prime_end)
+        # Truly a single 5'WT block.
+        # Prepend oh_L + upstream_cassette before CDS content so the assembled
+        # product is: oh_L → upstream_cassette → ATG → [5'WT CDS] → oh1
+        wt_5prime_seq <- paste0(oh_L, upstream_cassette,
+                                substring(cds, wt_5prime_start, wt_5prime_end))
         block_name <- paste0("bsai_5wt_tile", tile$tile_id)
 
-        oh_5 <- substring(cds, wt_5prime_start, wt_5prime_start + 3L)
+        oh_5 <- oh_L
         oh_3 <- tile$oh1_seq
 
         block_seq <- create_bsai_block(wt_5prime_seq, oh_5, oh_3,
@@ -404,7 +415,8 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
         for (s in seq_len(n_bsai_sub)) {
           if (s == 1L) {
             sub_start <- split_points[s] + 1L
-            oh_5 <- substring(cds, sub_start, sub_start + 3L)
+            # First sub-block: oh_5 = oh_L, prepend upstream_cassette before CDS
+            oh_5 <- oh_L
           } else {
             # Overlap: start 4 nt earlier so gene_seq begins with junction OH
             sub_start <- split_points[s] - 3L
@@ -416,6 +428,10 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
             sub_seq <- substring(cds, sub_start, sub_end - 4L)
           } else {
             sub_seq <- substring(cds, sub_start, sub_end)
+          }
+          # First sub-block: prepend oh_L + upstream_cassette before CDS content
+          if (s == 1L) {
+            sub_seq <- paste0(oh_L, upstream_cassette, sub_seq)
           }
           block_name <- paste0("bsai_5wt_tile", tile$tile_id, "_sub", s)
           oh_3 <- if (s < n_bsai_sub) internal_oh_bsai[s] else tile$oh1_seq
@@ -1032,8 +1048,7 @@ design_wt_geneblocks <- function(cds, polIII, tiles, tile_overhangs = NULL,
     }
   }
 
-  # Design helper plasmid insert
-  oh_L <- substring(cds, 1, 4) # First 4 nt of gene
+  # Design helper plasmid insert (oh_L already extracted at top of function)
   helper <- design_helper_plasmid(oh_L, oh4, paqci_star2, paqci_star1)
 
   # Check block lengths

@@ -257,7 +257,7 @@ test_that("GG simulator produces identical results with and without handles", {
   assembly_plan <- plan_assembly(
     cds = cds, polIII = TEST_POLIII,
     max_mutable_nt = tile_size, max_block_length = 1800L,
-    config = list(overlap_codons = 6L, boundary_method = "oogga_two_pass",
+    config = list(oh_L = "TGAA", overlap_codons = 6L, boundary_method = "oogga_two_pass",
       oogga_max_identity = 2L, oogga_beam_width = 10L,
       multi_k = FALSE, min_geneblock_length = 300L))
   tiles <- assembly_plan$tiles

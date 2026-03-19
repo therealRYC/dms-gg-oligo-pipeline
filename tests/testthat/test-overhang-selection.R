@@ -49,7 +49,8 @@ test_that("plan_assembly returns complete assembly plan", {
   cds <- domesticate_test_gene()
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
 
   expect_true(is.list(plan))
   expect_true(!is.null(plan$tiles))
@@ -93,7 +94,8 @@ test_that("plan_assembly handles long gene with superblocking", {
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
 
   expect_true(nrow(plan$tiles) >= 8) # 2100/243 ~ 9 tiles
   expect_true(!is.null(plan$superblock_splits))
@@ -125,7 +127,8 @@ test_that("oh3 and oh4 are never homopolymers (short gene)", {
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
 
   expect_false(plan$oh3 %in% HOMOPOLYMER_4NT,
     info = paste("oh3 =", plan$oh3, "should not be a homopolymer")
@@ -144,7 +147,8 @@ test_that("oh3 and oh4 are never homopolymers (long gene)", {
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
 
   expect_false(plan$oh3 %in% HOMOPOLYMER_4NT,
     info = paste("oh3 =", plan$oh3, "should not be a homopolymer")
@@ -167,7 +171,8 @@ test_that("global boundaries produce shared splits across tiles", {
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
 
   # Long gene should trigger superblock splits
   splits <- plan$superblock_splits
@@ -275,7 +280,8 @@ test_that("convert_partition_to_splits round-trips through plan_assembly correct
     cds <- apply_domestication(cds, scan_result$domestication, codon_usage = cu)
   }
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
 
   # Verify shim output has correct schema
   splits <- plan$superblock_splits
@@ -366,8 +372,9 @@ test_that("overhang_score returns NA for unknown overhangs", {
 test_that("precompute_boundary_scores returns correct structure", {
   cds <- TEST_GENE_SEQ
   oh_fidelity <- load_overhang_fidelity("BsmBI")
+  oh_L <- "TGAA"  # External overhang (not CDS-derived)
 
-  precomp <- precompute_boundary_scores(cds, oh_fidelity)
+  precomp <- precompute_boundary_scores(cds, oh_fidelity, oh_L = oh_L)
   n_codons <- nchar(cds) %/% 3
 
   expect_equal(length(precomp$oh1_seq), n_codons)
@@ -376,7 +383,6 @@ test_that("precompute_boundary_scores returns correct structure", {
   expect_equal(length(precomp$valid), n_codons)
 
   # oh_L collision positions should be invalid
-  oh_L <- substring(cds, 1, 4)
   for (b in seq_len(n_codons - 1)) {
     if (precomp$oh1_seq[b] == oh_L ||
       precomp$oh1_seq[b] == reverse_complement(oh_L)) {
@@ -397,13 +403,15 @@ test_that("precompute_boundary_scores works with eff_lookup parameter", {
   # Call with eff_lookup (new scoring: P_fid * P_eff)
   result_with_eff <- precompute_boundary_scores(
     TEST_GENE_SEQ, oh_data,
-    eff_lookup = eff_lookup
+    eff_lookup = eff_lookup,
+    oh_L = "TGAA"
   )
 
   # Call without eff_lookup (default = 1.0 efficiency)
   result_no_eff <- precompute_boundary_scores(
     TEST_GENE_SEQ, oh_data,
-    eff_lookup = NULL
+    eff_lookup = NULL,
+    oh_L = "TGAA"
   )
 
   # Both should have valid structure
@@ -430,7 +438,8 @@ test_that("plan_assembly uses oogga_two_pass by default", {
 
   tile_size <- compute_max_tile_size(300, 12)
   # Default should use oogga_two_pass
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
   expect_true(is.list(plan))
   expect_true(!is.null(plan$tiles))
   expect_true(!is.null(plan$oh3))
@@ -438,7 +447,7 @@ test_that("plan_assembly uses oogga_two_pass by default", {
 
   # Explicit oogga_two_pass should also work
   plan_otp <- plan_assembly(cds, TEST_POLIII, tile_size,
-    config = list(boundary_method = "oogga_two_pass")
+    config = list(boundary_method = "oogga_two_pass", oh_L = "TGAA")
   )
   expect_true(is.list(plan_otp))
   expect_true(!is.null(plan_otp$tiles))
@@ -579,7 +588,7 @@ test_that("plan_assembly includes oh_R_result and full_seq in output", {
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size, config = list(oh_L = "TGAA"))
 
   # oh_R_result should exist in the plan (may be NULL if no cassette)
   expect_true("oh_R_result" %in% names(plan))

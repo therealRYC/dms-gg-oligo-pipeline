@@ -144,6 +144,7 @@ test_that("design_wt_geneblocks handles oversized cassette (last tile)", {
   plan <- plan_assembly(
     cds = cds, polIII = TEST_POLIII,
     max_mutable_nt = tile_size,
+    config = list(oh_L = "TGAA"),
     downstream_cassette = big_cassette
   )
   tiles <- plan$tiles
@@ -188,7 +189,8 @@ test_that("normal cassette (1067 nt) is NOT split", {
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
 
   tiles <- plan$tiles
   result <- design_wt_geneblocks(

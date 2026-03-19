@@ -130,7 +130,8 @@ test_that("non-final 3'WT sub-blocks have gene_region WITHOUT polIII", {
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
   tiles <- plan$tiles
   result <- design_wt_geneblocks(
     cds = cds, polIII = TEST_POLIII,
@@ -190,7 +191,8 @@ test_that("global boundaries increase block reuse (long gene)", {
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA"))
   tiles <- plan$tiles
   result <- design_wt_geneblocks(
     cds = cds, polIII = TEST_POLIII,
@@ -248,7 +250,8 @@ setup_geneblocks <- function(cds_raw, polIII = TEST_POLIII,
     cds = cds, polIII = polIII,
     max_mutable_nt = tile_size,
     max_block_length = max_block_length,
-    config = list(min_geneblock_length = min_block_length)
+    config = list(min_geneblock_length = min_block_length,
+                  oh_L = "TGAA")
   )
   tiles <- plan$tiles
 
@@ -343,7 +346,8 @@ test_that("min_sub_length uses gene-content semantics (not total block)", {
     cds = cds, polIII = TEST_POLIII,
     max_mutable_nt = tile_size,
     max_block_length = 1800L,
-    config = list(min_geneblock_length = 300L)
+    config = list(min_geneblock_length = 300L,
+                  oh_L = "TGAA")
   )
 
   # The global boundaries should exist (long gene triggers splits)
@@ -477,6 +481,7 @@ test_that("config rejects flanking pad containing enzyme site", {
     polIII_promoter = "ACGTACGTACGT",
     paqci_star2 = "AGTC",
     paqci_star1 = "TCGA",
+    oh_L = "TGAA", upstream_cassette = "",
     max_oligo_length = 300L,
     max_geneblock_length = 1800L,
     min_geneblock_length = 300L,
@@ -490,7 +495,11 @@ test_that("config rejects flanking pad containing enzyme site", {
     geneblock_flanking_pad = bad_pad,
     handle_overhead = 0L,
     fwd_handle_length = 0L,
-    rev_handle_length = 0L
+    rev_handle_length = 0L,
+    barcode_filter_hairpin = TRUE, barcode_max_hairpin_stem = 3L,
+    barcode_filter_dinuc_repeats = TRUE, barcode_max_dinuc_repeat_units = 4L,
+    barcode_filter_polyg = FALSE, barcode_max_polyg = 2L,
+    barcode_filter_ggc = FALSE, barcode_filter_tm_uniformity = FALSE, barcode_tm_tolerance = 2.0
   )
 
   expect_error(validate_config(cfg), "geneblock_flanking_pad.*BsmBI")

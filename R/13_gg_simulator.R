@@ -338,19 +338,25 @@ select_junctional_variants <- function(tile_var_idx, variants, tile,
 #' @param tile_start_nt Tile start position in gene (1-based). When provided
 #'   with tile_end_nt, enables partial-overlap-aware mutation.
 #' @param tile_end_nt Tile end position in gene (1-based).
+#' @param oh_L 4-nt BsaI overhang upstream of ATG (user-specified, external to CDS).
+#'   In the assembled product, oh_L appears between helper_left_cap and the CDS.
+#'   Default "" for backward compatibility with callers that don't use oh_L.
+#' @param upstream_cassette Sequence between oh_L and ATG (default "").
 #' @return Character string of the expected assembled product
 build_expected_product <- function(variant_row, barcode, cds,
                                     cassette_for_block, oh3,
                                     helper_left_cap, helper_right_cap,
-                                    tile_start_nt = NULL, tile_end_nt = NULL) {
+                                    tile_start_nt = NULL, tile_end_nt = NULL,
+                                    oh_L = "", upstream_cassette = "") {
 
   codon_start <- (variant_row$position - 1L) * 3L + 1L
 
   if (!is.null(tile_start_nt) && !is.null(tile_end_nt)) {
-    # The oligo's mutable region covers tile positions 5 to t_len-4,
-    # i.e., gene positions [tile_start+4, tile_end-4]. Only mutate
-    # nucleotides of the codon that fall within this range.
-    mutable_start <- tile_start_nt + 4L
+    # The oligo's mutable region covers gene positions [mutable_start, tile_end-4].
+    # For tile 1 (tile_start_nt == 1), oh_L is external to the CDS so no front
+    # strip is consumed — all positions from 1 are mutable. For other tiles,
+    # oh1 (4 nt) is consumed at the 5' end, so mutable starts at tile_start + 4.
+    mutable_start <- if (tile_start_nt == 1L) tile_start_nt else tile_start_nt + 4L
     mutable_end <- tile_end_nt - 4L
     gene_chars <- strsplit(cds, "")[[1]]
     mut_chars <- strsplit(variant_row$mut_codon, "")[[1]]
@@ -365,7 +371,11 @@ build_expected_product <- function(variant_row, barcode, cds,
     mutant_cds <- replace_codon(cds, variant_row$position, variant_row$mut_codon)
   }
 
-  paste0(helper_left_cap, mutant_cds, cassette_for_block, oh3, barcode, helper_right_cap)
+  # oh_L and upstream_cassette sit between the helper left cap and the CDS in
+  # the assembled product. In the old architecture oh_L = CDS[1..4] so it was
+  # already implicit in mutant_cds; with the new oh_L architecture oh_L is
+  # external to the CDS and must be included explicitly here.
+  paste0(helper_left_cap, oh_L, upstream_cassette, mutant_cds, cassette_for_block, oh3, barcode, helper_right_cap)
 }
 
 #' Strict nucleotide-level verification of an assembled product
@@ -432,7 +442,8 @@ verify_assembly_product_strict <- function(product, expected,
   # Use overlap-aware mutation when tile boundaries are provided,
   # matching the physical assembly behavior for boundary codons.
   if (!is.null(tile_start_nt) && !is.null(tile_end_nt)) {
-    mutable_start <- tile_start_nt + 4L
+    # Tile 1 (tile_start_nt == 1): oh_L is external, no front strip consumed.
+    mutable_start <- if (tile_start_nt == 1L) tile_start_nt else tile_start_nt + 4L
     mutable_end <- tile_end_nt - 4L
     codon_start <- (mut_position - 1L) * 3L + 1L
     gene_chars <- strsplit(expected_cds, "")[[1]]
@@ -500,7 +511,8 @@ verify_assembly_product_strict <- function(product, expected,
 #'   If provided, checks for core_polIII instead of full polIII.
 #' @return List with pass (logical), and detail flags
 verify_assembly_product <- function(product, expected_cds, mut_position, mut_codon,
-                                      polIII, barcode, core_polIII = NULL) {
+                                      polIII, barcode, core_polIII = NULL,
+                                      upstream_cassette = "") {
 
   # Build expected mutant CDS
   expected_mut_cds <- replace_codon(expected_cds, mut_position, mut_codon)
@@ -515,6 +527,15 @@ verify_assembly_product <- function(product, expected_cds, mut_position, mut_cod
   # Check for barcode
   has_barcode <- grepl(barcode, product, fixed = TRUE)
 
+  # Check upstream_cassette appears before CDS (if non-empty)
+  has_upstream <- if (nzchar(upstream_cassette)) {
+    uc_pos <- regexpr(upstream_cassette, product, fixed = TRUE)
+    gene_pos_check <- regexpr(expected_mut_cds, product, fixed = TRUE)
+    (uc_pos > 0L) && (gene_pos_check > 0L) && (uc_pos < gene_pos_check)
+  } else {
+    TRUE
+  }
+
   # Check order: gene before polIII before barcode
   gene_pos <- regexpr(expected_mut_cds, product, fixed = TRUE)
   polIII_pos <- regexpr(polIII_check, product, fixed = TRUE)
@@ -523,10 +544,11 @@ verify_assembly_product <- function(product, expected_cds, mut_position, mut_cod
                    (gene_pos < polIII_pos) && (polIII_pos < barcode_pos)
 
   list(
-    pass = has_mut_gene && has_polIII && has_barcode && correct_order,
+    pass = has_mut_gene && has_polIII && has_barcode && correct_order && has_upstream,
     has_mut_gene = has_mut_gene,
     has_polIII = has_polIII,
     has_barcode = has_barcode,
+    has_upstream = has_upstream,
     correct_order = correct_order
   )
 }
@@ -646,8 +668,11 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
           bsai_block_seqs = bsai_block_seqs,
           bsmbi_block_seqs = bsmbi_block_seqs
         )
-
-        # Original (coarse) verification
+        upstream_cassette <- if (!is.null(assembly_plan)) {
+          assembly_plan$upstream_cassette %||% ""
+        } else {
+          ""
+        }
         verify <- verify_assembly_product(
           product = product,
           expected_cds = cds,
@@ -655,7 +680,8 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
           mut_codon = variants$mut_codon[vi],
           polIII = polIII,
           barcode = barcode,
-          core_polIII = core_polIII
+          core_polIII = core_polIII,
+          upstream_cassette = upstream_cassette
         )
 
         # Strict (nucleotide-level) verification
@@ -669,7 +695,9 @@ simulate_pipeline_assembly <- function(oligos, geneblock_result, tiles, variants
             helper_left_cap = helper_left_cap,
             helper_right_cap = helper_right_cap,
             tile_start_nt = tiles$start_nt[t],
-            tile_end_nt = tiles$end_nt[t]
+            tile_end_nt = tiles$end_nt[t],
+            oh_L = if (!is.null(assembly_plan)) assembly_plan$oh_L %||% "" else "",
+            upstream_cassette = if (!is.null(assembly_plan)) assembly_plan$upstream_cassette %||% "" else ""
           )
           verify_assembly_product_strict(
             product = product,
