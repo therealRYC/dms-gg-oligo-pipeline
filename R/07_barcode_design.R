@@ -181,9 +181,11 @@ design_barcodes <- function(n_variants,
                             filter_polyg = DEFAULT_FILTER_POLYG,
                             max_polyg = DEFAULT_MAX_POLYG,
                             filter_tm_uniformity = DEFAULT_FILTER_TM_UNIFORMITY,
-                            tm_tolerance = DEFAULT_TM_TOLERANCE) {
+                            tm_tolerance = DEFAULT_TM_TOLERANCE,
+                            verbose_timing = FALSE) {
 
   n_total <- n_variants * barcodes_per_variant
+  if (verbose_timing) tmr <- timer_start()
 
   # Dynamic filter pass rate for capacity estimation
   filter_pass_rate <- estimate_filter_pass_rate(
@@ -248,6 +250,7 @@ design_barcodes <- function(n_variants,
          ". Try increasing prefix_length or decreasing min_hamming_distance.")
   }
   prefixes <- prefixes[seq_len(n_variants)]
+  if (verbose_timing) tmr <- timer_mark(tmr, "prefix_generation")
 
   cli::cli_alert_info(paste0(
     "Generated ", length(prefixes), " unique prefixes (method=", code_type, ")."
@@ -268,6 +271,8 @@ design_barcodes <- function(n_variants,
     filter_polyg = filter_polyg,
     max_polyg = max_polyg
   )
+
+  if (verbose_timing) tmr <- timer_mark(tmr, "suffix_generation")
 
   # 4b. Tm uniformity post-filter (needs full set to compute median)
   if (filter_tm_uniformity) {
@@ -338,6 +343,8 @@ design_barcodes <- function(n_variants,
     ))
   }
 
+  if (verbose_timing) tmr <- timer_mark(tmr, "tm_post_filter")
+
   # 5. Validate prefix distances — skip for algebraically-guaranteed codes
   if (code_type %in% c("linear", "lexicode")) {
     cli::cli_alert_success(paste0(
@@ -364,6 +371,9 @@ design_barcodes <- function(n_variants,
     ", median=", median(min_hamming_dist),
     ", max=", max(min_hamming_dist)
   ))
+
+  if (verbose_timing) tmr <- timer_mark(tmr, "nn_distance_computation")
+  if (verbose_timing) timer_report(tmr, "design_barcodes")
 
   # 7. Build assignment table
   barcode_assignments <- data.frame(

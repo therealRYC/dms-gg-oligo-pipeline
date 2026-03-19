@@ -61,7 +61,8 @@ load_config <- function(config_path) {
     simulate_assembly = TRUE,
     simulation_samples_per_tile = 1L,
     output_dir = "output",
-    geneblock_flanking_pad = DEFAULT_GENEBLOCK_FLANKING_PAD
+    geneblock_flanking_pad = DEFAULT_GENEBLOCK_FLANKING_PAD,
+    verbose_timing = FALSE
   )
 
   for (key in names(defaults)) {
@@ -105,6 +106,7 @@ load_config <- function(config_path) {
   cfg$simulate_assembly <- as.logical(cfg$simulate_assembly)
   cfg$simulation_samples_per_tile <- as.integer(cfg$simulation_samples_per_tile)
   cfg$geneblock_flanking_pad <- toupper(as.character(cfg$geneblock_flanking_pad))
+  cfg$verbose_timing <- as.logical(cfg$verbose_timing)
 
   # --- Validate oh3 and oh4 ---
   # These are fixed BsmBI/BsaI overhangs used in the 3-enzyme assembly
