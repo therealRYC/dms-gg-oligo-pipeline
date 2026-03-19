@@ -103,9 +103,6 @@ test_that("full pipeline runs on short test gene (3-enzyme)", {
   expect_true(nrow(assembly_plan$reaction_fidelity) > 0)
   expect_true(all(!is.na(variants$tile_id)))
 
-  # Tiles should have HF membership info
-  expect_true("oh1_in_hf" %in% names(tiles))
-  expect_true("oh2_in_hf" %in% names(tiles))
   expect_true(all(nchar(tiles$oh1_seq) == 4))
   expect_true(all(nchar(tiles$oh2_seq) == 4))
 

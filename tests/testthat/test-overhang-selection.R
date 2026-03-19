@@ -10,33 +10,6 @@ test_that("load_overhang_fidelity BsmBI returns all 256 overhangs", {
   expect_gte(sum(oh_data$fidelity >= 0.80), 30)
 })
 
-test_that("load_high_fidelity_set returns Potapov Table 1 Set 3 (25 overhangs)", {
-  hf_set <- load_high_fidelity_set()
-  expect_equal(length(hf_set), 25)
-  expect_true(all(nchar(hf_set) == 4))
-  # Should match the hard-coded Potapov set exactly
-  expect_equal(hf_set, POTAPOV_TABLE1_SET3_25)
-  # AAAA should be included (present in paper's SA-optimized set)
-  expect_true("AAAA" %in% hf_set)
-})
-
-test_that("POTAPOV_TABLE1_SET3_25 overhangs are mutually orthogonal", {
-  hf_set <- POTAPOV_TABLE1_SET3_25
-  # No identity collisions
-  expect_equal(length(unique(hf_set)), 25)
-  # No reverse-complement collisions within the set
-  for (i in seq_along(hf_set)) {
-    rc_i <- reverse_complement(hf_set[i])
-    for (j in seq_along(hf_set)) {
-      if (i != j) {
-        expect_true(hf_set[j] != rc_i,
-          info = paste(hf_set[i], "RC-collides with", hf_set[j])
-        )
-      }
-    }
-  }
-})
-
 test_that("plan_assembly returns complete assembly plan", {
   cu <- TEST_CODON_USAGE
   cds <- domesticate_test_gene()
@@ -204,7 +177,7 @@ test_that("convert_partition_to_splits returns empty for single superblock", {
   # Build a mock partition with 1 SB
   tiles <- data.frame(
     tile_id = 1:3, start_nt = c(1L, 201L, 401L), end_nt = c(200L, 400L, 600L),
-    oh2_seq = c("ACGT", "TGCA", "GCAT"), oh2_in_hf = c(TRUE, TRUE, FALSE),
+    oh2_seq = c("ACGT", "TGCA", "GCAT"),
     oh2_fidelity = c(0.99, 0.98, 0.95), stringsAsFactors = FALSE
   )
   part <- list(
@@ -218,7 +191,7 @@ test_that("convert_partition_to_splits returns empty for single superblock", {
   splits <- convert_partition_to_splits(part, tiles, 600L)
   expect_equal(nrow(splits), 0L)
   expect_true(all(c(
-    "split_nt", "junction_oh", "junction_in_hf",
+    "split_nt", "junction_oh",
     "junction_fidelity", "block_type", "tile_id"
   ) %in% names(splits)))
 })
@@ -232,7 +205,6 @@ test_that("convert_partition_to_splits generates correct bsmbi_3wt and bsai_5wt 
     end_nt = c(200L, 400L, 600L, 800L, 1000L),
     oh1_seq = c("ATGG", "CCTA", "GGAT", "TTAC", "ACGT"),
     oh2_seq = c("TGCA", "GCAT", "ACTT", "CGGA", "TTAG"),
-    oh2_in_hf = c(TRUE, FALSE, TRUE, TRUE, FALSE),
     oh2_fidelity = c(0.99, 0.95, 0.98, 0.97, 0.93),
     stringsAsFactors = FALSE
   )
@@ -254,8 +226,6 @@ test_that("convert_partition_to_splits generates correct bsmbi_3wt and bsai_5wt 
   expect_true(nrow(splits) > 0)
   expect_true(all(splits$split_nt == 600L))
   expect_true(all(splits$junction_oh == "ACTT"))
-  expect_true(all(splits$junction_in_hf == TRUE))
-
   # bsmbi_3wt: tiles whose end_nt < 600 → tiles 1 (200) and 2 (400)
   bsmbi_rows <- splits[splits$block_type == "bsmbi_3wt", ]
   expect_equal(sort(bsmbi_rows$tile_id), c(1L, 2L))
@@ -279,7 +249,7 @@ test_that("convert_partition_to_splits round-trips through plan_assembly correct
   # Verify shim output has correct schema
   splits <- plan$superblock_splits
   expect_true(all(c(
-    "split_nt", "junction_oh", "junction_in_hf",
+    "split_nt", "junction_oh",
     "junction_fidelity", "block_type", "tile_id"
   ) %in% names(splits)))
 
@@ -342,7 +312,7 @@ test_that("overhang_score computes P_fid * P_eff correctly", {
   fid_lookup <- c("AAAA" = 0.996, "AACG" = 0.934, "GGCG" = 0.669)
   eff_lookup <- c("AAAA" = 1.0, "AACG" = 0.8, "GGCG" = 0.4)
 
-  # Score = fid * eff (no HF bonus — BUG-008)
+  # Score = fid * eff
   score1 <- overhang_score("AACG", fid_lookup, eff_lookup)
   expect_equal(score1, 0.934 * 0.8, tolerance = 1e-6)
 
