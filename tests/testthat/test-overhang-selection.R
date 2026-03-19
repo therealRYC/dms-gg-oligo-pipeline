@@ -588,7 +588,7 @@ test_that("plan_assembly includes oh_R_result and full_seq in output", {
   }
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size, config = list(oh_L = "TGAA"))
 
   # oh_R_result should exist in the plan (may be NULL if no cassette)
   expect_true("oh_R_result" %in% names(plan))
