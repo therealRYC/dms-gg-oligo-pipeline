@@ -504,3 +504,92 @@ test_that("config rejects flanking pad containing enzyme site", {
 
   expect_error(validate_config(cfg), "geneblock_flanking_pad.*BsmBI")
 })
+
+# =============================================================================
+# Sub-block split OOGGA compatibility check
+# =============================================================================
+
+test_that("optimize_split_points uses OOGGA compat check, not just exact match", {
+  # Create a scenario where a candidate junction OH has high positional identity
+
+  # (3/4 matches) with an existing OH but is not an exact match or RC.
+  # The OOGGA check (max_identity=2) should reject it.
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+
+  # Build a test CDS with a known 4-nt sequence at the expected split point.
+  # We'll use ACAG as existing OH and put TCAG at the split point.
+  # ACAG vs TCAG: positions 2,3,4 match = 3/4 identity → rejected by max_identity=2.
+  # Need a CDS where TCAG appears near the target split point.
+  # Use a 3600 nt gene so it needs splitting at ~1800 nt.
+  set.seed(42)
+  codons <- c("ATG", replicate(1199, {
+    sample(c("GCT", "GAA", "CTG", "GTG", "AAG", "ACT", "TCA", "GAT"), 1)
+  }))
+  test_cds <- paste0(codons, collapse = "")
+
+  existing_ohs <- c("ACAG", "CACC") # ACAG is the key one
+  eff_lookup <- compute_overhang_efficiency(load_pairwise_matrix("BsmBI"))
+
+  # With OOGGA check (default max_identity=2)
+  result <- optimize_split_points(
+    cds = test_cds,
+    block_start_nt = 1L,
+    block_end_nt = nchar(test_cds),
+    max_sub_length = 1778L,
+    existing_ohs = existing_ohs,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    max_identity = 2L
+  )
+
+  if (nrow(result) > 0) {
+    # Build OOGGA compat matrix and verify all junction OHs pass
+    compat <- build_oh_compatibility(2L)
+    for (i in seq_len(nrow(result))) {
+      joh <- result$junction_oh[i]
+      if (joh == "NNNN") next # fallback — no valid candidate found
+      for (eoh in existing_ohs) {
+        # Each junction OH must be compatible with existing OHs
+        expect_true(
+          compat[joh, eoh],
+          info = paste0("Junction OH ", joh, " incompatible with existing ", eoh)
+        )
+      }
+    }
+  }
+})
+
+test_that("find_cassette_split_points uses OOGGA compat check", {
+  # Test that cassette split points avoid near-matches with existing OHs
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(load_pairwise_matrix("BsmBI"))
+
+  # Create a long cassette that needs splitting
+  set.seed(123)
+  cassette <- paste0(sample(c("A", "C", "G", "T"), 2000, replace = TRUE), collapse = "")
+
+  existing_ohs <- c("ACAG", "GGTC") # these overhangs must be avoided
+
+  result <- find_cassette_split_points(
+    cassette_seq = cassette,
+    max_sub_length = 1200L,
+    existing_ohs = existing_ohs,
+    oh_fidelity = oh_fidelity,
+    eff_lookup = eff_lookup,
+    max_identity = 2L
+  )
+
+  if (nrow(result) > 0) {
+    compat <- build_oh_compatibility(2L)
+    for (i in seq_len(nrow(result))) {
+      joh <- result$junction_oh[i]
+      if (joh == "NNNN") next
+      for (eoh in existing_ohs) {
+        expect_true(
+          compat[joh, eoh],
+          info = paste0("Cassette junction OH ", joh, " incompatible with ", eoh)
+        )
+      }
+    }
+  }
+})

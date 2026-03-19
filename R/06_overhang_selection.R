@@ -358,14 +358,14 @@ auto_select_bsai_pair <- function(oh_L, oh4, blacklist, bsai_matrix) {
 
     if (set_fid < 0.95) {
       cli::cli_alert_warning(paste0(
-        "BsaI set fidelity for {oh_L=", oh_L, ", oh4=", oh4,
-        "} = ", round(set_fid, 4), " (< 0.95). ",
+        "BsaI set fidelity for [oh_L=", oh_L, ", oh4=", oh4,
+        "] = ", round(set_fid, 4), " (< 0.95). ",
         "Consider using oh_L: \"auto\" or oh4: \"auto\" for optimized selection."
       ))
     } else {
       cli::cli_alert_info(paste0(
-        "BsaI set fidelity for {oh_L=", oh_L, ", oh4=", oh4,
-        "} = ", round(set_fid, 4)
+        "BsaI set fidelity for [oh_L=", oh_L, ", oh4=", oh4,
+        "] = ", round(set_fid, 4)
       ))
     }
 
