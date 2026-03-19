@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-18 — Accept oh_L from config; oh_R cassette search
+# Last updated: 2026-03-19 — Auto-select BsaI pair with set fidelity; OOGGA sub-block compat
 # 06_overhang_selection.R — Integrated assembly planning with dynamic tile boundary search
 # DMS Golden Gate Oligo Pipeline
 #
@@ -1301,7 +1301,9 @@ sb_dp_to_partition <- function(sb_result, tiles, gene_len, polIII_len,
 #' @param polIII PolIII promoter sequence
 #' @param max_mutable_nt Max mutable region in nt (from compute_max_tile_size)
 #' @param max_block_length Max synthesis length (default 1800)
-#' @param config List with manual_oh3, manual_oh4, oh_L, upstream_cassette,
+#' @param config List with manual_oh3, oh4 ("auto" or 4-nt sequence),
+#'   oh_L ("auto" or 4-nt sequence), paqci_star2 ("auto" or 4-nt sequence),
+#'   paqci_star1 ("auto" or 4-nt sequence), upstream_cassette,
 #'   search_window_K, min_mutable_codons
 #' @param downstream_cassette Full downstream cassette sequence (intergene + polIII).
 #'   When NULL (default), uses polIII only — backward compatible.
