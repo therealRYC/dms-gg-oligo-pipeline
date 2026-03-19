@@ -747,25 +747,45 @@ has_hairpin_vec <- function(seqs, max_stem = DEFAULT_MAX_HAIRPIN_STEM) {
 
   stem_len <- max_stem + 1L  # reject stems LONGER than max_stem
   min_loop <- 1L             # minimum loop size for a physical hairpin
-  comp <- c(A = "T", C = "G", G = "C", T = "A")
 
-  vapply(seqs, function(s) {
-    n <- nchar(s)
-    # Need room for stem + loop + stem
-    if (n < stem_len * 2L + min_loop) return(FALSE)
-    chars <- strsplit(s, "")[[1]]
-    # For each possible first-stem position, check if RC appears downstream
-    for (i in seq_len(n - stem_len * 2L - min_loop + 1L)) {
-      rc_str <- paste0(rev(comp[chars[i:(i + stem_len - 1L)]]), collapse = "")
-      # Search region starts after stem + loop gap
-      search_start <- i + stem_len + min_loop
-      remaining <- substring(s, search_start, n)
-      if (nchar(remaining) >= stem_len && grepl(rc_str, remaining, fixed = TRUE)) {
-        return(TRUE)
-      }
-    }
-    FALSE
-  }, logical(1), USE.NAMES = FALSE)
+  # Vectorized approach: instead of looping over each sequence (O(n_seqs * L^2)),
+
+  # pre-compute all 4^stem_len possible k-mers and their reverse complements,
+  # then run 4^stem_len vectorized grepl() calls (C-level) across all sequences.
+  # For stem_len=4: 256 patterns vs millions of per-sequence R iterations.
+  comp <- c(A = "T", C = "G", G = "C", T = "A")
+  bases <- c("A", "C", "G", "T")
+
+  # Generate all k-mers of length stem_len (e.g., 256 for stem_len=4)
+  kmer_grid <- do.call(expand.grid, rep(list(bases), stem_len))
+  kmers <- apply(kmer_grid, 1, paste0, collapse = "")
+
+  # Compute reverse complement for each k-mer
+  rc_kmers <- vapply(kmers, function(k) {
+    paste0(rev(comp[strsplit(k, "")[[1]]]), collapse = "")
+  }, character(1), USE.NAMES = FALSE)
+
+  # Build regex patterns: kmer + gap(>=min_loop) + rc_kmer
+  # This is equivalent to the original: for each stem position, check if RC
+  # appears downstream with at least min_loop gap between stem end and RC start.
+  patterns <- paste0(kmers, ".{", min_loop, ",}", rc_kmers)
+
+  # Sequences too short for stem + loop + stem can't have hairpins
+  min_hp_len <- stem_len * 2L + min_loop
+  short_mask <- nchar(seqs) < min_hp_len
+
+  # Run vectorized grepl for each pattern; OR results together
+  result <- rep(FALSE, n_seqs)
+  for (pat in patterns) {
+    result <- result | grepl(pat, seqs)
+    # Early exit: once every sequence is flagged, no need to check more patterns
+    if (all(result)) break
+  }
+
+  # Short sequences can't form hairpins — override any false positives
+  result[short_mask] <- FALSE
+
+  result
 }
 
 #' Check for excessive dinucleotide repeats
