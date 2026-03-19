@@ -481,7 +481,7 @@ test_that("build_expected_product matches simulate_tile_assembly for TEST_GENE_S
   cds <- domesticate_test_gene(polIII = TEST_POLIII)
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size, config = list(oh_L = "TGAA"))
   tiles <- plan$tiles
   oh3 <- plan$oh3
   oh4 <- plan$oh4
@@ -565,7 +565,9 @@ test_that("build_expected_product matches simulate_tile_assembly for TEST_GENE_S
       helper_left_cap = helper_left_cap,
       helper_right_cap = helper_right_cap,
       tile_start_nt = tiles$start_nt[t],
-      tile_end_nt = tiles$end_nt[t]
+      tile_end_nt = tiles$end_nt[t],
+      oh_L = plan$oh_L %||% "",
+      upstream_cassette = plan$upstream_cassette %||% ""
     )
 
     expect_identical(sim_product, exp_product,
@@ -744,7 +746,7 @@ test_that("simulate_pipeline_assembly with strict verification passes for TEST_G
   cds <- domesticate_test_gene(polIII = TEST_POLIII)
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size, config = list(oh_L = "TGAA"))
   tiles <- plan$tiles
   oh3 <- plan$oh3
   oh4 <- plan$oh4
@@ -828,7 +830,7 @@ test_that("simulate_pipeline_assembly with strict verification passes for TEST_L
   cds <- TEST_LONG_GENE_SEQ
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size, config = list(oh_L = "TGAA"))
   tiles <- plan$tiles
   oh3 <- plan$oh3
   oh4 <- plan$oh4
@@ -905,7 +907,7 @@ test_that("simulate_pipeline_assembly works with old signature (no new params)",
   cds <- domesticate_test_gene(polIII = TEST_POLIII)
 
   tile_size <- compute_max_tile_size(300, 12)
-  plan <- plan_assembly(cds, TEST_POLIII, tile_size)
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size, config = list(oh_L = "TGAA"))
   tiles <- plan$tiles
   oh3 <- plan$oh3
   oh4 <- plan$oh4
