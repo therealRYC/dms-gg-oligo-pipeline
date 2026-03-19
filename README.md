@@ -77,7 +77,7 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 | `max_oligo_length` | 300 | Twist oligo pool maximum (nt) |
 | `max_geneblock_length` | 1800 | Gene fragment synthesis maximum (nt) |
 | `geneblock_flanking_pad` | `"TGCATG"` | Flanking bases beyond enzyme sites on gene blocks for efficient Type IIs cleavage. Set to `""` to disable. |
-| `pcr_handles` | *(none)* | Path to CSV file with per-tile PCR handle pairs (`fwd,rev` columns). Omit for single-pool-per-tile ordering. |
+| `pcr_handles` | *(none)* | Path to CSV file with per-tile PCR handle pairs (`fwd,rev` columns, both written 5'→3'). The `rev` handle is appended directly to the oligo 3' end as-is (not reverse-complemented). To order the reverse primer, take the RC of the `rev` column. Omit for single-pool-per-tile ordering. |
 | `barcode_length` | 20 | Total barcode length (nt); set to `"auto"` for auto-sizing |
 | `barcode_prefix_length` | 12 | Prefix length for Hamming-constrained region (nt) |
 | `min_hamming_distance` | 3 | Minimum Hamming distance between variant prefixes |
@@ -97,9 +97,11 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 | `auto_domesticate` | `true` | Automatically apply silent mutations to remove enzyme sites |
 | `simulate_assembly` | `true` | Run in-silico GG assembly simulation after design. Uses targeted junctional sampling (boundary-vulnerable variants) + strict nucleotide-level verification. |
 | `simulation_samples_per_tile` | 1 | Additional random variants per tile beyond the targeted junctional samples (overlap_codons/2 variants from each boundary) |
-| `include_synonymous` | `false` | Add synonymous codon controls per position |
+| `include_synonymous` | `false` | Boolean (`true`/`false`). When `true`, adds one synonymous variant per position using the highest-frequency alternative codon for the same amino acid. Met and Trp positions are skipped (only one codon each). |
 
 **oh_L overhang**: The `oh_L` parameter has no meaningful default — it is the BsaI overhang at the 5' gene junction, determined by your helper plasmid design. Placing oh_L upstream of the start codon (ATG) frees codon 2 for full mutagenesis. The pipeline will error if left as `"NNNN"`. Note: `CACC` (a natural Kozak choice) collides with oh3 derived from the U6 promoter ending `...CACCG` — choose oh_L based on your specific plasmid.
+
+**oh3 auto-derivation**: The BsmBI overhang at the PolIII-barcode junction (oh3) is automatically derived from the last 4 nucleotides of the PolIII promoter (before the terminal base). For the default U6 promoter ending `...CACCG`, oh3 = `CACC`. If you provide a different PolIII promoter, oh3 adapts accordingly. If the derived oh3 is a homopolymer (e.g., `AAAA`) or palindromic, the pipeline falls back to score-based selection from the BsmBI fidelity data. You can also override oh3 manually via `manual_oh3` in the config.
 
 **PaqCI overhangs**: The `paqci_star2` and `paqci_star1` parameters have no meaningful default — they are determined by the PaqCI sites flanking the cloning site in your destination backbone. The pipeline will error if these are left as the placeholder `"NNNN"`. The values in the example configs (`AATG`/`GCTA`) are arbitrary and should be replaced with the overhangs from your specific vector.
 
@@ -213,23 +215,20 @@ dms-gg-oligo-pipeline/
 Rscript -e 'testthat::test_dir("tests/testthat")'
 ```
 
-For the full test suite including slow integration tests (TRIO gene, ~9 kb):
-```bash
-RUN_SLOW_TESTS=true Rscript -e 'testthat::test_dir("tests/testthat")'
-```
+The test suite includes TRIO (9294 nt) gene block tests that run as part of the standard suite.
 
 ## Validated Genes
 
-The pipeline has been validated on three genes of increasing size plus a cassette-splitting test case. All runs used `barcodes_per_variant=1` (single barcode per variant) for fast validation:
+The pipeline has been validated on three genes of increasing size plus a cassette-splitting test case. All pre-built configs use the default `barcodes_per_variant=10`:
 
-| Gene | Accession | Codons | Variants | Oligos | Gene Blocks | Tiles | Runtime |
-|------|-----------|--------|----------|--------|-------------|-------|---------|
-| GRIN2A | NM_000833 | 1,465 | 30,681 | 30,681 | 51 | 25 | ~4 min |
-| AKAP11 | NM_016248 | 1,902 | 39,858 | 39,858 | 64 | 31 | ~7 min |
-| TRIO | NM_007118 | 3,098 | 64,974 | 64,974 | 98 | 47 | ~8 min |
-| GRIN2A + P2A-EGFP | NM_000833 | 1,465 | 30,681 | 30,681 | 64 | 25 | ~4 min |
+| Gene | Accession | Codons | Config | Notes |
+|------|-----------|--------|--------|-------|
+| GRIN2A | NM_000833 | 1,465 | `configs/grin2a.yaml` | Standard validation gene |
+| AKAP11 | NM_016248 | 1,902 | `configs/akap11.yaml` | Medium-size gene |
+| TRIO | NM_007118 | 3,098 | `configs/trio.yaml` | Large gene, stress-tests superblock splitting |
+| GRIN2A + P2A-EGFP | NM_000833 | 1,465 | `configs/grin2a_long_cassette.yaml` | Cassette splitting test (1881 nt cassette) |
 
-Pre-built configs for each gene are in `configs/`. Runtimes measured on WSL2 with `barcodes_per_variant=1`. At `barcodes_per_variant=10`, expect approximately 10x longer runtimes due to barcode generation and oligo assembly scaling (e.g., GRIN2A: ~45 min, AKAP11: ~77 min).
+Pre-built configs are in `configs/`. Each config requires the user to set `oh_L` to their helper plasmid's BsaI overhang (default `TGAA` for testing) and `paqci_star2`/`paqci_star1` to their destination vector's PaqCI overhangs.
 
 The GRIN2A + P2A-EGFP test case (`configs/grin2a_long_cassette.yaml`) validates cassette splitting: the downstream cassette (P2A-EGFP + WPRE + spacer + bGH polyA = 1881 nt) exceeds the 1778 nt cassette block synthesis limit and is automatically split into 2 BsmBI-connected fragments.
 
@@ -249,24 +248,22 @@ All three sequences were obtained from the **pTK4 vector** (Bhatt et al., Addgen
 | Spacer | 31 bp | Between WPRE and hGH polyA (downstream of GFP) | Contains ClaI and SalI sites. Retained for consistency with pTK4 and XPRESSO vector designs. |
 | bGH polyA | 225 bp | Puromycin resistance polyA site (separate from the WPRE-spacer-hGH region) | Bovine growth hormone polyadenylation signal. The pTK4 GFP cassette uses hGH polyA (477 bp) downstream of WPRE, but the puromycin cassette elsewhere in pTK4 uses the shorter bGH polyA. We use bGH polyA for its smaller size and wider use across standard vectors (pcDNA3.1, pEGFP, pAAV). |
 
-The bGH polyA sequence matches GenBank J00008.1 (bovine GH gene), EF550208.1 (pcDNA3.1+PA), and U55762.1 (pEGFP-N1). No BsmBI or PaqCI enzyme sites. See `data/cassette_elements/README.md` for full sequences and `docs/cassette_design_rationale.md` for design rationale.
+The bGH polyA sequence matches GenBank J00008.1 (bovine GH gene), EF550208.1 (pcDNA3.1+PA), and U55762.1 (pEGFP-N1). No BsmBI or PaqCI enzyme sites. See `data/cassette_elements/README.md` for full sequences.
 
 ## Overhang Fidelity Data
 
-The `data/neb_overhang_fidelity/` directory contains pre-processed ligation fidelity data from two publications:
+The `data/neb_overhang_fidelity/` directory contains enzyme-specific ligation fidelity data from Pryor et al. 2020:
 
 | File | Source | Conditions | Description |
 |------|--------|------------|-------------|
-| `potapov_18h_overhangs.rds` | Potapov et al. 2018 | T4 ligase, 37°C, 18h | Individual fidelity for all 256 4-nt overhangs |
-| `potapov_18h_pairwise.rds` | Potapov et al. 2018 | T4 ligase, 37°C, 18h | 256x256 pairwise ligation matrix |
-| `bsai_overhangs.rds` | Pryor et al. 2020 | BsaI, 37°C, 5min/60°C cycling | BsaI enzyme-specific individual fidelity |
-| `bsai_pairwise.rds` | Pryor et al. 2020 | BsaI, 37°C, 5min/60°C cycling | BsaI enzyme-specific 256x256 pairwise matrix |
-| `bsmbi_overhangs.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | BsmBI enzyme-specific individual fidelity |
-| `bsmbi_pairwise.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | BsmBI enzyme-specific 256x256 pairwise matrix (Hamming model) |
-| `bsmbi_cycling_pairwise.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | **Real experimental** 256x256 matrix (used for scoring) |
-| `high_fidelity_sets.rds` | Potapov et al. 2018 | T4, 25°C, 18h (SA-optimized) | Potapov Table 1 Set 3 (25 overhangs, 95.8% set fidelity) |
+| `bsai_overhangs.rds` | Pryor et al. 2020 | BsaI, 37°C/5min + 60°C cycling | Individual fidelity for all 256 4-nt overhangs |
+| `bsai_pairwise.rds` | Pryor et al. 2020 | BsaI, 37°C/5min + 60°C cycling | 256x256 pairwise ligation matrix |
+| `bsmbi_overhangs.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | Individual fidelity for all 256 4-nt overhangs |
+| `bsmbi_pairwise.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | 256x256 pairwise ligation matrix |
 
-**Overhang scoring formula**: `Score = P_fid(oh) * P_eff(oh)`, where both metrics come from the BsmBI cycling matrix (Pryor et al. 2020). P_fid measures ligation accuracy (fraction of correct pairings) and P_eff measures relative ligation yield (correct count vs. best overhang). This matches the actual assembly conditions (BsmBI cycling protocol) and is more conservative than T4 static data. See `260302_overhang_fidelity_comparison/` for the full analysis.
+The pipeline uses enzyme-specific cycling data (not T4 ligase static data) because it matches the actual Golden Gate assembly conditions. The Potapov 2018 Table 1 Set 3 (25 SA-optimized overhangs, 95.8% set fidelity) is hard-coded in `R/06_overhang_selection.R` as `POTAPOV_TABLE1_SET3_25` for informational overlap checking — no RDS file needed.
+
+**Overhang scoring formula**: `Score = P_fid(oh) * P_eff(oh)`, where both metrics come from the BsmBI cycling matrix (Pryor et al. 2020). P_fid measures ligation accuracy (fraction of correct pairings) and P_eff measures relative ligation yield (correct count vs. best overhang).
 
 ## References
 

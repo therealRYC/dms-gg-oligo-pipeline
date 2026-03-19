@@ -10,7 +10,7 @@
 #
 # Overhang scoring (BUG-008):
 #   Score = P_fid_bsmbi(oh) * P_eff_bsmbi(oh)
-# Both from BsmBI cycling matrix (Pryor et al. 2020). HF set bonus dropped.
+# Both from BsmBI cycling matrix (Pryor et al. 2020).
 #
 # In the 3-enzyme architecture:
 # - oh1 (BsaI) and oh2 (BsmBI) are gene-derived at tile boundaries — optimized by boundary search
@@ -19,7 +19,7 @@
 # - Superblock junction overhangs are gene-derived at split positions — optimized by split search
 #
 # Key references:
-#   Potapov et al. 2018, ACS Synth Bio — 256x256 ligation fidelity matrices, HF overhang sets
+#   Potapov et al. 2018, ACS Synth Bio — 256x256 ligation fidelity matrices
 #   Pryor et al. 2020, PLOS ONE — Enzyme-specific (BsaI, BsmBI) cycling pairwise matrices
 
 # =============================================================================
@@ -30,21 +30,6 @@
 # polyA/polyT runs after PolIII promoters can cause premature transcription
 # termination, and homopolymer overhangs have poor ligation specificity.
 HOMOPOLYMER_4NT <- c("AAAA", "CCCC", "GGGG", "TTTT")
-
-# Potapov et al. 2018 Table 1, Set 3 — 25-overhang high-fidelity set
-# Source: Potapov et al. 2018, ACS Synth Bio 7:2665-2674 (PMID 30335370), Table 1
-# Optimized via simulated annealing (GetSet/MCMC) for SET fidelity (not individual).
-# Predicted set fidelity: 95.8% — highest for any 25-overhang set in the paper.
-# Note: includes AAAA (homopolymer), which is present in the paper's SA-optimized set.
-# The HOMOPOLYMER_4NT filter above applies only to freely-chosen overhangs (oh3/oh4),
-# NOT to HF set membership checks.
-POTAPOV_TABLE1_SET3_25 <- c(
-  "CCTC", "CTAA", "GACA", "GCAC", "AATC",
-  "GTAA", "TGAA", "ATTA", "CCAG", "AGGA",
-  "ACAA", "TAGA", "CGGA", "CATA", "CAGC",
-  "AACG", "AAGT", "CTCC", "AGAT", "ACCA",
-  "AGTG", "GGTA", "GCGA", "AAAA", "ATGA"
-)
 
 # =============================================================================
 # DATA LOADING
@@ -76,38 +61,6 @@ load_overhang_fidelity <- function(enzyme_name = "BsmBI") {
   }
   stop("BsmBI fidelity RDS not found at: ", data_path,
        "\n  and no pairwise matrix available at: ", pw_path)
-}
-
-#' Load a pre-validated high-fidelity overhang set
-#'
-#' Returns the Potapov 2018 Table 1, Set 3 (25 overhangs, 95.8% predicted set
-#' fidelity) by default. This set was optimized via simulated annealing for SET
-#' fidelity by NEB's GetSet tool. Falls back to greedy generation only if
-#' explicitly requested via set_name.
-#'
-#' @param set_name Name of the set. Default "potapov_set3_25" returns the
-#'   hard-coded Potapov Table 1 Set 3. Legacy names like "greedy_fidelity_20"
-#'   will attempt to load from RDS, falling back to greedy generation.
-#' @return Character vector of high-fidelity overhangs
-load_high_fidelity_set <- function(set_name = "potapov_set3_25") {
-  # Default: return the hard-coded Potapov Table 1 Set 3 (25 overhangs)
-  if (set_name == "potapov_set3_25") {
-    return(POTAPOV_TABLE1_SET3_25)
-  }
-
-  # Legacy path: try loading from RDS file for other named sets
-  data_path <- file.path(
-    find_data_dir(), "neb_overhang_fidelity",
-    "high_fidelity_sets.rds"
-  )
-  if (file.exists(data_path)) {
-    sets <- readRDS(data_path)
-    if (set_name %in% names(sets)) {
-      return(sets[[set_name]])
-    }
-  }
-
-  stop("HF set '", set_name, "' not found in RDS or built-in sets.")
 }
 
 #' Load 256x256 pairwise ligation matrix
@@ -179,7 +132,7 @@ compute_set_fidelity <- function(overhangs, pairwise_matrix) {
 #   Score = P_fid_bsmbi(oh) * P_eff_bsmbi(oh)
 # P_fid = M[X][RC(X)] / sum(M[X][*])      — individual fidelity (accuracy)
 # P_eff = M[X][RC(X)] / max_Y(M[Y][RC(Y)])  — relative ligation efficiency (yield)
-# HF set bonus dropped: pairwise misligation negligible under cycling conditions.
+# Pairwise misligation negligible under cycling conditions.
 
 #' Compute relative ligation efficiency for all 256 overhangs
 #'
@@ -371,8 +324,6 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
   oh2_seq <- character(n_codons)
   scores <- rep(-Inf, n_codons)
   valid <- logical(n_codons)
-  oh1_hf <- logical(n_codons)
-  oh2_hf <- logical(n_codons)
   n_unscorable <- 0L
 
   cli::cli_alert_info("Precomputing boundary scores for {n_codons - 1L} candidate positions...")
@@ -431,11 +382,6 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
 
     valid[b] <- TRUE
 
-    oh1_in <- oh1 %in% POTAPOV_TABLE1_SET3_25
-    oh2_in <- oh2 %in% POTAPOV_TABLE1_SET3_25
-    oh1_hf[b] <- oh1_in
-    oh2_hf[b] <- oh2_in
-
     scores[b] <- oh1_base + oh2_base
   }
 
@@ -445,7 +391,6 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
   list(
     oh1_seq = oh1_seq, oh2_seq = oh2_seq,
     score = scores, valid = valid,
-    oh1_hf = oh1_hf, oh2_hf = oh2_hf,
     n_unscorable = n_unscorable
   )
 }
@@ -484,7 +429,7 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
   if (total_block_length <= max_sub_length) {
     return(data.frame(
       split_nt = integer(0), junction_oh = character(0),
-      junction_in_hf = logical(0), junction_fidelity = numeric(0),
+      junction_fidelity = numeric(0),
       stringsAsFactors = FALSE
     ))
   }
@@ -522,7 +467,7 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
       lo_codon <- max((block_start_nt %/% 3L) + 5L, center_codon - search_window)
       hi_codon <- min((block_end_nt %/% 3L) - 5L, center_codon + search_window)
 
-      best <- list(pos = center_codon * 3L, oh = "NNNN", in_hf = FALSE, fid = NA_real_, score = -1)
+      best <- list(pos = center_codon * 3L, oh = "NNNN", fid = NA_real_, score = -1)
 
       for (C in lo_codon:hi_codon) {
         split_nt <- C * 3L
@@ -530,14 +475,13 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 
         if (junction_oh %in% local_existing) next # collision
 
-        in_hf <- junction_oh %in% POTAPOV_TABLE1_SET3_25
         score <- overhang_score(junction_oh, fid_lookup, eff_lookup)
         if (is.na(score)) next # unscorable — skip
 
         fid <- if (junction_oh %in% names(fid_lookup)) unname(fid_lookup[junction_oh]) else NA_real_
 
         if (score > best$score) {
-          best <- list(pos = split_nt, oh = junction_oh, in_hf = in_hf, fid = fid, score = score)
+          best <- list(pos = split_nt, oh = junction_oh, fid = fid, score = score)
         }
       }
 
@@ -545,7 +489,7 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 
       splits[[s]] <- data.frame(
         split_nt = best$pos, junction_oh = best$oh,
-        junction_in_hf = best$in_hf, junction_fidelity = best$fid,
+        junction_fidelity = best$fid,
         stringsAsFactors = FALSE
       )
     }
@@ -656,7 +600,7 @@ get_tile_reaction_overhangs <- function(partition_result, tile_idx, tiles,
 #' Translates the output of partition_tile_superblocks() into the per-tile
 #' split data frame consumed by design_wt_geneblocks() and R/12_report.R.
 #' Downstream consumers expect columns:
-#' split_nt, junction_oh, junction_in_hf, junction_fidelity, block_type, tile_id.
+#' split_nt, junction_oh, junction_fidelity, block_type, tile_id.
 #'
 #' Two-OH model (when sb_result is provided):
 #'   For each gene-region SB boundary, there are TWO overhangs (oh1_sb + oh2_sb):
@@ -671,19 +615,19 @@ get_tile_reaction_overhangs <- function(partition_result, tile_idx, tiles,
 #'
 #' @param partition_result List from partition_tile_superblocks()
 #' @param tiles Data frame of tiles (must have end_nt, start_nt, oh2_seq,
-#'   oh2_in_hf, oh2_fidelity, tile_id columns)
+#'   oh2_fidelity, tile_id columns)
 #' @param gene_len Length of the domesticated CDS in nucleotides
 #' @param sb_result SB DP result list from search_sb_boundaries_oogga(), or NULL
 #'   for legacy single-OH behavior. Must have boundaries$oh1_sb and oh2_sb.
 #' @param overlap_codons Integer, overlap codons for position computation (default 4)
-#' @return Data frame with columns: split_nt, junction_oh, junction_in_hf,
+#' @return Data frame with columns: split_nt, junction_oh,
 #'   junction_fidelity, block_type, tile_id. Empty (0-row) if n_superblocks <= 1.
 convert_partition_to_splits <- function(partition_result, tiles, gene_len,
                                         sb_result = NULL,
                                         overlap_codons = 4L) {
   empty_result <- data.frame(
     split_nt = integer(0), junction_oh = character(0),
-    junction_in_hf = logical(0), junction_fidelity = numeric(0),
+    junction_fidelity = numeric(0),
     block_type = character(0), tile_id = integer(0),
     stringsAsFactors = FALSE
   )
@@ -697,7 +641,6 @@ convert_partition_to_splits <- function(partition_result, tiles, gene_len,
   }
 
   # Precompute fidelity lookups for junction OH scoring
-  hf_set <- load_high_fidelity_set()
   oh_fidelity <- load_overhang_fidelity("BsmBI")
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
@@ -737,8 +680,6 @@ convert_partition_to_splits <- function(partition_result, tiles, gene_len,
       }
 
       # Fidelity for each directional OH
-      oh2_sb_in_hf <- oh2_sb %in% hf_set
-      oh1_sb_in_hf <- oh1_sb %in% hf_set
       oh2_sb_fidelity <- if (oh2_sb %in% names(fid_lookup)) {
         unname(fid_lookup[oh2_sb])
       } else {
@@ -762,7 +703,6 @@ convert_partition_to_splits <- function(partition_result, tiles, gene_len,
           splits_list[[length(splits_list) + 1L]] <- data.frame(
             split_nt = oh2_sb_pos,
             junction_oh = oh2_sb,
-            junction_in_hf = oh2_sb_in_hf,
             junction_fidelity = oh2_sb_fidelity,
             block_type = "bsmbi_3wt",
             tile_id = tiles$tile_id[t],
@@ -778,7 +718,6 @@ convert_partition_to_splits <- function(partition_result, tiles, gene_len,
           splits_list[[length(splits_list) + 1L]] <- data.frame(
             split_nt = oh1_sb_pos,
             junction_oh = oh1_sb,
-            junction_in_hf = oh1_sb_in_hf,
             junction_fidelity = oh1_sb_fidelity,
             block_type = "bsai_5wt",
             tile_id = tiles$tile_id[t],
@@ -790,14 +729,12 @@ convert_partition_to_splits <- function(partition_result, tiles, gene_len,
       # --- Legacy single-OH model ---
       split_nt <- boundary_nt
       junction_oh <- tiles$oh2_seq[boundary_tile]
-      junction_in_hf <- tiles$oh2_in_hf[boundary_tile]
       junction_fidelity <- tiles$oh2_fidelity[boundary_tile]
 
       for (t in seq_len(n_tiles)) {
         if (tiles$end_nt[t] < split_nt) {
           splits_list[[length(splits_list) + 1L]] <- data.frame(
             split_nt = split_nt, junction_oh = junction_oh,
-            junction_in_hf = junction_in_hf,
             junction_fidelity = junction_fidelity,
             block_type = "bsmbi_3wt", tile_id = tiles$tile_id[t],
             stringsAsFactors = FALSE
@@ -808,7 +745,6 @@ convert_partition_to_splits <- function(partition_result, tiles, gene_len,
         if (tiles$start_nt[t] > 1L && split_nt < tiles$start_nt[t]) {
           splits_list[[length(splits_list) + 1L]] <- data.frame(
             split_nt = split_nt, junction_oh = junction_oh,
-            junction_in_hf = junction_in_hf,
             junction_fidelity = junction_fidelity,
             block_type = "bsai_5wt", tile_id = tiles$tile_id[t],
             stringsAsFactors = FALSE
@@ -1060,7 +996,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   # Load data
   # BsmBI cycling fidelity (Pryor 2020) for boundary scoring — matches actual
   # assembly conditions and is more conservative than T4 static data.
-  hf_set <- load_high_fidelity_set() # informational only, not used in scoring
   oh_fidelity <- load_overhang_fidelity("BsmBI")
 
   # Load real enzyme-specific 256x256 pairwise matrices (Pryor et al. 2020).
@@ -1098,8 +1033,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     validate_fixed_overhangs(manual_oh3, manual_oh4)
     oh3 <- toupper(manual_oh3)
     oh4 <- toupper(manual_oh4)
-    oh3_in_hf <- oh3 %in% hf_set
-    oh4_in_hf <- oh4 %in% hf_set
     strategy_used <- "manual"
     cli::cli_alert_info(paste0("Using manual overhangs: oh3=", oh3, ", oh4=", oh4))
   } else {
@@ -1117,7 +1050,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       oh3 <- promoter_derived$oh3
       core_polIII <- promoter_derived$core_polIII
       oh3_spacer <- promoter_derived$spacer
-      oh3_in_hf <- oh3 %in% hf_set
       oh3_fid <- if (oh3 %in% names(fid_lookup)) unname(fid_lookup[oh3]) else NA_real_
       cli::cli_alert_info(paste0(
         "Derived oh3=", oh3, " from PolIII promoter 3' end",
@@ -1134,7 +1066,7 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
         ))
       }
       strategy_used <- "score_based"
-      # Select by P_fid * P_eff (BUG-008: no HF set preference)
+      # Select by P_fid * P_eff
       oh3_candidates <- oh_fidelity$overhang[oh_fidelity$fidelity >= 0.50]
       oh3_candidates <- oh3_candidates[!(oh3_candidates %in% HOMOPOLYMER_4NT)]
       oh3_candidates <- oh3_candidates[!(oh3_candidates %in% PALINDROMIC_4NT)]
@@ -1142,10 +1074,9 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
       if (length(oh3_candidates) == 0) stop("Cannot find any valid oh3 candidate.")
       oh3_scores <- unname(fid_lookup[oh3_candidates]) * unname(eff_lookup[oh3_candidates])
       oh3 <- oh3_candidates[which.max(oh3_scores)]
-      oh3_in_hf <- oh3 %in% hf_set
     }
 
-    # --- oh4: auto-select by P_fid * P_eff (BUG-008: no HF preference) ---
+    # --- oh4: auto-select by P_fid * P_eff ---
     # oh4 is in the BsaI reaction with oh_L, so it must avoid oh_L collision.
     # It does NOT check against oh1 (which doesn't exist yet) — the tile DP
     # will blacklist oh4 and route around it.
@@ -1158,14 +1089,10 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     if (length(oh4_candidates) == 0) stop("Cannot find any valid oh4 candidate.")
     oh4_scores <- unname(fid_lookup[oh4_candidates]) * unname(eff_lookup[oh4_candidates])
     oh4 <- oh4_candidates[which.max(oh4_scores)]
-    oh4_in_hf <- oh4 %in% hf_set
   }
 
   cli::cli_alert_success(paste0(
-    "Fixed overhangs: oh3=", oh3,
-    if (oh3_in_hf) " (HF)" else " (non-HF)",
-    ", oh4=", oh4,
-    if (oh4_in_hf) " (HF)" else " (non-HF)"
+    "Fixed overhangs: oh3=", oh3, ", oh4=", oh4
   ))
 
   # =========================================================================
@@ -1345,7 +1272,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
           tiles$start_nt[last_tile_idx] + 1L) %/% 3L
         tiles$oh2_score[last_tile_idx] <- oh_R_result$score
         tiles$oh2_fidelity[last_tile_idx] <- oh_R_result$fidelity
-        tiles$oh2_in_hf[last_tile_idx] <- oh_R_result$oh_R %in% hf_set
         tiles$boundary_score[last_tile_idx] <- tiles$oh1_score[last_tile_idx] +
           oh_R_result$score
 
@@ -1410,16 +1336,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   # Summary logging (shared by all paths)
   if (partition_result$n_superblocks > 1L) {
     n_boundaries_sb <- partition_result$n_superblocks - 1L
-    # Count HF junctions: use sb_result for two-OH model (both oh1_sb and oh2_sb)
-    if ("oh1_sb" %in% names(sb_result$boundaries)) {
-      sb_bnd <- sb_result$boundaries[seq_len(n_boundaries_sb), , drop = FALSE]
-      n_hf <- sum(sb_bnd$oh1_sb %in% hf_set, na.rm = TRUE) +
-        sum(sb_bnd$oh2_sb %in% hf_set, na.rm = TRUE)
-    } else {
-      n_hf <- sum(tiles$oh2_in_hf[partition_result$superblocks$end_tile[
-        seq_len(n_boundaries_sb)
-      ]])
-    }
     cass_msg <- if (partition_result$cassette_needs_splitting) {
       " Cassette will be split into fragments."
     } else {
@@ -1428,7 +1344,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     cli::cli_alert_info(paste0(
       boundary_method, " SB: ", partition_result$n_superblocks,
       " superblocks, ", n_boundaries_sb, " boundary(ies). ",
-      n_hf, " junction(s) in HF set. ",
       nrow(all_splits), " per-tile split entries. ",
       partition_result$n_collisions, " unresolved collision(s).",
       cass_msg
@@ -1467,12 +1382,11 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     }
 
     bsai_result <- compute_set_fidelity(bsai_ohs, bsai_matrix)
-    n_bsai_hf <- sum(bsai_ohs %in% hf_set)
 
     reaction_fidelity[[length(reaction_fidelity) + 1L]] <- data.frame(
       tile_id = i, reaction_type = "BsaI",
       overhangs = paste(bsai_ohs, collapse = ";"),
-      n_overhangs = length(bsai_ohs), n_in_hf = n_bsai_hf,
+      n_overhangs = length(bsai_ohs),
       set_fidelity = bsai_result$set_fidelity,
       stringsAsFactors = FALSE
     )
@@ -1485,12 +1399,11 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     ))
 
     bsmbi_result <- compute_set_fidelity(bsmbi_ohs, bsmbi_matrix)
-    n_bsmbi_hf <- sum(bsmbi_ohs %in% hf_set)
 
     reaction_fidelity[[length(reaction_fidelity) + 1L]] <- data.frame(
       tile_id = i, reaction_type = "BsmBI",
       overhangs = paste(bsmbi_ohs, collapse = ";"),
-      n_overhangs = length(bsmbi_ohs), n_in_hf = n_bsmbi_hf,
+      n_overhangs = length(bsmbi_ohs),
       set_fidelity = bsmbi_result$set_fidelity,
       stringsAsFactors = FALSE
     )
@@ -1499,35 +1412,29 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
   reaction_fidelity_df <- do.call(rbind, reaction_fidelity)
   rownames(reaction_fidelity_df) <- NULL
 
-  # Warn about low-fidelity reactions (internal safety net)
-  low_fid <- reaction_fidelity_df$set_fidelity < SET_FIDELITY_WARNING_THRESHOLD
+  # Warn about low-fidelity reactions (internal safety net).
+  # Dynamic threshold: median individual BsmBI overhang fidelity from the
+
+  # enzyme-specific cycling data (Pryor et al. 2020). More principled than a
+  # hardcoded constant — adapts to the actual data distribution.
+  fidelity_warning_threshold <- median(oh_fidelity$fidelity)
+  low_fid <- reaction_fidelity_df$set_fidelity < fidelity_warning_threshold
   if (any(low_fid)) {
     n_low <- sum(low_fid)
     min_fid <- min(reaction_fidelity_df$set_fidelity)
     cli::cli_alert_warning(paste0(
       n_low, " reaction(s) below set fidelity warning threshold (",
-      SET_FIDELITY_WARNING_THRESHOLD, "). Min: ", round(min_fid, 4)
+      round(fidelity_warning_threshold, 4), "). Min: ", round(min_fid, 4)
     ))
   } else {
     cli::cli_alert_success(paste0(
-      "All ", nrow(reaction_fidelity_df), " reactions above set fidelity threshold. ",
+      "All ", nrow(reaction_fidelity_df), " reactions above set fidelity threshold (",
+      round(fidelity_warning_threshold, 4), "). ",
       "Min: ", round(min(reaction_fidelity_df$set_fidelity), 4)
     ))
   }
 
-  # Summary
   n_boundaries <- n_tiles - 1L
-  n_both_hf <- if (n_boundaries > 0) {
-    sum(tiles$oh2_in_hf[-n_tiles] & tiles$oh1_in_hf[-1L])
-  } else {
-    0L
-  }
-  n_one_hf <- if (n_boundaries > 0) {
-    sum(xor(tiles$oh2_in_hf[-n_tiles], tiles$oh1_in_hf[-1L]))
-  } else {
-    0L
-  }
-  n_neither_hf <- n_boundaries - n_both_hf - n_one_hf
 
   # Compute core_downstream_cassette for gene block design.
   # When oh3 is derived from the PolIII promoter's terminal 5 nt, gene blocks
@@ -1547,8 +1454,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     oh4 = oh4,
     oh_L = oh_L,
     upstream_cassette = upstream_cassette, # sequence between oh_L and ATG (may be "")
-    oh3_in_hf = oh3_in_hf,
-    oh4_in_hf = oh4_in_hf,
     core_polIII = core_polIII, # promoter minus last 5 nt (NULL if not derived)
     core_downstream_cassette = core_downstream_cassette, # full cassette minus last 5 nt (NULL if not derived)
     oh3_spacer = oh3_spacer, # terminal nt of promoter (NULL if not derived)
@@ -1556,7 +1461,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     tile_partition = partition_result, # tile-boundary partition (native format)
     reaction_fidelity = reaction_fidelity_df,
     strategy_used = strategy_used,
-    hf_set_used = hf_set,
     oh_fidelity_used = oh_fidelity,
     cassette_needs_splitting = partition_result$cassette_needs_splitting,
     sb_result = sb_result, # SB DP result for inspection
@@ -1566,9 +1470,6 @@ plan_assembly <- function(cds, polIII, max_mutable_nt,
     summary = list(
       n_tiles = n_tiles,
       n_boundaries = n_boundaries,
-      n_boundaries_both_in_hf = n_both_hf,
-      n_boundaries_one_in_hf = n_one_hf,
-      n_boundaries_neither_in_hf = n_neither_hf,
       n_superblocks = partition_result$n_superblocks,
       n_superblock_splits = nrow(all_splits),
       n_sb_collisions = partition_result$n_collisions,

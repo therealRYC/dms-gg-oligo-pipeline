@@ -1077,14 +1077,10 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
   if (is.null(oh_L)) oh_L <- substring(cds, 1, 4)
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
-  hf_set <- load_high_fidelity_set()
-
   tiles$oh1_seq <- NA_character_
   tiles$oh2_seq <- NA_character_
   tiles$oh1_score <- NA_real_
   tiles$oh2_score <- NA_real_
-  tiles$oh1_in_hf <- NA
-  tiles$oh2_in_hf <- NA
   tiles$oh1_fidelity <- NA_real_
   tiles$oh2_fidelity <- NA_real_
   tiles$tile_seq <- NA_character_
@@ -1107,8 +1103,6 @@ search_tile_boundaries_oogga <- function(cds, max_mutable_nt,
 
     tiles$oh1_score[i] <- overhang_score(tiles$oh1_seq[i], fid_lookup, eff_lookup)
     tiles$oh2_score[i] <- overhang_score(tiles$oh2_seq[i], fid_lookup, eff_lookup)
-    tiles$oh1_in_hf[i] <- tiles$oh1_seq[i] %in% hf_set
-    tiles$oh2_in_hf[i] <- tiles$oh2_seq[i] %in% hf_set
     oh1_fid <- if (tiles$oh1_seq[i] %in% names(fid_lookup)) unname(fid_lookup[tiles$oh1_seq[i]]) else NA_real_
     oh2_fid <- if (tiles$oh2_seq[i] %in% names(fid_lookup)) unname(fid_lookup[tiles$oh2_seq[i]]) else NA_real_
     tiles$oh1_fidelity[i] <- oh1_fid
@@ -1222,8 +1216,6 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
   # Load lookups needed for post-processing
   fid_lookup <- oh_fidelity$fidelity
   names(fid_lookup) <- oh_fidelity$overhang
-  hf_set <- load_high_fidelity_set()
-
   # --- Tile each segment ---
   all_tiles <- list()
   max_identity_used <- max_identity
@@ -1307,8 +1299,6 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
         oh2_seq = NA_character_,
         oh1_score = NA_real_,
         oh2_score = NA_real_,
-        oh1_in_hf = NA,
-        oh2_in_hf = NA,
         oh1_fidelity = NA_real_,
         oh2_fidelity = NA_real_,
         tile_seq = NA_character_,
@@ -1390,8 +1380,6 @@ tile_segments_oogga <- function(cds, sb_result, gene_len,
 
     tiles$oh1_score[i] <- overhang_score(tiles$oh1_seq[i], fid_lookup, eff_lookup)
     tiles$oh2_score[i] <- overhang_score(tiles$oh2_seq[i], fid_lookup, eff_lookup)
-    tiles$oh1_in_hf[i] <- tiles$oh1_seq[i] %in% hf_set
-    tiles$oh2_in_hf[i] <- tiles$oh2_seq[i] %in% hf_set
     tiles$oh1_fidelity[i] <- if (tiles$oh1_seq[i] %in% names(fid_lookup)) {
       unname(fid_lookup[tiles$oh1_seq[i]])
     } else {
