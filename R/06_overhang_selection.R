@@ -743,13 +743,17 @@ precompute_boundary_scores <- function(cds, oh_fidelity,
 #'   region but must be counted for sizing. Default 0.
 #' @param eff_lookup Named numeric vector (overhang -> efficiency). If NULL,
 #'   efficiency is treated as 1.0 for all overhangs.
+#' @param max_identity Integer, OOGGA max positional identity for compatibility
+#'   checking (default 2). When > 0, uses build_oh_compatibility() matrix
+#'   instead of exact-match collision check.
 #' @return Data frame with split positions and junction overhangs
 optimize_split_points <- function(cds, block_start_nt, block_end_nt,
                                   max_sub_length, existing_ohs,
                                   oh_fidelity,
                                   search_window = 50L,
                                   extra_content_length = 0L,
-                                  eff_lookup = NULL) {
+                                  eff_lookup = NULL,
+                                  max_identity = 2L) {
   gene_block_length <- block_end_nt - block_start_nt + 1L
   total_block_length <- gene_block_length + extra_content_length
 
@@ -777,14 +781,30 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
   n_splits <- ceiling(total_block_length / effective_max) - 1L
   if (n_splits < 1L) n_splits <- 1L
 
-  existing_set <- unique(c(existing_ohs, vapply(existing_ohs, reverse_complement, character(1))))
+  # Build OOGGA compatibility matrix for positional identity checking.
+  # This replaces the simple %in% collision check with a stricter test
+  # that catches near-matches like TCAG vs ACAG (3/4 positional identity).
+  compat <- build_oh_compatibility(max_identity)
+
+  # Helper: check if a candidate is compatible with all existing overhangs
+  is_oh_compatible <- function(candidate, existing_ohs_vec) {
+    for (oh in existing_ohs_vec) {
+      if (nchar(oh) != 4L) next
+      if (!compat[candidate, oh]) return(FALSE)
+    }
+    TRUE
+  }
+
+  # Existing overhangs to check against (no RC expansion needed — compat matrix
+  # already checks both A-vs-B and A-vs-RC(B) internally)
+  existing_base <- unique(existing_ohs)
 
   # Search for split points, validating sub-block sizes; retry with more splits
   # if the search window drift causes any sub-block to exceed the limit
   max_retry <- 3L
   for (retry in seq_len(max_retry)) {
     target_sub_size <- gene_block_length / (n_splits + 1L)
-    local_existing <- existing_set
+    local_existing <- existing_base
     splits <- list()
 
     for (s in seq_len(n_splits)) {
@@ -800,7 +820,8 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
         split_nt <- C * 3L
         junction_oh <- substring(cds, split_nt - 3L, split_nt)
 
-        if (junction_oh %in% local_existing) next # collision
+        # OOGGA compatibility check against all existing overhangs in this reaction
+        if (!is_oh_compatible(junction_oh, local_existing)) next
 
         score <- overhang_score(junction_oh, fid_lookup, eff_lookup)
         if (is.na(score)) next # unscorable — skip
@@ -812,7 +833,7 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
         }
       }
 
-      local_existing <- c(local_existing, best$oh, reverse_complement(best$oh))
+      local_existing <- c(local_existing, best$oh)
 
       splits[[s]] <- data.frame(
         split_nt = best$pos, junction_oh = best$oh,
