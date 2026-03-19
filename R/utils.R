@@ -171,3 +171,58 @@ translate_cds <- function(cds) {
   codons <- extract_codons(toupper(cds))
   paste(vapply(codons, translate_codon, character(1)), collapse = "")
 }
+
+# ============================================================================
+# Sub-step timing helpers (for verbose_timing mode)
+# ============================================================================
+
+#' Create a new timer object for sub-step profiling
+#'
+#' Returns a list that accumulates named timing entries. Use with timer_mark()
+#' and timer_report() for fine-grained module profiling.
+#'
+#' @return A timer environment (list with start time and entries)
+timer_start <- function() {
+  list(
+    t0 = proc.time()[["elapsed"]],
+    last = proc.time()[["elapsed"]],
+    entries = list()
+  )
+}
+
+#' Record a timing checkpoint
+#'
+#' Marks the elapsed time since the last checkpoint (or timer creation).
+#' Call this after each sub-step you want to profile.
+#'
+#' @param timer Timer object from timer_start()
+#' @param label Human-readable label for this sub-step
+#' @return Updated timer object (must be reassigned: timer <- timer_mark(timer, "label"))
+timer_mark <- function(timer, label) {
+  now <- proc.time()[["elapsed"]]
+  elapsed <- now - timer$last
+  timer$entries[[length(timer$entries) + 1L]] <- list(
+    label = label,
+    elapsed = elapsed
+  )
+  timer$last <- now
+  timer
+}
+
+#' Print a formatted timing report via cli
+#'
+#' Emits one cli_alert_info line per sub-step, plus a total. Only call this
+#' when verbose_timing is TRUE (callers should check before invoking).
+#'
+#' @param timer Timer object with accumulated entries
+#' @param module_name Name of the module (used as header)
+timer_report <- function(timer, module_name) {
+  total <- proc.time()[["elapsed"]] - timer$t0
+  cli::cli_alert_info("[timing] {module_name}: {round(total, 1)}s total")
+  for (entry in timer$entries) {
+    pct <- if (total > 0) round(entry$elapsed / total * 100, 1) else 0
+    cli::cli_alert_info(
+      "  {entry$label}: {round(entry$elapsed, 1)}s ({pct}%)"
+    )
+  }
+}

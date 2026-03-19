@@ -29,7 +29,9 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
                           min_hamming = DEFAULT_MIN_HAMMING,
                           assembly_plan = NULL,
                           pcr_handles = NULL,
-                          barcode_filter_config = NULL) {
+                          barcode_filter_config = NULL,
+                          verbose_timing = FALSE) {
+  if (verbose_timing) tmr <- timer_start()
   checks <- list()
   blocks <- geneblock_result$blocks
 
@@ -269,6 +271,8 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
     )
   )
 
+  if (verbose_timing) tmr <- timer_mark(tmr, "checks_1_to_14_core")
+
   # --- Enhanced barcode filter QC checks ---
   # These verify that the output barcodes satisfy the filters that were enabled
   # during generation. Uses barcode_filter_config if provided, otherwise defaults.
@@ -350,6 +354,8 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
       )
     )
   }
+
+  if (verbose_timing) tmr <- timer_mark(tmr, "enhanced_barcode_filters")
 
   # 15. Gene block minimum length (synthesis minimum, warning only)
   n_under_min <- sum(blocks$length < min_block_length)
@@ -447,6 +453,9 @@ run_qc_checks <- function(oligos, geneblock_result, variants, barcodes,
       }
     )
   }
+
+  if (verbose_timing) tmr <- timer_mark(tmr, "structural_checks")
+  if (verbose_timing) timer_report(tmr, "run_qc_checks")
 
   # Compile report
   report <- do.call(rbind, checks)

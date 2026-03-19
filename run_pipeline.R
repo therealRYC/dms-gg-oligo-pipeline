@@ -300,7 +300,8 @@ barcode_result <- design_barcodes(
   filter_polyg = cfg$barcode_filter_polyg,
   max_polyg = cfg$barcode_max_polyg,
   filter_tm_uniformity = cfg$barcode_filter_tm_uniformity,
-  tm_tolerance = cfg$barcode_tm_tolerance
+  tm_tolerance = cfg$barcode_tm_tolerance,
+  verbose_timing = cfg$verbose_timing
 )
 barcodes <- barcode_result$barcodes
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
@@ -402,7 +403,8 @@ qc_result <- run_qc_checks(
     max_polyg = cfg$barcode_max_polyg,
     filter_tm_uniformity = cfg$barcode_filter_tm_uniformity,
     tm_tolerance = cfg$barcode_tm_tolerance
-  )
+  ),
+  verbose_timing = cfg$verbose_timing
 )
 step_elapsed <- (proc.time() - step_start)[["elapsed"]]
 step_timings[["10_qc"]] <- step_elapsed
