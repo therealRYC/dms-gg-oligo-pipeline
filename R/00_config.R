@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-18 — Add oh_L (required) and upstream_cassette config parameters
+# Last updated: 2026-03-19 — Make oh_L, oh4, paqci_star2, paqci_star1 optional (default "auto")
 # 00_config.R — YAML config parsing, validation, defaults
 # DMS Golden Gate Oligo Pipeline
 
@@ -110,12 +110,20 @@ load_config <- function(config_path) {
 
   # --- Validate oh3 and oh4 ---
   # These are fixed BsmBI/BsaI overhangs used in the 3-enzyme assembly
-  if (!is.null(cfg$oh3)) cfg$oh3 <- toupper(cfg$oh3)
-  if (!is.null(cfg$oh4)) cfg$oh4 <- toupper(cfg$oh4)
+  # oh4: BsaI overhang at barcode-helper junction (default "auto" — auto-selected)
+  if (is.null(cfg$oh4)) cfg$oh4 <- "auto"
+  if (!is.null(cfg$oh3) && !identical(tolower(cfg$oh3), "auto")) cfg$oh3 <- toupper(cfg$oh3)
+  if (!identical(tolower(cfg$oh4), "auto")) cfg$oh4 <- toupper(cfg$oh4)
 
-  # --- Uppercase oh_L and upstream_cassette ---
-  # oh_L: user-specified BsaI overhang at gene 5' junction (required, no default)
-  if (!is.null(cfg$oh_L)) cfg$oh_L <- toupper(cfg$oh_L)
+  # --- Uppercase oh_L, paqci overhangs, and upstream_cassette ---
+  # oh_L: BsaI overhang at gene 5' junction (default "auto" — auto-selected)
+  if (is.null(cfg$oh_L)) cfg$oh_L <- "auto"
+  if (!identical(tolower(cfg$oh_L), "auto")) cfg$oh_L <- toupper(cfg$oh_L)
+  # paqci_star2/paqci_star1: PaqCI overhangs (default "auto" — auto-selected)
+  if (is.null(cfg$paqci_star2)) cfg$paqci_star2 <- "auto"
+  if (is.null(cfg$paqci_star1)) cfg$paqci_star1 <- "auto"
+  if (!identical(tolower(cfg$paqci_star2), "auto")) cfg$paqci_star2 <- toupper(cfg$paqci_star2)
+  if (!identical(tolower(cfg$paqci_star1), "auto")) cfg$paqci_star1 <- toupper(cfg$paqci_star1)
   # upstream_cassette: sequence between oh_L and ATG (e.g., Kozak tail)
   cfg$upstream_cassette <- toupper(cfg$upstream_cassette)
 
@@ -438,23 +446,27 @@ validate_config <- function(cfg) {
     errors <- c(errors, "polIII_promoter sequence is required")
   }
 
-  if (is.null(cfg$paqci_star2) || cfg$paqci_star2 == "NNNN") {
-    errors <- c(errors, "paqci_star2 overhang must be specified (not NNNN)")
-  }
-  if (is.null(cfg$paqci_star1) || cfg$paqci_star1 == "NNNN") {
-    errors <- c(errors, "paqci_star1 overhang must be specified (not NNNN)")
+  # --- PaqCI overhang validation (optional — default "auto" for auto-selection) ---
+  for (paqci_name in c("paqci_star2", "paqci_star1")) {
+    val <- cfg[[paqci_name]]
+    if (identical(tolower(val), "auto")) next # auto-select — skip validation
+    if (is.null(val) || val == "NNNN") {
+      errors <- c(errors, paste0(
+        paqci_name, " must be 'auto' or a valid 4-nt sequence (not NNNN)"
+      ))
+    } else if (nchar(val) != 4L || grepl("[^ACGT]", val)) {
+      errors <- c(errors, paste0(paqci_name, " must be exactly 4 ACGT characters, got: ", val))
+    }
   }
 
-  # --- oh_L validation (REQUIRED — user must specify based on their helper plasmid) ---
-  if (is.null(cfg$oh_L) || cfg$oh_L == "NNNN") {
-    errors <- c(errors, paste0(
-      "oh_L must be specified (not NNNN). This is the BsaI overhang at the 5' gene ",
-      "junction, determined by your helper plasmid design. It sits upstream of the CDS ",
-      "start codon (ATG), freeing codon 2 for mutagenesis."
-    ))
-  } else {
-    oh_L_val <- cfg$oh_L
-    if (nchar(oh_L_val) != 4L || grepl("[^ACGT]", oh_L_val)) {
+  # --- oh_L validation (optional — default "auto" for auto-selection) ---
+  oh_L_val <- cfg$oh_L
+  if (!identical(tolower(oh_L_val), "auto")) {
+    if (is.null(oh_L_val) || oh_L_val == "NNNN") {
+      errors <- c(errors, paste0(
+        "oh_L must be 'auto' or a valid 4-nt sequence (not NNNN)"
+      ))
+    } else if (nchar(oh_L_val) != 4L || grepl("[^ACGT]", oh_L_val)) {
       errors <- c(errors, paste0("oh_L must be exactly 4 ACGT characters, got: ", oh_L_val))
     } else {
       # Check oh_L is not a palindrome (self-complementary → ligation ambiguity)
@@ -471,12 +483,14 @@ validate_config <- function(cfg) {
           "Homopolymer overhangs have poor ligation specificity — choose a different overhang."
         ))
       }
-      # Check oh_L doesn't collide with oh3 or oh4 (if provided)
+      # Check oh_L doesn't collide with oh3 or oh4 (if both specified, not auto)
       for (oh_name in c("oh3", "oh4")) {
-        if (!is.null(cfg[[oh_name]]) && nchar(cfg[[oh_name]]) == 4L && !grepl("[^ACGT]", cfg[[oh_name]])) {
-          if (oh_L_val == cfg[[oh_name]] || oh_L_val == reverse_complement(cfg[[oh_name]])) {
+        oh_val <- cfg[[oh_name]]
+        if (!is.null(oh_val) && !identical(tolower(oh_val), "auto") &&
+          nchar(oh_val) == 4L && !grepl("[^ACGT]", oh_val)) {
+          if (oh_L_val == oh_val || oh_L_val == reverse_complement(oh_val)) {
             errors <- c(errors, paste0(
-              "oh_L (", oh_L_val, ") collides with ", oh_name, " (", cfg[[oh_name]],
+              "oh_L (", oh_L_val, ") collides with ", oh_name, " (", oh_val,
               "). These overhangs must be distinct (including reverse complements)."
             ))
           }
@@ -490,17 +504,19 @@ validate_config <- function(cfg) {
     errors <- c(errors, "upstream_cassette contains non-ACGT characters")
   }
 
-  # --- oh3 and oh4 validation (optional but validated if provided) ---
+  # --- oh3 and oh4 validation (optional but validated if provided, skip "auto") ---
   for (oh_name in c("oh3", "oh4")) {
-    if (!is.null(cfg[[oh_name]])) {
-      oh_val <- cfg[[oh_name]]
+    oh_val <- cfg[[oh_name]]
+    if (!is.null(oh_val) && !identical(tolower(oh_val), "auto")) {
       if (nchar(oh_val) != 4L || grepl("[^ACGT]", oh_val)) {
-        errors <- c(errors, paste0(oh_name, " must be exactly 4 ACGT characters, got: ", oh_val))
+        errors <- c(errors, paste0(oh_name, " must be exactly 4 ACGT characters or 'auto', got: ", oh_val))
       }
     }
   }
-  # If both provided, check they're distinct and don't collide
-  if (!is.null(cfg$oh3) && !is.null(cfg$oh4)) {
+  # If both provided (non-auto), check they're distinct and don't collide
+  oh3_explicit <- !is.null(cfg$oh3) && !identical(tolower(cfg$oh3), "auto")
+  oh4_explicit <- !is.null(cfg$oh4) && !identical(tolower(cfg$oh4), "auto")
+  if (oh3_explicit && oh4_explicit) {
     if (cfg$oh3 == cfg$oh4) {
       errors <- c(errors, "oh3 and oh4 must be different sequences")
     }

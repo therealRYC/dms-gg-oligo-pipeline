@@ -196,8 +196,10 @@ assembly_plan <- plan_assembly(
   max_block_length = cfg$max_geneblock_length,
   config = list(
     manual_oh3 = cfg$oh3,
-    manual_oh4 = cfg$oh4,
+    oh4 = cfg$oh4,
     oh_L = cfg$oh_L,
+    paqci_star2 = cfg$paqci_star2,
+    paqci_star1 = cfg$paqci_star1,
     upstream_cassette = cfg$upstream_cassette,
     multi_k = cfg$multi_k_search,
     overlap_codons = cfg$overlap_codons,
@@ -348,8 +350,8 @@ geneblock_result <- design_wt_geneblocks(
   tiles = tiles,
   oh3 = oh3,
   oh4 = oh4,
-  paqci_star2 = cfg$paqci_star2,
-  paqci_star1 = cfg$paqci_star1,
+  paqci_star2 = assembly_plan$paqci_star2,
+  paqci_star1 = assembly_plan$paqci_star1,
   max_block_length = cfg$max_geneblock_length,
   min_block_length = cfg$min_geneblock_length,
   assembly_plan = assembly_plan,
@@ -430,8 +432,8 @@ if (isTRUE(cfg$simulate_assembly)) {
     overlap_codons      = cfg$overlap_codons %||% 6L,
     targeted_sampling   = TRUE,
     strict_verification = TRUE,
-    paqci_star2         = cfg$paqci_star2,
-    paqci_star1         = cfg$paqci_star1
+    paqci_star2         = assembly_plan$paqci_star2,
+    paqci_star1         = assembly_plan$paqci_star1
   )
   n_total <- nrow(sim_results)
 
@@ -552,6 +554,7 @@ cli::cli_alert_success(paste0("Gene blocks: ", nrow(geneblock_result$blocks)))
 cli::cli_alert_success(paste0("Tiles: ", nrow(tiles)))
 cli::cli_alert_success(paste0(
   "Fixed overhangs: oh_L=", assembly_plan$oh_L, ", oh3=", oh3, ", oh4=", oh4,
+  ", paqci_star2=", assembly_plan$paqci_star2, ", paqci_star1=", assembly_plan$paqci_star1,
   if (nzchar(cfg$upstream_cassette)) paste0(", upstream_cassette='", cfg$upstream_cassette, "'") else ""
 ))
 if (!is.null(cfg$pcr_handles)) {
