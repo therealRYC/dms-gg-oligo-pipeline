@@ -8,9 +8,10 @@ suppressPackageStartupMessages({
 })
 
 # --- Source pipeline modules in dependency order ---
-PIPELINE_ROOT <- normalizePath(file.path(dirname(
-  "/mnt/c/Users/rober/OneDrive/Documents/Fowler Lab/260127 Claude Code Setup/worktree-recover-upstream/tests/testthat/test_oh_L_smoke.R"
-), "..", ".."), mustWork = TRUE)
+# Resolve project root relative to this test file's actual location
+PIPELINE_ROOT <- normalizePath(file.path(
+  testthat::test_path(), "..", ".."
+), mustWork = TRUE)
 
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
