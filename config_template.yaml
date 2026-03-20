@@ -44,19 +44,18 @@ intergene_elements:
     # 225 nt — bGH polyA signal from pcDNA3.1 (Thermo Fisher). GenBank J00008.1, EF550208.1.
     # No BsmBI, BsaI, or PaqCI sites. Verified against Goodwin & Rottman 1992 JBC 267:16330.
 
-# --- 5' Gene Junction (REQUIRED — determined by your helper plasmid) ---
+# --- 5' Gene Junction (default: auto-selected) ---
 # oh_L: 4-nt BsaI overhang at the 5' gene junction. This overhang sits
 # UPSTREAM of the start codon (ATG) in the helper plasmid, so the assembled
 # product is: ...oh_L + upstream_cassette + ATG + [gene CDS] + ...
 #
-# oh_L is determined by your helper plasmid design — there is NO meaningful
-# default. The pipeline will error if left as NNNN. Moving oh_L upstream
-# of ATG frees codon 2 for full mutagenesis (previously locked inside the
-# overhang when oh_L = CDS[1:4] = ATGX).
+# When "auto", the pipeline co-selects oh_L and oh4 as a pair optimized for
+# BsaI set fidelity (set_fidelity == 1.0 preferred). IMPORTANT: record the
+# auto-selected value — your helper plasmid must be built to match.
 #
 # NOTE: CACC (the obvious Kozak overhang) collides with oh3 derived from
 # the U6 promoter ending ...CACCG. Choose based on your plasmid design.
-oh_L: "NNNN"                                # 4-nt BsaI overhang (REQUIRED)
+oh_L: "auto"                                # 4-nt BsaI overhang or "auto"
 
 # upstream_cassette: DNA sequence between oh_L and the ATG start codon.
 # Typically a partial Kozak sequence (e.g., "CC" for a ...CACC-oh_L-CC-ATG
@@ -182,19 +181,20 @@ dp_k_range: 5                                # Search K_ideal +/- dp_k_range til
                                              # Search stops early when avg score gain < 0.5%.
 
 # --- Fixed Overhangs for 3-Enzyme Assembly ---
-# oh3: 4-nt BsmBI overhang at PolIII-barcode junction (same for all tiles)
-# oh4: 4-nt BsaI overhang at barcode-helper plasmid junction (same for all tiles)
-# If not provided, will be auto-selected from high-fidelity NEB data.
+# oh3: 4-nt BsmBI overhang at PolIII-barcode junction (same for all tiles).
+#   Derived from the PolIII promoter's 3' end by default.
+# oh4: 4-nt BsaI overhang at barcode-helper plasmid junction (same for all tiles).
+#   Auto-selected as a pair with oh_L for optimal BsaI set fidelity.
 # oh3: "NNNN"
-# oh4: "NNNN"
+# oh4: "auto"
 
-# --- PaqCI Overhangs (REQUIRED — determined by your destination vector) ---
+# --- PaqCI Overhangs (default: auto-selected) ---
 # These 4-nt overhangs are set by the PaqCI sites flanking the cloning site in
-# your backbone. They have NO meaningful default — you MUST replace "NNNN" with
-# the actual overhangs from your vector. The pipeline will error if left as NNNN.
-# The values in the example configs (AATG/GCTA) are arbitrary placeholders.
-paqci_star2: "NNNN"                        # PaqCI** overhang (5' end of insert)
-paqci_star1: "NNNN"                        # PaqCI* overhang (3' end of insert)
+# your backbone. When "auto", the pipeline picks non-colliding overhangs.
+# IMPORTANT: record the auto-selected values — your destination vector must match.
+# To use specific overhangs from your vector, replace "auto" with the 4-nt sequence.
+paqci_star2: "auto"                        # PaqCI** overhang (5' end of insert) or "auto"
+paqci_star1: "auto"                        # PaqCI* overhang (3' end of insert) or "auto"
 
 # --- Variant Controls ---
 # WT controls are ALWAYS included (one per mutable position, identical codon to

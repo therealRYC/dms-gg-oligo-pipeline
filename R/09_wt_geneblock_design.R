@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-18 — Flanking pads + oh_L/upstream_cassette for 5'WT blocks
+# Last updated: 2026-03-19 — OOGGA compatibility check for sub-block junction overhangs
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -29,11 +29,15 @@
 #' @param existing_ohs Character vector of overhangs already in use (must avoid collisions)
 #' @param oh_fidelity Data frame with overhang + fidelity columns
 #' @param eff_lookup Named numeric vector (overhang -> efficiency). NULL = 1.0 for all.
+#' @param max_identity Integer, OOGGA max positional identity for compatibility
+#'   checking (default 2). Uses build_oh_compatibility() matrix to catch
+#'   near-matches that cause cross-ligation (e.g., TCAG vs ACAG).
 #' @return Data frame with columns: split_pos (1-based position in cassette, last nt of
 #'   sub-block N), junction_oh (4-nt overhang at that position). Empty if no splits needed.
 find_cassette_split_points <- function(cassette_seq, max_sub_length,
                                        existing_ohs, oh_fidelity,
-                                       eff_lookup = NULL) {
+                                       eff_lookup = NULL,
+                                       max_identity = 2L) {
   cassette_len <- nchar(cassette_seq)
 
   if (cassette_len <= max_sub_length) {
@@ -56,7 +60,14 @@ find_cassette_split_points <- function(cassette_seq, max_sub_length,
   n_splits <- ceiling(cassette_len / (max_sub_length - junction_overhead)) - 1L
   if (n_splits < 1L) n_splits <- 1L
 
-  existing_set <- unique(c(existing_ohs, vapply(existing_ohs, reverse_complement, character(1))))
+  # Build OOGGA compatibility matrix for positional identity checking.
+  # Catches near-matches like TCAG vs ACAG (3/4 positional identity) that
+  # would cause cross-ligation in the BsmBI reaction.
+  compat <- build_oh_compatibility(max_identity)
+
+  # Existing overhangs to check against (no RC expansion needed — compat matrix
+  # already checks both A-vs-B and A-vs-RC(B) internally)
+  existing_base <- unique(existing_ohs)
 
   # Greedy split point search with retry on oversized fragments
 
@@ -65,7 +76,7 @@ find_cassette_split_points <- function(cassette_seq, max_sub_length,
 
   for (retry in seq_len(max_retry)) {
     target_sub_size <- cassette_len / (n_splits + 1L)
-    local_existing <- existing_set
+    local_existing <- existing_base
     splits <- list()
 
     for (s in seq_len(n_splits)) {
@@ -80,7 +91,13 @@ find_cassette_split_points <- function(cassette_seq, max_sub_length,
         if (p < 4L) next
         junction_oh <- substring(cassette_seq, p - 3L, p)
 
-        if (junction_oh %in% local_existing) next
+        # OOGGA compatibility check against all existing overhangs
+        compatible <- TRUE
+        for (oh in local_existing) {
+          if (nchar(oh) != 4L) next
+          if (!compat[junction_oh, oh]) { compatible <- FALSE; break }
+        }
+        if (!compatible) next
         if (junction_oh %in% HOMOPOLYMER_4NT) next
 
         score <- overhang_score(junction_oh, fid_lookup, eff_lookup)
@@ -91,7 +108,7 @@ find_cassette_split_points <- function(cassette_seq, max_sub_length,
         }
       }
 
-      local_existing <- c(local_existing, best$oh, reverse_complement(best$oh))
+      local_existing <- c(local_existing, best$oh)
       splits[[s]] <- data.frame(
         split_pos = best$pos, junction_oh = best$oh,
         stringsAsFactors = FALSE

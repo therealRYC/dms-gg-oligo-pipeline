@@ -566,3 +566,153 @@ test_that("plan_assembly includes oh_R_result and full_seq in output", {
     expect_equal(last_tile$oh2_seq, plan$oh_R_result$oh_R)
   }
 })
+
+# =============================================================================
+# Auto-select BsaI pair {oh_L, oh4} with set fidelity
+# =============================================================================
+
+test_that("auto_select_bsai_pair: both auto returns set_fidelity == 1.0", {
+  # Load BsaI matrix for pair scoring
+  bsai_matrix <- load_pairwise_matrix("BsaI")
+
+  # oh3 = CACC (from test PolIII), blacklist oh3 + RC
+  blacklist <- c("CACC", reverse_complement("CACC"))
+
+  result <- auto_select_bsai_pair("auto", "auto", blacklist, bsai_matrix)
+
+  expect_equal(nchar(result$oh_L), 4)
+  expect_equal(nchar(result$oh4), 4)
+  # Both should be auto-selected
+  expect_true(result$auto_selected["oh_L"])
+  expect_true(result$auto_selected["oh4"])
+  # Set fidelity should be 1.0 (many valid BsaI pairs achieve this)
+  expect_equal(result$set_fidelity, 1.0)
+  # The pair should not be in the blacklist
+  expect_false(result$oh_L %in% blacklist)
+  expect_false(result$oh4 %in% blacklist)
+  # The pair should not be identical or RC of each other
+  expect_false(result$oh_L == result$oh4)
+  expect_false(result$oh_L == reverse_complement(result$oh4))
+})
+
+test_that("auto_select_bsai_pair: one specified, one auto preserves specified", {
+  bsai_matrix <- load_pairwise_matrix("BsaI")
+  blacklist <- c("CACC", reverse_complement("CACC"))
+
+  # Specify oh_L, auto-select oh4
+  result <- auto_select_bsai_pair("TGAA", "auto", blacklist, bsai_matrix)
+
+  expect_equal(result$oh_L, "TGAA")
+  expect_false(result$auto_selected["oh_L"])
+  expect_true(result$auto_selected["oh4"])
+  expect_equal(nchar(result$oh4), 4)
+  # The auto-selected oh4 should have high set fidelity with TGAA
+  expect_gte(result$set_fidelity, 0.95)
+  # oh4 should NOT be AGAA (the old buggy selection for TGAA)
+  # because TGAA × AGAA has 4.9% cross-ligation
+  # The auto-selector picks by set fidelity, so it should avoid AGAA
+  if (result$oh4 == "AGAA") {
+    # If it DID pick AGAA, set fidelity should be very high (1.0) to justify it
+    expect_equal(result$set_fidelity, 1.0)
+  }
+})
+
+test_that("auto_select_bsai_pair: both specified validates and warns", {
+  bsai_matrix <- load_pairwise_matrix("BsaI")
+
+  # Good pair — should return without error
+  result <- auto_select_bsai_pair("GCTA", "AATG", character(0), bsai_matrix)
+  expect_equal(result$oh_L, "GCTA")
+  expect_equal(result$oh4, "AATG")
+  expect_false(result$auto_selected["oh_L"])
+  expect_false(result$auto_selected["oh4"])
+  expect_gt(result$set_fidelity, 0)
+})
+
+test_that("auto_select_bsai_pair: TGAA+AGAA cross-ligation detected", {
+  # This is the GRIN2A bug: oh_L=TGAA, oh4=AGAA has 4.9% misligation
+  bsai_matrix <- load_pairwise_matrix("BsaI")
+
+  result <- auto_select_bsai_pair("TGAA", "AGAA", character(0), bsai_matrix)
+  # Set fidelity should be < 1.0 for this problematic pair
+  # Exact value depends on BsaI matrix, but it should trigger the < 0.95 warning
+  expect_lt(result$set_fidelity, 1.0)
+})
+
+# =============================================================================
+# Auto-select PaqCI pair
+# =============================================================================
+
+test_that("auto_select_paqci_pair: both auto returns valid non-colliding pair", {
+  blacklist <- c("TGAA", "CACC", "AGAA")
+
+  result <- auto_select_paqci_pair("auto", "auto", blacklist)
+
+  expect_equal(nchar(result$paqci_star2), 4)
+  expect_equal(nchar(result$paqci_star1), 4)
+  expect_true(result$auto_selected["paqci_star2"])
+  expect_true(result$auto_selected["paqci_star1"])
+  # Must not collide with each other
+  expect_false(result$paqci_star2 == result$paqci_star1)
+  expect_false(result$paqci_star2 == reverse_complement(result$paqci_star1))
+  # Must not be in blacklist (or RC of blacklist)
+  bl_expanded <- c(blacklist, vapply(blacklist, reverse_complement, character(1)))
+  expect_false(result$paqci_star2 %in% bl_expanded)
+  expect_false(result$paqci_star1 %in% bl_expanded)
+})
+
+test_that("auto_select_paqci_pair: both specified validates", {
+  result <- auto_select_paqci_pair("AATG", "GCTA", character(0))
+  expect_equal(result$paqci_star2, "AATG")
+  expect_equal(result$paqci_star1, "GCTA")
+  expect_false(result$auto_selected["paqci_star2"])
+  expect_false(result$auto_selected["paqci_star1"])
+})
+
+test_that("auto_select_paqci_pair: identical pair rejected", {
+  expect_error(
+    auto_select_paqci_pair("AATG", "AATG", character(0)),
+    "must be different"
+  )
+})
+
+# =============================================================================
+# plan_assembly with auto overhangs
+# =============================================================================
+
+test_that("plan_assembly with oh_L=auto and oh4=auto returns valid plan", {
+  cds <- domesticate_test_gene()
+  tile_size <- compute_max_tile_size(300, 12)
+
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "auto", oh4 = "auto",
+                  paqci_star2 = "auto", paqci_star1 = "auto"))
+
+  expect_true(is.list(plan))
+  expect_equal(nchar(plan$oh_L), 4)
+  expect_equal(nchar(plan$oh4), 4)
+  expect_equal(nchar(plan$paqci_star2), 4)
+  expect_equal(nchar(plan$paqci_star1), 4)
+  # oh_L and oh4 should not collide
+  expect_false(plan$oh_L == plan$oh4)
+  expect_false(plan$oh_L == reverse_complement(plan$oh4))
+  # PaqCI values should be in the assembly plan
+  expect_false(plan$paqci_star2 == plan$paqci_star1)
+})
+
+test_that("plan_assembly with specified oh_L auto-selects oh4 with set fidelity", {
+  cds <- domesticate_test_gene()
+  tile_size <- compute_max_tile_size(300, 12)
+
+  plan <- plan_assembly(cds, TEST_POLIII, tile_size,
+    config = list(oh_L = "TGAA", oh4 = "auto",
+                  paqci_star2 = "AATG", paqci_star1 = "GCTA"))
+
+  expect_equal(plan$oh_L, "TGAA")
+  expect_equal(nchar(plan$oh4), 4)
+  # Check BsaI set fidelity for the pair
+  bsai_matrix <- load_pairwise_matrix("BsaI")
+  pair_fid <- compute_set_fidelity(c(plan$oh_L, plan$oh4), bsai_matrix)
+  # Should be much better than the old TGAA+AGAA pair
+  expect_gte(pair_fid$set_fidelity, 0.95)
+})
