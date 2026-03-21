@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-07 — Fix report OH display: use block metadata instead of junction indices
+# Last updated: 2026-03-20 — Add borderline overhang pair reporting (Section 5c)
 # 12_report.R — Wetlab-compatible Markdown assembly report
 # DMS Golden Gate Oligo Pipeline
 #
@@ -61,6 +61,9 @@ generate_report <- function(gene, cfg, assembly_plan, geneblock_result,
 
   # Section 5b: Reaction Fidelity Summary
   add(report_reaction_fidelity_summary(assembly_plan))
+
+  # Section 5c: Borderline Overhang Pairs (if any)
+  add(report_borderline_overhangs(assembly_plan))
 
   # Section 6: Fixed Overhangs & Helper Plasmid
   add(report_fixed_overhangs(assembly_plan, helper, cfg))
@@ -360,6 +363,41 @@ report_reaction_fidelity_summary <- function(assembly_plan) {
     summary_line, "",
     warn_lines,
     unscorable_lines
+  )
+}
+
+
+#' Section 5c: Borderline Overhang Pairs
+#'
+#' Reports overhang pairs at exactly the max_identity threshold — technically
+#' compatible but representing the tightest margin before collision. Useful
+#' for troubleshooting if a reaction underperforms.
+#'
+#' @param assembly_plan List containing borderline_overhangs data frame
+#' @return Character vector of markdown lines (empty if no borderline pairs)
+report_borderline_overhangs <- function(assembly_plan) {
+  bl <- assembly_plan$borderline_overhangs
+  if (is.null(bl) || nrow(bl) == 0L) return(character(0))
+
+  df <- data.frame(
+    Tile = bl$tile_id,
+    Reaction = bl$reaction_type,
+    `OH A` = bl$oh_a,
+    `OH B` = bl$oh_b,
+    `Identity` = paste0(bl$identity, "/4"),
+    Type = bl$match_type,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  c(
+    "### 5c. Borderline Overhang Pairs", "",
+    paste0(
+      "The following overhang pairs are at exactly the max_identity threshold (",
+      bl$identity[1], "/4). They are compatible but represent the tightest margin ",
+      "before collision:"
+    ), "",
+    md_table(df), ""
   )
 }
 

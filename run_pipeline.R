@@ -376,6 +376,19 @@ cli::cli_alert_success(paste0(
   "Reaction fidelity recomputed. Min: ", round(min_fid, 4)
 ))
 
+# Step 9c: Flag borderline overhang pairs (at exactly max_identity threshold)
+max_identity_used <- attr(tiles, "max_identity_used") %||% cfg$oogga_max_identity %||% 2L
+borderline <- flag_borderline_overhangs(assembly_plan$reaction_fidelity, max_identity_used)
+assembly_plan$borderline_overhangs <- borderline
+if (nrow(borderline) > 0L) {
+  cli::cli_alert_warning(paste0(
+    nrow(borderline), " borderline overhang pair(s) at exactly ",
+    max_identity_used, "/4 identity — see report for details"
+  ))
+} else {
+  cli::cli_alert_success("No borderline overhang pairs detected")
+}
+
 # Step 10: QC checks
 cli::cli_h2("Step 10: Running QC checks")
 step_start <- proc.time()
