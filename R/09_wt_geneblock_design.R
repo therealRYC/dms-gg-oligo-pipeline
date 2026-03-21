@@ -84,7 +84,7 @@ find_cassette_split_points <- function(cassette_seq, max_sub_length,
       lo <- max(5L, center - search_window)
       hi <- min(cassette_len - 5L, center + search_window)
 
-      best <- list(pos = center, oh = "NNNN", score = -1)
+      best <- list(pos = center, oh = NA_character_, score = -1)
 
       for (p in lo:hi) {
         # Extract 4-nt overhang ending at position p
@@ -105,6 +105,25 @@ find_cassette_split_points <- function(cassette_seq, max_sub_length,
 
         if (score > best$score) {
           best <- list(pos = p, oh = junction_oh, score = score)
+        }
+      }
+
+      # Fallback: if no OOGGA-compatible overhang found, relax constraints
+      # and pick the best-fidelity non-homopolymer overhang in the window
+      if (is.na(best$oh)) {
+        cli::cli_alert_warning(paste0(
+          "Cassette split ", s, ": no OOGGA-compatible overhang in window [",
+          lo, ", ", hi, "]. Relaxing to best-fidelity candidate."
+        ))
+        for (p in lo:hi) {
+          if (p < 4L) next
+          junction_oh <- substring(cassette_seq, p - 3L, p)
+          if (junction_oh %in% HOMOPOLYMER_4NT) next
+          score <- overhang_score(junction_oh, fid_lookup, eff_lookup)
+          if (is.na(score)) next
+          if (score > best$score) {
+            best <- list(pos = p, oh = junction_oh, score = score)
+          }
         }
       }
 
@@ -1265,6 +1284,17 @@ recompute_reaction_fidelity <- function(geneblock_result, assembly_plan) {
       }
     }
     bsai_ohs <- unique(bsai_ohs)
+    # Guard: filter overhangs not in the pairwise matrix (e.g., from cassette splits
+    # that produce overhangs outside the NEB validated set)
+    bsai_valid <- bsai_ohs %in% rownames(bsai_matrix)
+    if (!all(bsai_valid)) {
+      cli::cli_alert_warning(paste0(
+        "Tile ", manifest$tile_id, " BsaI: dropping ", sum(!bsai_valid),
+        " overhang(s) not in pairwise matrix: ",
+        paste(bsai_ohs[!bsai_valid], collapse = ", ")
+      ))
+      bsai_ohs <- bsai_ohs[bsai_valid]
+    }
     bsai_result <- compute_set_fidelity(bsai_ohs, bsai_matrix)
 
     reaction_fidelity[[length(reaction_fidelity) + 1L]] <- data.frame(
@@ -1288,6 +1318,16 @@ recompute_reaction_fidelity <- function(geneblock_result, assembly_plan) {
       }
     }
     bsmbi_ohs <- unique(bsmbi_ohs)
+    # Guard: filter overhangs not in the pairwise matrix
+    bsmbi_valid <- bsmbi_ohs %in% rownames(bsmbi_matrix)
+    if (!all(bsmbi_valid)) {
+      cli::cli_alert_warning(paste0(
+        "Tile ", manifest$tile_id, " BsmBI: dropping ", sum(!bsmbi_valid),
+        " overhang(s) not in pairwise matrix: ",
+        paste(bsmbi_ohs[!bsmbi_valid], collapse = ", ")
+      ))
+      bsmbi_ohs <- bsmbi_ohs[bsmbi_valid]
+    }
     bsmbi_result <- compute_set_fidelity(bsmbi_ohs, bsmbi_matrix)
 
     reaction_fidelity[[length(reaction_fidelity) + 1L]] <- data.frame(

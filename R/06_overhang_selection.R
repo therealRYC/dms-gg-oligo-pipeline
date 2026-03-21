@@ -107,6 +107,30 @@ compute_set_fidelity <- function(overhangs, pairwise_matrix) {
     ))
   }
 
+  # Pre-validate: all overhangs must be in the matrix dimnames.
+  # Invalid overhangs (e.g., NA from unresolved split points) are filtered
+  # with a warning rather than crashing the pipeline.
+  valid_names <- rownames(pairwise_matrix)
+  bad_mask <- !overhangs %in% valid_names | is.na(overhangs)
+  if (any(bad_mask)) {
+    cli::cli_alert_warning(paste0(
+      "compute_set_fidelity: dropping ", sum(bad_mask),
+      " invalid overhang(s): [",
+      paste(overhangs[bad_mask], collapse = ", "), "]"
+    ))
+    overhangs <- overhangs[!bad_mask]
+    n <- length(overhangs)
+    if (n < 2) {
+      return(list(
+        set_fidelity = 1.0,
+        per_overhang = data.frame(
+          overhang = overhangs, correct_fraction = 1.0,
+          stringsAsFactors = FALSE
+        )
+      ))
+    }
+  }
+
   per_oh_fidelity <- numeric(n)
   for (i in seq_len(n)) {
     oh_i <- overhangs[i]
@@ -814,7 +838,7 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
       lo_codon <- max((block_start_nt %/% 3L) + 5L, center_codon - search_window)
       hi_codon <- min((block_end_nt %/% 3L) - 5L, center_codon + search_window)
 
-      best <- list(pos = center_codon * 3L, oh = "NNNN", fid = NA_real_, score = -1)
+      best <- list(pos = center_codon * 3L, oh = NA_character_, fid = NA_real_, score = -1)
 
       for (C in lo_codon:hi_codon) {
         split_nt <- C * 3L
@@ -830,6 +854,25 @@ optimize_split_points <- function(cds, block_start_nt, block_end_nt,
 
         if (score > best$score) {
           best <- list(pos = split_nt, oh = junction_oh, fid = fid, score = score)
+        }
+      }
+
+      # Fallback: if no OOGGA-compatible overhang found, relax constraints
+      # and pick the best-fidelity candidate in the window (skip only homopolymers)
+      if (is.na(best$oh)) {
+        cli::cli_alert_warning(paste0(
+          "Gene split ", s, " (nt ", center_nt,
+          "): no OOGGA-compatible overhang in window. Relaxing to best-fidelity candidate."
+        ))
+        for (C in lo_codon:hi_codon) {
+          split_nt <- C * 3L
+          junction_oh <- substring(cds, split_nt - 3L, split_nt)
+          score <- overhang_score(junction_oh, fid_lookup, eff_lookup)
+          if (is.na(score)) next
+          fid <- if (junction_oh %in% names(fid_lookup)) unname(fid_lookup[junction_oh]) else NA_real_
+          if (score > best$score) {
+            best <- list(pos = split_nt, oh = junction_oh, fid = fid, score = score)
+          }
         }
       }
 
