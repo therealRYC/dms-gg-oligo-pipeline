@@ -1,0 +1,20 @@
+check_name,desc,pass,detail
+oligo_lengths,All oligos within synthesis length limit,TRUE,Range: 139-294 nt (limit: 300)
+block_lengths,All gene blocks within synthesis length limit,TRUE,Range: 234-1792 nt (limit: 1800)
+barcode_junction_sites,No enzyme sites at barcode-context junctions,TRUE,"0 barcode(s) with junction enzyme sites (left='CACACC', right='AGAATG')"
+barcode_uniqueness,All barcodes are unique,TRUE,305340 unique / 305340 total
+tile_coverage,Tiles cover entire gene without gaps,TRUE,4395 / 4395 nt covered
+variant_count,Expected number of variants generated,TRUE,30534 unique variants (expected: 30534 across 1454/1463 mutable positions; 27626 missense + 1454 nonsense + 1454 wt_control; 9 position(s) skipped)
+single_codon_change,Each non-control variant differs by exactly one codon from WT,TRUE,290800 / 290800 variants confirmed (WT controls excluded)
+oligo_gc_content,Oligo GC content within reasonable range (25-75%),TRUE,GC range: 37.4-66.3% | 0 oligo(s) with extreme GC
+domestication_complete,"Gene domesticated for all 3 enzymes (BsaI, BsmBI, PaqCI)",TRUE,No enzyme sites in gene
+overhang_fidelity,Tile boundary overhangs have adequate fidelity,FALSE,25 tile(s) with low-fidelity boundary overhangs (<0.80)
+tile_manifests,Per-tile assembly manifests complete,TRUE,26 tile manifest(s) generated
+helper_plasmid,Helper plasmid free of unintended BsmBI sites,TRUE,OK
+reaction_fidelity,Per-reaction set-level overhang fidelity,TRUE,Min set fidelity: 0.9943 across 52 reactions | 0 reaction(s) below 0.90
+barcode_poliii_term,No barcodes contain PolIII terminator signal (TTTT),TRUE,0 / 305340 barcode(s) contain TTTT
+barcode_hairpins,No barcodes have hairpin stems > 3 bp,TRUE,0 / 305340 barcode(s) have hairpin stems > 3 bp
+barcode_dinuc_repeats,No barcodes have dinucleotide repeats > 4 units,TRUE,0 / 305340 barcode(s) exceed 4 dinuc repeat units
+barcode_tm_distribution,Barcode Tm distribution (informational),TRUE,"Tm: median=53.3, range=[41.9, 65.1], sd=4 C"
+block_min_length,All gene blocks above synthesis minimum length,FALSE,3 block(s) below 300 nt minimum. Range: 234-1792 nt
+sb_overhang_collisions,Superblock boundary overhangs are unique (no collisions),TRUE,"6 SB boundary OH(s), all unique"
