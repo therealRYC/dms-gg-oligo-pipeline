@@ -678,3 +678,144 @@ test_that("plan_assembly with oogga_two_pass on TEST_LONG_GENE_SEQ has no SB ski
   )
 })
 
+
+# =============================================================================
+# Regression: oh2 clamp fix — last-of-segment tile extends into overlap zone
+# =============================================================================
+
+test_that("last-of-segment tile oh2 uses overlap-extended position, not segment boundary", {
+  # BUG: Before the fix, the last tile in a segment had end_codon clamped at
+
+  # the segment boundary (n_codons_tile). After the fix, it extends by
+  # overlap_codons into the next segment, matching what the SB DP validated.
+  #
+  # Strategy: call search_tile_boundaries_oogga() with n_codons_tile < n_codons
+  # (simulating a non-last segment with forward extension). Verify the last
+  # tile's end_codon > n_codons_tile.
+  oh_fidelity <- load_overhang_fidelity("BsmBI")
+  bsmbi_pw <- load_pairwise_matrix("BsmBI")
+  eff_lookup <- compute_overhang_efficiency(bsmbi_pw)
+
+  # Use first 1200 nt of TEST_LONG_GENE_SEQ + 12 nt extension (4 overlap codons)
+  # This simulates a non-last segment: segment is 400 codons, CDS is 404 codons
+  segment_codons <- 400L
+  overlap_codons <- 4L
+  extended_codons <- segment_codons + overlap_codons
+  cds_extended <- substring(TEST_LONG_GENE_SEQ, 1, extended_codons * 3L)
+
+  max_mutable_nt <- 243L
+  oh_L <- "TGAA"
+
+  tiles <- search_tile_boundaries_oogga(
+    cds = cds_extended,
+    max_mutable_nt = max_mutable_nt,
+    oh_fidelity = oh_fidelity,
+    multi_k = TRUE,
+    dp_k_range = 1L,
+    overlap_codons = overlap_codons,
+    eff_lookup = eff_lookup,
+    alien_ohs_oh1 = c(oh_L, reverse_complement(oh_L)),
+    alien_ohs_oh2 = character(0),
+    max_identity = 2L,
+    n_codons_tile = segment_codons,  # DP constrains boundaries within 400 codons
+    oh_L = oh_L
+  )
+
+  n_tiles <- nrow(tiles)
+  last_tile <- tiles[n_tiles, ]
+
+  # The last tile must extend PAST the segment boundary into the overlap zone.
+  # Before fix: end_codon == segment_codons (400) — WRONG
+  # After fix:  end_codon == segment_codons + overlap_codons (404) — CORRECT
+  expect_equal(
+    last_tile$end_codon, extended_codons,
+    info = paste(
+      "Last tile end_codon should be", extended_codons,
+      "(segment_codons + overlap), got", last_tile$end_codon
+    )
+  )
+
+  # Also verify the oh2 is extracted at the overlap-shifted position
+  expected_oh2_pos <- extended_codons * 3L
+  expected_oh2 <- substring(cds_extended, expected_oh2_pos - 3L, expected_oh2_pos)
+  expect_equal(
+    last_tile$oh2_seq, expected_oh2,
+    info = paste(
+      "Last tile oh2 should be", expected_oh2,
+      "(at overlap position), got", last_tile$oh2_seq
+    )
+  )
+})
+
+
+# =============================================================================
+# Regression: flag_borderline_overhangs catches exact-threshold pairs
+# =============================================================================
+
+test_that("flag_borderline_overhangs catches pairs at exactly max_identity", {
+  # Construct a reaction_fidelity_df with known overhangs.
+  # AATC vs AATG: direct identity = 3/4.
+  # At max_identity=3, this is exactly at threshold → should be flagged.
+  rxn_fid <- data.frame(
+    tile_id = 1L,
+    reaction_type = "BsaI",
+    overhangs = "AATC;AATG;CCCC",
+    n_overhangs = 3L,
+    set_fidelity = 0.95,
+    stringsAsFactors = FALSE
+  )
+
+  result <- flag_borderline_overhangs(rxn_fid, max_identity = 3L)
+
+  # Should flag the AATC/AATG pair (3/4 direct identity)
+  expect_true(nrow(result) >= 1L,
+    info = "Expected at least one borderline pair flagged"
+  )
+  # Check the specific pair is present
+  direct_flags <- result[result$match_type == "direct", ]
+  expect_true(
+    any(direct_flags$oh_a == "AATC" & direct_flags$oh_b == "AATG"),
+    info = "AATC/AATG pair should be flagged at max_identity=3"
+  )
+})
+
+test_that("flag_borderline_overhangs returns empty for clean reactions", {
+  # AAAA and CCCC: identity = 0/4, RC identity = 0/4 — far below any threshold
+  rxn_fid <- data.frame(
+    tile_id = 1L,
+    reaction_type = "BsmBI",
+    overhangs = "AAAA;CCCC",
+    n_overhangs = 2L,
+    set_fidelity = 0.99,
+    stringsAsFactors = FALSE
+  )
+
+  result <- flag_borderline_overhangs(rxn_fid, max_identity = 2L)
+  expect_equal(nrow(result), 0L,
+    info = "Clean overhang set should produce no borderline flags"
+  )
+})
+
+test_that("flag_borderline_overhangs detects RC borderline pairs", {
+  # AATC: RC = GATT. identity(AATC, GATT) = 0/4 (direct = fine).
+  # But we want a pair where RC identity is exactly at threshold.
+  # GCAG vs CTGG: RC(CTGG) = CCAG. identity(GCAG, CCAG) = 3/4.
+  # At max_identity=3, the RC match is borderline.
+  rxn_fid <- data.frame(
+    tile_id = 2L,
+    reaction_type = "BsmBI",
+    overhangs = "GCAG;CTGG",
+    n_overhangs = 2L,
+    set_fidelity = 0.90,
+    stringsAsFactors = FALSE
+  )
+
+  result <- flag_borderline_overhangs(rxn_fid, max_identity = 3L)
+
+  # Should flag the RC pair
+  rc_flags <- result[result$match_type == "RC", ]
+  expect_true(nrow(rc_flags) >= 1L,
+    info = "RC borderline pair GCAG/CTGG (RC=CCAG, 3/4) should be flagged"
+  )
+})
+
