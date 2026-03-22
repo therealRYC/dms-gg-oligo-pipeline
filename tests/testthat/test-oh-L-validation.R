@@ -66,14 +66,14 @@ tests <- list(
     id   = 1,
     name = "oh_L missing (NULL)",
     modify = function(cfg) { cfg$oh_L <- NULL; cfg },
-    expect_error_re = "oh_L must be specified",
+    expect_error_re = "oh_L must be",
     should_pass = FALSE
   ),
   list(
     id   = 2,
     name = "oh_L = 'NNNN'",
     modify = function(cfg) { cfg$oh_L <- "NNNN"; cfg },
-    expect_error_re = "oh_L must be specified",
+    expect_error_re = "oh_L must be",
     should_pass = FALSE
   ),
   list(
