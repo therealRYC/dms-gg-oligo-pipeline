@@ -92,6 +92,9 @@ config.yaml
     check_and_fix_new_sites()  (post-check for inadvertent enzyme sites)
     │
     ▼
+[5.5] auto_size_barcode_length()  (if barcode_length="auto", resolve before tiling)
+    │
+    ▼
 [6] plan_assembly() ───────► assembly_plan (tiles, oh3, oh4, superblocks)
     assign_variants_to_tiles()  (each variant → best tile)
     │
@@ -103,6 +106,8 @@ config.yaml
     │
     ▼
 [9] design_wt_geneblocks() ► geneblock_result (blocks, tile_manifests, helper)
+    [9b] recompute_reaction_fidelity()  (from actual block overhangs)
+    [9c] flag_borderline_overhangs()    (near-miss overhang pairs)
     │
     ▼
 [10] run_qc_checks() ──────► qc_result (17 validation checks)
@@ -121,7 +126,7 @@ config.yaml
 
 ### `constants.R` — Enzyme definitions, synthesis limits, amino acid alphabet
 
-**File**: `R/constants.R` (138 lines)
+**File**: `R/constants.R` (157 lines)
 
 This file defines all the biological and engineering constants used throughout the pipeline.
 
@@ -164,13 +169,12 @@ MIN_GENEBLOCK_LENGTH <- 300L   # Twist gene fragment synthesis minimum
 - `AA_TO_CODONS`: Reverse lookup (amino acid → all codons)
 - `PALINDROMIC_4NT`: 16 palindromic 4-mers — hard-blacklisted for freely-chosen overhangs because they enable self-circularization
 - `POLIII_TERM_SEQ`: `"TTTT"` — RNA PolIII terminates at ≥4 T's; barcodes must avoid this
-- `SET_FIDELITY_WARNING_THRESHOLD`: 0.80 — internal safety net for per-reaction set fidelity warnings (not user-configurable)
 - `DEFAULT_BARCODE_LENGTH`: 20 nt
 - `DEFAULT_BARCODES_PER_VARIANT`: 10
 
 ### `utils.R` — Shared DNA helper functions
 
-**File**: `R/utils.R` (173 lines)
+**File**: `R/utils.R` (228 lines)
 
 #### Key Functions
 
@@ -231,7 +235,7 @@ Uses a `while` loop with `regexpr()` + `fixed = TRUE` to find all occurrences (i
 
 ### `00_config.R` — YAML parsing, validation, defaults
 
-**File**: `R/00_config.R` (307 lines)
+**File**: `R/00_config.R` (683 lines)
 
 #### `load_config(config_path)` → validated config list
 
@@ -250,14 +254,17 @@ defaults <- list(
   min_hamming_distance    = 3L,
   barcode_prefix_length   = 12L,
   barcodes_per_variant    = 10L,
-  overlap_codons          = 4L,
-  boundary_method         = "dp",            # tile-first DP (or "greedy")
+  overlap_codons          = 6L,
+  boundary_method         = "oogga_two_pass",  # only supported method
+  upstream_cassette       = "",                # sequence between oh_L and ATG (e.g., Kozak tail)
   auto_domesticate        = TRUE,
   simulate_assembly       = TRUE,
   include_synonymous      = FALSE,
   ...
 )
 ```
+
+**`upstream_cassette`** (new): Optional DNA sequence inserted between oh_L and the ATG start codon on tile 1 oligos (e.g., a Kozak tail). Its length is subtracted from the mutable region budget for ALL tiles (conservative — avoids tile-specific DP refactoring). Default: empty string. Validated as ACGT-only when non-empty.
 
 #### `build_downstream_cassette(cfg)` — Intergene Elements
 
@@ -276,7 +283,7 @@ When `intergene_elements` is empty (the default), `downstream_cassette = polIII_
 Validates:
 - Gene input: exactly one of `gene_fasta` or `gene_cds` required
 - `polIII_promoter` is required
-- `paqci_star1` and `paqci_star2` must be specified (not `NNNN`)
+- `paqci_star1` and `paqci_star2` default to `"auto"` (auto-selected via `auto_select_paqci_pair()`); can also be user-specified 4-nt sequences (not `NNNN`)
 - `oh3` and `oh4` (if provided): 4 ACGT characters, distinct, not RC of each other, no enzyme sites
 - Range checks on oligo length (100–500), barcode length (6–30 or "auto"), etc.
 - Prefix length constraints: `prefix_length >= min_hamming` and `prefix_length < barcode_length` when `barcodes_per_variant > 1`
@@ -398,7 +405,7 @@ The function extracts 6 nt of context from each side of every junction and scans
 
 ### `03_codon_table.R` — CoCoPUTs codon usage
 
-**File**: `R/03_codon_table.R` (237 lines)
+**File**: `R/03_codon_table.R` (247 lines)
 
 #### `load_codon_usage(custom_path)` → data frame (codon, aa, frequency)
 
@@ -500,25 +507,25 @@ WT controls are skipped because their codon is identical to the domesticated CDS
 
 ### `05_tiling.R` — Gene partitioning
 
-**File**: `R/05_tiling.R` (217 lines)
+**File**: `R/05_tiling.R` (242 lines)
 
-#### `compute_max_tile_size(max_oligo_length, barcode_length)` → integer nt
+#### `compute_max_tile_size(max_oligo_length, barcode_length, handle_overhead, upstream_cassette_len)` → integer nt
 
 Computes the maximum mutable region that fits in an oligo after subtracting all fixed elements:
 
 ```
-overhead = BsaI_5'(7) + oh1(4) + BsmBI_oh2(11) + BsmBI_oh3(11) + barcode + BsaI_oh4(11)
-         = 44 + barcode_length
+overhead = BsaI_5'(7) + oh1(4) + upstream_cassette + BsmBI_oh2(11) + BsmBI_oh3(11) + barcode + BsaI_oh4(11) + handles
+         = 44 + upstream_cassette_len + barcode_length + handle_overhead
 
 mutable_size = max_oligo_length - overhead
-             = 300 - 44 - 20 = 236 nt = 78 codons (at barcode_length=20)
+             = 300 - 44 - 0 - 20 - 0 = 236 nt = 78 codons (at barcode_length=20, no cassette/handles)
 ```
 
-Result is rounded down to a codon boundary (multiple of 3).
+The `upstream_cassette_len` is subtracted from ALL tiles' mutable space (conservative -- avoids tile-specific DP refactoring; cost: 0-2 codons for typical <=6 nt cassettes). Result is rounded down to a codon boundary (multiple of 3).
 
 #### `partition_tiles()` — Geometric Partitioning
 
-Simple equal-sized tiling with overlap. Each tile is `mutable_codons` wide, with `overlap_codons` (default 4) shared between adjacent tiles.
+Simple equal-sized tiling with overlap. Each tile is `mutable_codons` wide, with `overlap_codons` (default 6) shared between adjacent tiles.
 
 ```r
 effective_step <- mutable_codons - overlap_codons
@@ -550,7 +557,7 @@ Variants at gene edges that can only achieve quality 1 are flagged with `overhan
 
 ### `06_overhang_selection.R` + `06b_oogga_dp.R` — Assembly planning with OOGGA collision-aware DP
 
-**Files**: `R/06_overhang_selection.R` (~1600 lines) + `R/06b_oogga_dp.R` (~1400 lines)
+**Files**: `R/06_overhang_selection.R` (~1936 lines) + `R/06b_oogga_dp.R` (~1420 lines)
 
 These modules integrate tiling, overhang selection, and superblock partitioning into a single planning system. The architecture uses **OOGGA-style collision-aware dynamic programming** (inspired by Mukundan & Madhusudhan 2025) in a two-pass design: SB boundaries first, then tile boundaries per SB segment.
 
@@ -624,7 +631,7 @@ After SB boundaries are placed, each SB segment gets its own tile DP. Key featur
 
 ##### Tile Overlap
 
-Tiles are extended rightward by `overlap_codons` (default 4) so adjacent tiles share codons at their boundary. This means:
+Tiles are extended rightward by `overlap_codons` (default 6) so adjacent tiles share codons at their boundary. This means:
 - Core boundary positions from the DP determine where tiles logically separate
 - Each tile physically extends `overlap_codons` past its core end
 - Codons near the boundary are mutable in both tiles — `assign_variants_to_tiles()` picks the tile where they're fully interior
@@ -633,10 +640,11 @@ Tiles are extended rightward by `overlap_codons` (default 4) so adjacent tiles s
 
 Main entry point called from `run_pipeline.R`. Follows a **constrained-first ordering**: fixed overhangs are committed before any boundary search runs.
 
-**Phase 1** — Select fixed overhangs (oh_L, oh3, oh4):
-- `oh_L` = first 4 nt of gene (physical constraint)
-- `oh3` (BsmBI, same for all tiles): prefer promoter-derived oh3 from the PolIII promoter's terminal 5 nt. If the promoter-derived 4-mer is a homopolymer or palindrome, fall back to highest-scoring overhang by P_fid × P_eff
-- `oh4` (BsaI, same for all tiles): highest-scoring overhang that doesn't collide with oh_L
+**Phase 1** — Select fixed overhangs (oh_L, oh3, oh4, PaqCI):
+- `oh_L` (BsaI, 5' gene junction): default `"auto"` — auto-selected via `auto_select_bsai_pair()` which jointly optimizes oh_L and oh4 for BsaI set fidelity. When auto-selected, oh_L is external to the CDS (upstream of ATG), not the first 4 nt of the gene. Can also be user-specified.
+- `oh3` (BsmBI, same for all tiles): prefer promoter-derived oh3 from the PolIII promoter's terminal 5 nt. If the promoter-derived 4-mer is a homopolymer or palindrome, fall back to highest-scoring overhang by P_fid x P_eff
+- `oh4` (BsaI, same for all tiles): jointly optimized with oh_L via `auto_select_bsai_pair()` for best BsaI set fidelity, blacklisting oh3+RC
+- `paqci_star2` / `paqci_star1` (PaqCI, Level 2): default `"auto"` — auto-selected via `auto_select_paqci_pair()` which scores candidates by base composition diversity and avoids collision with oh_L, oh4, oh3
 - oh3 and oh4 do NOT check against oh1/oh2 (which don't exist yet) — downstream phases will blacklist them
 
 **Phase 2** — SB boundary search (OOGGA DP on full gene+cassette):
@@ -659,7 +667,7 @@ Main entry point called from `run_pipeline.R`. Follows a **constrained-first ord
 
 **Phase 4** — Per-reaction pairwise validation:
 - Compute set fidelity for each BsaI and BsmBI reaction
-- Warn if any reaction falls below `SET_FIDELITY_WARNING_THRESHOLD` (0.80)
+- Warn if any reaction falls below 0.80 set fidelity (hardcoded threshold in QC checks)
 
 Returns `assembly_plan` with tiles, oh3, oh4, oh_R_result, full_seq, superblocks, reaction fidelity.
 
@@ -688,11 +696,15 @@ Constraints:
 
 ### `07_barcode_design.R` — Unified hierarchical prefix-suffix barcodes
 
-**File**: `R/07_barcode_design.R` (~830 lines)
+**File**: `R/07_barcode_design.R` (~1255 lines)
 
 ### `07b_linear_codes.R` — GF(4) Hamming code construction
 
 **File**: `R/07b_linear_codes.R` (542 lines)
+
+#### `auto_size_barcode_length()` — Automatic Length Sizing
+
+When `barcode_length = "auto"` in config, this function (called at Step 5.5 in the pipeline, after variant count is known) iterates suffix lengths from 0 to 18, checking that `4^suffix_length * filter_pass_rate >= barcodes_per_variant * 2` (2x safety margin). Returns the smallest barcode_length (prefix + suffix) that satisfies capacity. Max 30 nt, min 6 nt.
 
 #### Architecture
 
@@ -816,7 +828,7 @@ Uses the sphere-packing (Hamming) bound: `max_prefixes = 4^k / V(k, t)` where `V
 
 ### `08_oligo_assembly.R` — Universal oligo construction
 
-**File**: `R/08_oligo_assembly.R` (~155 lines)
+**File**: `R/08_oligo_assembly.R` (~185 lines)
 
 This module is remarkably concise — the simplicity is a direct benefit of the universal oligo architecture (no tile-type-specific logic).
 
@@ -879,9 +891,13 @@ sequences[idx] <- paste0(
 
 ### `09_wt_geneblock_design.R` — BsaI/BsmBI gene blocks
 
-**File**: `R/09_wt_geneblock_design.R` (~1250 lines)
+**File**: `R/09_wt_geneblock_design.R` (~1423 lines)
 
 This module designs the WT gene blocks that pair with oligos in Golden Gate reactions. All blocks include configurable flanking pads outside enzyme sites for efficient Type IIs cleavage at linear termini.
+
+#### `flag_borderline_overhangs()` — Near-Miss Detection
+
+Called at Step 9c in the pipeline (after gene block design and reaction fidelity recomputation). Checks all overhang pairs within each reaction for pairs at exactly `max_identity` threshold (e.g., 2/4 positional matches). These are technically allowed by OOGGA but represent the weakest permissible pairs. Both direct and RC identity are checked. Returns a data frame of flagged pairs for inclusion in the assembly report.
 
 #### Block Types
 
@@ -914,7 +930,7 @@ pad + BsaI_fwd + [gene content] + BsaI_rev + pad    (BsaI blocks)
 pad + BsmBI_fwd + [gene content] + BsmBI_rev + pad   (BsmBI blocks)
 ```
 
-Default pad: `"TTTT"` (4 nt). Configurable via `geneblock_flanking_pad` in config. NEB recommends ≥4 bp flanking for efficient Type IIs cleavage at linear fragment termini — the enzyme needs extra DNA to "grip onto" near the ends of linear dsDNA. The pad overhead (2 × pad length) is counted in block length calculations to stay within synthesis limits.
+Default pad: `"TGCATG"` (6 nt). Configurable via `geneblock_flanking_pad` in config. NEB recommends >=6 bp flanking for efficient Type IIs cleavage at linear fragment termini — the enzyme needs extra DNA to "grip onto" near the ends of linear dsDNA. The pad overhead (2 x pad length) is counted in block length calculations to stay within synthesis limits.
 
 #### Superblock Splitting
 
@@ -955,7 +971,7 @@ It contains:
 
 ### `10_qc_checks.R` — 17 validation checks
 
-**File**: `R/10_qc_checks.R` (373 lines)
+**File**: `R/10_qc_checks.R` (501 lines)
 
 #### `run_qc_checks()` → list with qc_pass (logical) and qc_report (data frame)
 
@@ -996,8 +1012,8 @@ This accounts for WT controls (1 per position) and optional synonymous variants.
 **Check 7 (single codon change)** excludes WT controls (their codon IS the WT codon by design) and verifies that the recorded `wt_codon` matches the actual gene codon at that position.
 
 **Things to verify:**
-- Check 10 uses an internal fidelity threshold of 0.80 (hardcoded in `SET_FIDELITY_WARNING_THRESHOLD`). This flags truly problematic overhangs rather than just non-ideal ones.
-- Check 13 (reaction fidelity) uses a minimum threshold of 0.80 for the entire SET fidelity (product of per-overhang fidelities). This is reasonable — even with 6 overhangs in a reaction, each would need ~0.97 individual fidelity for the set to be ≥0.80.
+- Check 10 uses an internal fidelity threshold of 0.80 (hardcoded inline in `10_qc_checks.R`). This flags truly problematic overhangs rather than just non-ideal ones. The former `SET_FIDELITY_WARNING_THRESHOLD` constant was removed from `constants.R`.
+- Check 13 (reaction fidelity) uses a minimum threshold of 0.80 for the entire SET fidelity (product of per-overhang fidelities), hardcoded inline in `10_qc_checks.R`. This is reasonable -- even with 6 overhangs in a reaction, each would need ~0.97 individual fidelity for the set to be >=0.80.
 
 ---
 
@@ -1005,11 +1021,11 @@ This accounts for WT controls (1 per position) and optional synonymous variants.
 
 ### `11_output.R` — CSV/FASTA file writer
 
-**File**: `R/11_output.R` (173 lines)
+**File**: `R/11_output.R` (203 lines)
 
 #### `write_outputs()` → list of file paths
 
-Writes 10 output files:
+Writes up to 11 output files:
 
 | # | File | Contents |
 |---|------|----------|
@@ -1023,6 +1039,7 @@ Writes 10 output files:
 | 8 | `{gene}_geneblock_order.fasta` | Gene block sequences in FASTA format |
 | 9 | `{gene}_sequences.fasta` | Original CDS, domesticated CDS, protein |
 | 10 | `{gene}_skipped_variants.csv` | Gene-edge variants skipped due to oh overlap |
+| 11 | `{gene}_pcr_primer_table.csv` | Per-tile PCR primer pairs (fwd/rev handles) — only written when PCR handles are configured |
 
 The sequences FASTA (#9) includes a domestication mutation count in the header — useful for traceability.
 
@@ -1034,7 +1051,7 @@ All CSV files use `readr::write_csv()` for consistent formatting.
 
 ### `12_report.R` — Wetlab-compatible Markdown assembly report
 
-**File**: `R/12_report.R` (~600 lines)
+**File**: `R/12_report.R` (~1045 lines)
 
 #### `generate_report()` → path to report file
 
@@ -1060,7 +1077,7 @@ The per-tile guide (#8) is the most operationally useful section — it tells a 
 
 ### `13_gg_simulator.R` — In-silico assembly verification
 
-**File**: `R/13_gg_simulator.R` (~400 lines)
+**File**: `R/13_gg_simulator.R` (~795 lines)
 
 #### Purpose
 
@@ -1131,11 +1148,11 @@ This catches off-by-one errors in overhang geometry that coarse verification (ha
 
 ### `run_pipeline.R` — Master entry point
 
-**File**: `run_pipeline.R` (487 lines)
+**File**: `run_pipeline.R` (607 lines)
 
 Usage: `Rscript run_pipeline.R config.yaml`
 
-The pipeline runs 12 steps with timing instrumentation:
+The pipeline runs 12+ steps with timing instrumentation:
 
 | Step | Function | Typical Time (GRIN2A, 1464 codons) |
 |------|----------|-------------------------------------|
@@ -1150,6 +1167,7 @@ The pipeline runs 12 steps with timing instrumentation:
 | 8 | `assemble_oligos()` | ~0.8s |
 | 9 | `design_wt_geneblocks()` | <1s |
 | 9b | Recompute reaction fidelity | <0.1s |
+| 9c | `flag_borderline_overhangs()` | <0.1s |
 | 10 | `run_qc_checks()` | <1s |
 | 10b | `simulate_pipeline_assembly()` | <5s |
 | 11 | `write_outputs()` | ~2s |
@@ -1213,6 +1231,10 @@ These 6-nt contexts are passed to `design_barcodes()` so that barcodes creating 
 
 After gene blocks are designed, the reaction fidelity is recomputed from actual block overhangs (not from the pre-computed SB boundaries which may include phantom overhangs from filtered split points).
 
+#### Step 9c: Borderline Overhang Flagging
+
+After fidelity recomputation, `flag_borderline_overhangs()` (from `09_wt_geneblock_design.R`) scans all per-reaction overhang pairs for near-misses at exactly the `max_identity` threshold. Flagged pairs are included in the assembly report as advisory warnings.
+
 ---
 
 ## Cross-Cutting Concerns
@@ -1234,7 +1256,7 @@ The pipeline uses a fail-fast approach:
 
 ### Testing
 
-Tests are in `tests/testthat/` with **5,278+ tests** (0 failures):
+Tests are in `tests/testthat/` with **346 test blocks** containing **~1,053 assertions** (0 failures):
 - **Unit tests**: Per-function tests with known inputs/outputs
 - **Integration tests**: Full pipeline on test genes (300 nt, 2100 nt)
 - **OOGGA DP tests**: `test-oogga-dp.R` — collision-aware boundary selection, two-OH SB model, beam search

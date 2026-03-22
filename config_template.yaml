@@ -73,6 +73,8 @@ upstream_cassette: ""
 # --- Oligo Synthesis ---
 max_oligo_length: 300                      # Twist oligo pool max (nt)
 max_geneblock_length: 1800                 # Gene fragment synthesis max (nt)
+# min_geneblock_length: 300                # Minimum gene block length (nt) to avoid synthesis issues.
+                                           # Blocks shorter than this trigger a warning.
 geneblock_flanking_pad: "TGCATG"           # Flanking bases beyond enzyme sites on gene blocks.
                                            # NEB recommends ≥6 bp for efficient Type IIs cleavage
                                            # at linear fragment termini. Set to "" to disable.
@@ -179,6 +181,16 @@ multi_k_search: true                         # Try multiple tile counts to find 
 dp_k_range: 5                                # Search K_ideal +/- dp_k_range tile counts (default 5).
                                              # Larger values explore more options but take longer.
                                              # Search stops early when avg score gain < 0.5%.
+overlap_codons: 6                            # Number of codons of overlap between adjacent tiles at
+                                             # boundaries (must be even, >= 2). Variants in the overlap
+                                             # zone appear in both tiles but are only mutable in one.
+# search_window_K: 15                        # Codon search window around ideal tile boundaries for
+                                             # overhang quality optimization. Larger = more options,
+                                             # slower. Rarely needs changing.
+# oogga_max_identity: 2                      # Max positional identity (out of 4) between overhang pairs
+                                             # before collision rejection. Lower = stricter filtering.
+# oogga_beam_width: 10                       # Beam search width for SB boundary DP. Higher = more
+                                             # exploration at the cost of speed.
 
 # --- Fixed Overhangs for 3-Enzyme Assembly ---
 # oh3: 4-nt BsmBI overhang at PolIII-barcode junction (same for all tiles).
@@ -217,3 +229,7 @@ simulation_samples_per_tile: 1             # Number of randomly sampled variants
 
 # --- Output ---
 output_dir: "output"                       # Directory for output files
+
+# --- Advanced / Debug ---
+# verbose_timing: false                    # Print per-step timing information to console.
+                                           # Useful for profiling large genes. Default: off.
