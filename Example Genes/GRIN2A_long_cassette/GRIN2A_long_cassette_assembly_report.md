@@ -1,6 +1,6 @@
 # DMS-GG Assembly Report: GRIN2A_long_cassette
 
-Generated: 2026-03-20 21:57:59
+Generated: 2026-03-21 08:14:31
 Pipeline: dms-gg-oligo-pipeline (3-Enzyme Architecture: BsaI + BsmBI + PaqCI)
 
 ---
@@ -13,10 +13,10 @@ Pipeline: dms-gg-oligo-pipeline (3-Enzyme Architecture: BsaI + BsmBI + PaqCI)
 | CDS length           | 4395 nt (1465 codons)                                                          |
 | Protein length       | 1464 aa                                                                        |
 | Number of tiles      | 24                                                                             |
-| Total variants       | 30597                                                                          |
-| Total oligos         | 305970                                                                         |
+| Total variants       | 30723                                                                          |
+| Total oligos         | 307230                                                                         |
 | Oligo length range   | 185-294 nt                                                                     |
-| Gene blocks to order | 58                                                                             |
+| Gene blocks to order | 59                                                                             |
 | Barcodes per variant | 10                                                                             |
 
 ## 2. Assembly Architecture Overview
@@ -44,7 +44,7 @@ Every oligo in the pool has the same layout regardless of tile position:
 
 ## 3. Oligo Pool Summary
 
-**Total oligos:** 305970 | **Length range:** 185-294 nt
+**Total oligos:** 307230 | **Length range:** 185-294 nt
 
 | Tile | Codons    | Oligos | Length |
 | ---- | --------- | ------ | ------ |
@@ -56,8 +56,8 @@ Every oligo in the pool has the same layout regardless of tile position:
 | 6    | 337-411   | 14490  | 281 nt |
 | 7    | 406-478   | 14070  | 275 nt |
 | 8    | 473-547   | 14490  | 281 nt |
-| 9    | 542-586   | 8400   | 191 nt |
-| 10   | 587-644   | 11340  | 230 nt |
+| 9    | 542-592   | 9450   | 209 nt |
+| 10   | 587-644   | 10920  | 230 nt |
 | 11   | 639-711   | 14070  | 275 nt |
 | 12   | 706-772   | 12810  | 257 nt |
 | 13   | 767-835   | 13230  | 263 nt |
@@ -66,8 +66,8 @@ Every oligo in the pool has the same layout regardless of tile position:
 | 16   | 944-986   | 7770   | 185 nt |
 | 17   | 981-1054  | 14280  | 278 nt |
 | 18   | 1049-1124 | 14700  | 284 nt |
-| 19   | 1119-1168 | 9450   | 206 nt |
-| 20   | 1169-1244 | 15120  | 284 nt |
+| 19   | 1119-1174 | 10500  | 224 nt |
+| 20   | 1169-1244 | 14700  | 284 nt |
 | 21   | 1239-1295 | 10710  | 227 nt |
 | 22   | 1290-1348 | 11130  | 233 nt |
 | 23   | 1343-1412 | 13440  | 266 nt |
@@ -91,8 +91,8 @@ Every oligo in the pool has the same layout regardless of tile position:
 
 | Statistic         | Value                              |
 | ----------------- | ---------------------------------- |
-| Total barcodes    | 305970                             |
-| Unique barcodes   | 305970                             |
+| Total barcodes    | 307230                             |
+| Unique barcodes   | 307230                             |
 | GC content range  | 35% - 65%                          |
 | GC content mean   | 48.5%                              |
 | Hamming guarantee | 100% cross-variant (prefix d >= 3) |
@@ -101,28 +101,28 @@ Every oligo in the pool has the same layout regardless of tile position:
 
 **Overall:** ISSUES FOUND
 
-| Check                     | Description                                                   | Result | Detail                                                                                                                                              |
-| ------------------------- | ------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| oligo_lengths             | All oligos within synthesis length limit                      | PASS   | Range: 185-294 nt (limit: 300)                                                                                                                      |
-| block_lengths             | All gene blocks within synthesis length limit                 | PASS   | Range: 34-1794 nt (limit: 1800)                                                                                                                     |
-| barcode_junction_sites    | No enzyme sites at barcode-context junctions                  | PASS   | 0 barcode(s) with junction enzyme sites (left='CACACC', right='AGAATG')                                                                             |
-| barcode_uniqueness        | All barcodes are unique                                       | PASS   | 305970 unique / 305970 total                                                                                                                        |
-| tile_coverage             | Tiles cover entire gene without gaps                          | PASS   | 4395 / 4395 nt covered                                                                                                                              |
-| variant_count             | Expected number of variants generated                         | PASS   | 30597 unique variants (expected: 30597 across 1457/1463 mutable positions; 27683 missense + 1457 nonsense + 1457 wt_control; 6 position(s) skipped) |
-| single_codon_change       | Each non-control variant differs by exactly one codon from WT | PASS   | 291400 / 291400 variants confirmed (WT controls excluded)                                                                                           |
-| oligo_gc_content          | Oligo GC content within reasonable range (25-75%)             | PASS   | GC range: 43.7-66.3% | 0 oligo(s) with extreme GC                                                                                                   |
-| domestication_complete    | Gene domesticated for all 3 enzymes (BsaI, BsmBI, PaqCI)      | PASS   | No enzyme sites in gene                                                                                                                             |
-| overhang_fidelity         | Tile boundary overhangs have adequate fidelity                | FAIL   | 21 tile(s) with low-fidelity boundary overhangs (<0.80)                                                                                             |
-| tile_manifests            | Per-tile assembly manifests complete                          | PASS   | 24 tile manifest(s) generated                                                                                                                       |
-| helper_plasmid            | Helper plasmid free of unintended BsmBI sites                 | PASS   | OK                                                                                                                                                  |
-| reaction_fidelity         | Per-reaction set-level overhang fidelity                      | PASS   | Min set fidelity: 0.9979 across 48 reactions | 0 reaction(s) below 0.90                                                                             |
-| barcode_poliii_term       | No barcodes contain PolIII terminator signal (TTTT)           | PASS   | 0 / 305970 barcode(s) contain TTTT                                                                                                                  |
-| barcode_hairpins          | No barcodes have hairpin stems > 3 bp                         | PASS   | 0 / 305970 barcode(s) have hairpin stems > 3 bp                                                                                                     |
-| barcode_dinuc_repeats     | No barcodes have dinucleotide repeats > 4 units               | PASS   | 0 / 305970 barcode(s) exceed 4 dinuc repeat units                                                                                                   |
-| barcode_tm_distribution   | Barcode Tm distribution (informational)                       | PASS   | Tm: median=53.3, range=[42.2, 65.7], sd=4 C                                                                                                         |
-| block_min_length          | All gene blocks above synthesis minimum length                | FAIL   | 12 block(s) below 300 nt minimum. Range: 34-1794 nt                                                                                                 |
-| cassette_fragment_lengths | Cassette fragments within synthesis limits                    | FAIL   | 2 cassette fragment(s). Range: 297-1587 nt. 0 over max, 1 under min.                                                                                |
-| sb_overhang_collisions    | Superblock boundary overhangs are unique (no collisions)      | PASS   | 5 SB boundary OH(s), all unique                                                                                                                     |
+| Check                     | Description                                                   | Result | Detail                                                                                                                       |
+| ------------------------- | ------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| oligo_lengths             | All oligos within synthesis length limit                      | PASS   | Range: 185-294 nt (limit: 300)                                                                                               |
+| block_lengths             | All gene blocks within synthesis length limit                 | FAIL   | Range: 72-1806 nt (limit: 1800)                                                                                              |
+| barcode_junction_sites    | No enzyme sites at barcode-context junctions                  | PASS   | 0 barcode(s) with junction enzyme sites (left='CACACC', right='AGAATG')                                                      |
+| barcode_uniqueness        | All barcodes are unique                                       | PASS   | 307230 unique / 307230 total                                                                                                 |
+| tile_coverage             | Tiles cover entire gene without gaps                          | PASS   | 4395 / 4395 nt covered                                                                                                       |
+| variant_count             | Expected number of variants generated                         | PASS   | 30723 unique variants (expected: 30723 across 1463/1463 mutable positions; 27797 missense + 1463 nonsense + 1463 wt_control) |
+| single_codon_change       | Each non-control variant differs by exactly one codon from WT | PASS   | 292600 / 292600 variants confirmed (WT controls excluded)                                                                    |
+| oligo_gc_content          | Oligo GC content within reasonable range (25-75%)             | PASS   | GC range: 43.7-66.3% | 0 oligo(s) with extreme GC                                                                            |
+| domestication_complete    | Gene domesticated for all 3 enzymes (BsaI, BsmBI, PaqCI)      | PASS   | No enzyme sites in gene                                                                                                      |
+| overhang_fidelity         | Tile boundary overhangs have adequate fidelity                | FAIL   | 21 tile(s) with low-fidelity boundary overhangs (<0.80)                                                                      |
+| tile_manifests            | Per-tile assembly manifests complete                          | PASS   | 24 tile manifest(s) generated                                                                                                |
+| helper_plasmid            | Helper plasmid free of unintended BsmBI sites                 | PASS   | OK                                                                                                                           |
+| reaction_fidelity         | Per-reaction set-level overhang fidelity                      | PASS   | Min set fidelity: 0.9979 across 48 reactions | 0 reaction(s) below 0.90                                                      |
+| barcode_poliii_term       | No barcodes contain PolIII terminator signal (TTTT)           | PASS   | 0 / 307230 barcode(s) contain TTTT                                                                                           |
+| barcode_hairpins          | No barcodes have hairpin stems > 3 bp                         | PASS   | 0 / 307230 barcode(s) have hairpin stems > 3 bp                                                                              |
+| barcode_dinuc_repeats     | No barcodes have dinucleotide repeats > 4 units               | PASS   | 0 / 307230 barcode(s) exceed 4 dinuc repeat units                                                                            |
+| barcode_tm_distribution   | Barcode Tm distribution (informational)                       | PASS   | Tm: median=53.3, range=[42.3, 65.7], sd=4 C                                                                                  |
+| block_min_length          | All gene blocks above synthesis minimum length                | FAIL   | 11 block(s) below 300 nt minimum. Range: 72-1806 nt                                                                          |
+| cassette_fragment_lengths | Cassette fragments within synthesis limits                    | FAIL   | 2 cassette fragment(s). Range: 297-1587 nt. 0 over max, 1 under min.                                                         |
+| sb_overhang_collisions    | Superblock boundary overhangs are unique (no collisions)      | PASS   | 5 SB boundary OH(s), all unique                                                                                              |
 
 ## 5b. Reaction Fidelity Summary
 
@@ -150,13 +150,217 @@ computed from the actual block overhangs after construction:
 | 17   | 4        | 1.0000            | 4         | 1.0000             |
 | 18   | 4        | 1.0000            | 4         | 1.0000             |
 | 19   | 4        | 1.0000            | 5         | 1.0000             |
-| 20   | 4        | 1.0000            | 5         | 0.9985             |
+| 20   | 4        | 1.0000            | 5         | 1.0000             |
 | 21   | 5        | 1.0000            | 4         | 1.0000             |
-| 22   | 5        | 1.0000            | 5         | 0.9985             |
+| 22   | 5        | 1.0000            | 4         | 0.9985             |
 | 23   | 5        | 1.0000            | 4         | 1.0000             |
 | 24   | 5        | 1.0000            | 3         | 1.0000             |
 
 **Min:** 0.9979 | **Max:** 1.0000 | **Mean:** 0.9998
+
+### 5c. Borderline Overhang Pairs
+
+The following overhang pairs are at exactly the max_identity threshold (2/4). They are compatible but represent the tightest margin before collision:
+
+| Tile | Reaction | OH A | OH B            | Identity | Type   |
+| ---- | -------- | ---- | --------------- | -------- | ------ |
+| 1    | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 1    | BsmBI    | CACC | CGAC            | 2/4      | direct |
+| 1    | BsmBI    | GAAA | TAAT            | 2/4      | direct |
+| 1    | BsmBI    | GAAA | TCAA            | 2/4      | direct |
+| 1    | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 2    | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 2    | BsaI     | AAGA | CTGA            | 2/4      | direct |
+| 2    | BsmBI    | CACC | GGAT (RC: ATCC) | 2/4      | RC     |
+| 2    | BsmBI    | GGAT | GAAA            | 2/4      | direct |
+| 2    | BsmBI    | GGAT | TAAT            | 2/4      | direct |
+| 2    | BsmBI    | GAAA | TAAT            | 2/4      | direct |
+| 2    | BsmBI    | GAAA | TCAA            | 2/4      | direct |
+| 2    | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 3    | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 3    | BsaI     | AAGA | ATCA            | 2/4      | direct |
+| 3    | BsaI     | AGAA | ATCA            | 2/4      | direct |
+| 3    | BsaI     | AGAA | ATCA (RC: TGAT) | 2/4      | RC     |
+| 3    | BsmBI    | CACC | GGAC (RC: GTCC) | 2/4      | RC     |
+| 3    | BsmBI    | GGAC | GAAA            | 2/4      | direct |
+| 3    | BsmBI    | GAAA | TAAT            | 2/4      | direct |
+| 3    | BsmBI    | GAAA | TCAA            | 2/4      | direct |
+| 3    | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 4    | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 4    | BsaI     | AAGA | AATG            | 2/4      | direct |
+| 4    | BsmBI    | CACC | CATT            | 2/4      | direct |
+| 4    | BsmBI    | CATT | TAAT            | 2/4      | direct |
+| 4    | BsmBI    | GAAA | TAAT            | 2/4      | direct |
+| 4    | BsmBI    | GAAA | TCAA            | 2/4      | direct |
+| 4    | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 5    | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 5    | BsaI     | AAGA | TTTC (RC: GAAA) | 2/4      | RC     |
+| 5    | BsaI     | AGAA | TTTC (RC: GAAA) | 2/4      | RC     |
+| 5    | BsmBI    | CACC | TACA            | 2/4      | direct |
+| 5    | BsmBI    | TACA | GAAA            | 2/4      | direct |
+| 5    | BsmBI    | TACA | TAAT            | 2/4      | direct |
+| 5    | BsmBI    | TACA | TCAA            | 2/4      | direct |
+| 5    | BsmBI    | TACA | TCAA (RC: TTGA) | 2/4      | RC     |
+| 5    | BsmBI    | GAAA | TAAT            | 2/4      | direct |
+| 5    | BsmBI    | GAAA | TCAA            | 2/4      | direct |
+| 5    | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 6    | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 6    | BsaI     | AAGA | TTTA (RC: TAAA) | 2/4      | RC     |
+| 6    | BsaI     | AGAA | TTTA (RC: TAAA) | 2/4      | RC     |
+| 6    | BsmBI    | CACC | CCTG (RC: CAGG) | 2/4      | RC     |
+| 6    | BsmBI    | GAAA | TAAT            | 2/4      | direct |
+| 6    | BsmBI    | GAAA | TCAA            | 2/4      | direct |
+| 6    | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 7    | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 7    | BsaI     | AGAA | CTCA (RC: TGAG) | 2/4      | RC     |
+| 7    | BsmBI    | CTAT | TAAT            | 2/4      | direct |
+| 7    | BsmBI    | GAAA | TAAT            | 2/4      | direct |
+| 7    | BsmBI    | GAAA | TCAA            | 2/4      | direct |
+| 7    | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 8    | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 8    | BsaI     | AAGA | TTTA (RC: TAAA) | 2/4      | RC     |
+| 8    | BsaI     | AGAA | TTTA (RC: TAAA) | 2/4      | RC     |
+| 8    | BsmBI    | TTCT | GAAA (RC: TTTC) | 2/4      | RC     |
+| 8    | BsmBI    | TTCT | TAAT            | 2/4      | direct |
+| 8    | BsmBI    | TTCT | TCAA (RC: TTGA) | 2/4      | RC     |
+| 8    | BsmBI    | GAAA | TAAT            | 2/4      | direct |
+| 8    | BsmBI    | GAAA | TCAA            | 2/4      | direct |
+| 8    | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 9    | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 9    | BsaI     | AGAA | GGCA            | 2/4      | direct |
+| 9    | BsmBI    | GAAA | TAAT            | 2/4      | direct |
+| 9    | BsmBI    | GAAA | TCAA            | 2/4      | direct |
+| 9    | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 10   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 10   | BsaI     | AAGA | AACT            | 2/4      | direct |
+| 10   | BsaI     | AGAA | AACT (RC: AGTT) | 2/4      | RC     |
+| 10   | BsmBI    | CACC | TAGC            | 2/4      | direct |
+| 10   | BsmBI    | TAGC | TAAT            | 2/4      | direct |
+| 10   | BsmBI    | TAGC | TCAA (RC: TTGA) | 2/4      | RC     |
+| 10   | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 11   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 11   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 11   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 11   | BsaI     | AGAA | GTCA (RC: TGAC) | 2/4      | RC     |
+| 11   | BsaI     | GAAA | GTCA            | 2/4      | direct |
+| 11   | BsmBI    | GAAA | TAAT            | 2/4      | direct |
+| 11   | BsmBI    | GAAA | TCAA            | 2/4      | direct |
+| 11   | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 12   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 12   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 12   | BsaI     | AAGA | ACCA            | 2/4      | direct |
+| 12   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 12   | BsaI     | AGAA | ACCA            | 2/4      | direct |
+| 12   | BsmBI    | CACC | GAAG (RC: CTTC) | 2/4      | RC     |
+| 12   | BsmBI    | GAAG | TAAT            | 2/4      | direct |
+| 12   | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 13   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 13   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 13   | BsaI     | AAGA | AAAG            | 2/4      | direct |
+| 13   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 13   | BsaI     | AGAA | AAAG            | 2/4      | direct |
+| 13   | BsaI     | GAAA | AAAG            | 2/4      | direct |
+| 13   | BsmBI    | CACC | CTTC            | 2/4      | direct |
+| 13   | BsmBI    | CTTC | TAAT (RC: ATTA) | 2/4      | RC     |
+| 13   | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 14   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 14   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 14   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 14   | BsaI     | GAAA | CTTA (RC: TAAG) | 2/4      | RC     |
+| 14   | BsmBI    | CACC | TTCC            | 2/4      | direct |
+| 14   | BsmBI    | TTCC | TCAA (RC: TTGA) | 2/4      | RC     |
+| 14   | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 15   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 15   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 15   | BsaI     | AAGA | TCAG (RC: CTGA) | 2/4      | RC     |
+| 15   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 15   | BsmBI    | CTTT | TAAT (RC: ATTA) | 2/4      | RC     |
+| 15   | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 16   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 16   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 16   | BsaI     | AAGA | TCAG (RC: CTGA) | 2/4      | RC     |
+| 16   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 16   | BsmBI    | TCTT | TAAT            | 2/4      | direct |
+| 16   | BsmBI    | TCTT | TCAA            | 2/4      | direct |
+| 16   | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 17   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 17   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 17   | BsaI     | AAGA | CAGG            | 2/4      | direct |
+| 17   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 17   | BsmBI    | AGAA | TAAT (RC: ATTA) | 2/4      | RC     |
+| 17   | BsmBI    | AGAA | TCAA            | 2/4      | direct |
+| 17   | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 18   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 18   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 18   | BsaI     | AAGA | CCTA (RC: TAGG) | 2/4      | RC     |
+| 18   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 18   | BsmBI    | CACC | GAAG (RC: CTTC) | 2/4      | RC     |
+| 18   | BsmBI    | GAAG | TAAT            | 2/4      | direct |
+| 18   | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 19   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 19   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 19   | BsaI     | AAGA | ACTA            | 2/4      | direct |
+| 19   | BsaI     | AAGA | ACTA (RC: TAGT) | 2/4      | RC     |
+| 19   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 19   | BsaI     | AGAA | ACTA            | 2/4      | direct |
+| 19   | BsmBI    | CACC | CTCA            | 2/4      | direct |
+| 19   | BsmBI    | TAAT | TCAA            | 2/4      | direct |
+| 19   | BsmBI    | TAAT | CTCA (RC: TGAG) | 2/4      | RC     |
+| 19   | BsmBI    | TCAA | CTCA (RC: TGAG) | 2/4      | RC     |
+| 20   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 20   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 20   | BsaI     | AAGA | CGGA            | 2/4      | direct |
+| 20   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 20   | BsaI     | AGAA | CGGA            | 2/4      | direct |
+| 20   | BsmBI    | CACC | GAAC            | 2/4      | direct |
+| 20   | BsmBI    | CACC | CTCA            | 2/4      | direct |
+| 20   | BsmBI    | CACC | CCCT            | 2/4      | direct |
+| 20   | BsmBI    | CTCA | CCCT            | 2/4      | direct |
+| 20   | BsmBI    | CTCA | TCAA (RC: TTGA) | 2/4      | RC     |
+| 21   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 21   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 21   | BsaI     | AAGA | TAAT (RC: ATTA) | 2/4      | RC     |
+| 21   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 21   | BsaI     | AGAA | TAAT (RC: ATTA) | 2/4      | RC     |
+| 21   | BsaI     | AGAA | TGCC (RC: GGCA) | 2/4      | RC     |
+| 21   | BsaI     | GAAA | TAAT            | 2/4      | direct |
+| 21   | BsaI     | GAAA | TGCC (RC: GGCA) | 2/4      | RC     |
+| 21   | BsmBI    | CACC | CATT            | 2/4      | direct |
+| 21   | BsmBI    | CACC | CCCT            | 2/4      | direct |
+| 21   | BsmBI    | CATT | CCCT            | 2/4      | direct |
+| 22   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 22   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 22   | BsaI     | AAGA | TAAT (RC: ATTA) | 2/4      | RC     |
+| 22   | BsaI     | AAGA | CATT (RC: AATG) | 2/4      | RC     |
+| 22   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 22   | BsaI     | AGAA | TAAT (RC: ATTA) | 2/4      | RC     |
+| 22   | BsaI     | GAAA | TAAT            | 2/4      | direct |
+| 22   | BsaI     | TAAT | CATT            | 2/4      | direct |
+| 22   | BsmBI    | CACC | TCTG (RC: CAGA) | 2/4      | RC     |
+| 22   | BsmBI    | TCTG | TCAA            | 2/4      | direct |
+| 23   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 23   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 23   | BsaI     | AAGA | TAAT (RC: ATTA) | 2/4      | RC     |
+| 23   | BsaI     | AAGA | CTTT (RC: AAAG) | 2/4      | RC     |
+| 23   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 23   | BsaI     | AGAA | TAAT (RC: ATTA) | 2/4      | RC     |
+| 23   | BsaI     | AGAA | CTTT (RC: AAAG) | 2/4      | RC     |
+| 23   | BsaI     | GAAA | TAAT            | 2/4      | direct |
+| 23   | BsaI     | GAAA | CTTT (RC: AAAG) | 2/4      | RC     |
+| 23   | BsaI     | TAAT | CTTT (RC: AAAG) | 2/4      | RC     |
+| 23   | BsmBI    | CTGT | TCAA (RC: TTGA) | 2/4      | RC     |
+| 23   | BsmBI    | TTTA | TCAA            | 2/4      | direct |
+| 24   | BsaI     | AAGA | AGAA            | 2/4      | direct |
+| 24   | BsaI     | AAGA | GAAA            | 2/4      | direct |
+| 24   | BsaI     | AAGA | TAAT (RC: ATTA) | 2/4      | RC     |
+| 24   | BsaI     | AAGA | TCAA (RC: TTGA) | 2/4      | RC     |
+| 24   | BsaI     | AGAA | GAAA            | 2/4      | direct |
+| 24   | BsaI     | AGAA | TAAT (RC: ATTA) | 2/4      | RC     |
+| 24   | BsaI     | AGAA | TCAA            | 2/4      | direct |
+| 24   | BsaI     | GAAA | TAAT            | 2/4      | direct |
+| 24   | BsaI     | GAAA | TCAA            | 2/4      | direct |
+| 24   | BsaI     | TAAT | TCAA            | 2/4      | direct |
+| 24   | BsmBI    | AGAA | TCAA            | 2/4      | direct |
 
 ## 6. Fixed Overhangs & Helper Plasmid
 
@@ -593,16 +797,16 @@ upstream_cassette = (none)
 
 ---
 
-### Tile 9 of 24 -- Codons 542-586 (135 nt)
+### Tile 9 of 24 -- Codons 542-592 (153 nt)
 
 **Boundary overhangs:**
 
 | Position          | Sequence | Fidelity |
 | ----------------- | -------- | -------- |
 | oh1 (5' boundary) | GGCA     | 0.5273   |
-| oh2 (3' boundary) | CAGA     | 0.8175   |
+| oh2 (3' boundary) | GAAA     | 0.8745   |
 
-**Variants:** 8400 mutations, 8400 oligos
+**Variants:** 9450 mutations, 9450 oligos
 
 #### BsaI Level 1 Reaction (37C)
 
@@ -611,7 +815,7 @@ upstream_cassette = (none)
 | #   | Component       | Part name             | Length  | 5' OH | 3' OH |
 | --- | --------------- | --------------------- | ------- | ----- | ----- |
 | 1   | 5'WT gene block | bsai_5wt_tile9        | 1657 nt | AAGA  | GGCA  |
-| 2   | Oligo pool      | Tile 9 (8400 oligos)  | 191 nt  | GGCA  | AGAA  |
+| 2   | Oligo pool      | Tile 9 (9450 oligos)  | 209 nt  | GGCA  | AGAA  |
 | 3   | Helper plasmid  | helper_plasmid_insert | --      | --    | --    |
 | 4   | Enzyme + buffer | BsaI-HFv2 + CutSmart  | --      | --    | --    |
 
@@ -629,14 +833,14 @@ upstream_cassette = (none)
 | #   | Component         | Part name                 | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile9_sub1      | 1794 nt | CAGA  | TAAT  |
+| 2   | 3'WT block        | bsmbi_3wt_tile1_sub2      | 1776 nt | GAAA  | TAAT  |
 | 3   | 3'WT block        | bsmbi_3wt_tile1_sub3      | 1226 nt | TAAT  | TCAA  |
 | 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub4 | 1587 nt | TCAA  | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CAGA]----3'WT sub1----[TAAT]----3'WT sub2----[TCAA]----3'WT+PolIII sub3----[CACC]
-   CAGA                   TAAT                   TCAA                          CACC 
+  [GAAA]----3'WT sub1----[TAAT]----3'WT sub2----[TCAA]----3'WT+PolIII sub3----[CACC]
+   GAAA                   TAAT                   TCAA                          CACC 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -652,7 +856,7 @@ upstream_cassette = (none)
 | oh1 (5' boundary) | AACT     | 0.6635   |
 | oh2 (3' boundary) | TAGC     | 0.7011   |
 
-**Variants:** 11340 mutations, 11340 oligos
+**Variants:** 10920 mutations, 10920 oligos
 
 #### BsaI Level 1 Reaction (37C)
 
@@ -661,7 +865,7 @@ upstream_cassette = (none)
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
 | 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | Oligo pool      | Tile 10 (11340 oligos) | 230 nt  | AACT  | AGAA  |
+| 2   | Oligo pool      | Tile 10 (10920 oligos) | 230 nt  | AACT  | AGAA  |
 | 3   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 4   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
@@ -710,15 +914,15 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile11_sub2   | 186 nt  | AACT  | GTCA  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile11_sub2   | 172 nt  | GAAA  | GTCA  |
 | 3   | Oligo pool      | Tile 11 (14070 oligos) | 275 nt  | GTCA  | AGAA  |
 | 4   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[GTCA]----oligo+BC----[AGAA]
-   AAGA                   AACT                   GTCA                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[GTCA]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   GTCA                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -761,15 +965,15 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile12_sub2   | 387 nt  | AACT  | ACCA  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile12_sub2   | 373 nt  | GAAA  | ACCA  |
 | 3   | Oligo pool      | Tile 12 (12810 oligos) | 257 nt  | ACCA  | AGAA  |
 | 4   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[ACCA]----oligo+BC----[AGAA]
-   AAGA                   AACT                   ACCA                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[ACCA]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   ACCA                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -812,15 +1016,15 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile13_sub2   | 570 nt  | AACT  | AAAG  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile13_sub2   | 556 nt  | GAAA  | AAAG  |
 | 3   | Oligo pool      | Tile 13 (13230 oligos) | 263 nt  | AAAG  | AGAA  |
 | 4   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[AAAG]----oligo+BC----[AGAA]
-   AAGA                   AACT                   AAAG                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[AAAG]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   AAAG                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -863,15 +1067,15 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile14_sub2   | 759 nt  | AACT  | CTTA  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile14_sub2   | 745 nt  | GAAA  | CTTA  |
 | 3   | Oligo pool      | Tile 14 (14700 oligos) | 284 nt  | CTTA  | AGAA  |
 | 4   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[CTTA]----oligo+BC----[AGAA]
-   AAGA                   AACT                   CTTA                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[CTTA]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   CTTA                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -914,15 +1118,15 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name             | Length  | 5' OH | 3' OH |
 | --- | --------------- | --------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10       | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile15_sub2  | 969 nt  | AACT  | TCAG  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1  | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile15_sub2  | 955 nt  | GAAA  | TCAG  |
 | 3   | Oligo pool      | Tile 15 (9240 oligos) | 206 nt  | TCAG  | AGAA  |
 | 4   | Helper plasmid  | helper_plasmid_insert | --      | --    | --    |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart  | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[TCAG]----oligo+BC----[AGAA]
-   AAGA                   AACT                   TCAG                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[TCAG]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   TCAG                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -965,15 +1169,15 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name             | Length  | 5' OH | 3' OH |
 | --- | --------------- | --------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10       | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile16_sub2  | 1101 nt | AACT  | TCAG  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1  | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile16_sub2  | 1087 nt | GAAA  | TCAG  |
 | 3   | Oligo pool      | Tile 16 (7770 oligos) | 185 nt  | TCAG  | AGAA  |
 | 4   | Helper plasmid  | helper_plasmid_insert | --      | --    | --    |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart  | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[TCAG]----oligo+BC----[AGAA]
-   AAGA                   AACT                   TCAG                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[TCAG]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   TCAG                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -1016,15 +1220,15 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile17_sub2   | 1212 nt | AACT  | CAGG  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile17_sub2   | 1198 nt | GAAA  | CAGG  |
 | 3   | Oligo pool      | Tile 17 (14280 oligos) | 278 nt  | CAGG  | AGAA  |
 | 4   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[CAGG]----oligo+BC----[AGAA]
-   AAGA                   AACT                   CAGG                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[CAGG]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   CAGG                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -1067,15 +1271,15 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile18_sub2   | 1416 nt | AACT  | CCTA  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile18_sub2   | 1402 nt | GAAA  | CCTA  |
 | 3   | Oligo pool      | Tile 18 (14700 oligos) | 284 nt  | CCTA  | AGAA  |
 | 4   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[CCTA]----oligo+BC----[AGAA]
-   AAGA                   AACT                   CCTA                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[CCTA]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   CCTA                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -1101,32 +1305,32 @@ upstream_cassette = (none)
 
 ---
 
-### Tile 19 of 24 -- Codons 1119-1168 (150 nt)
+### Tile 19 of 24 -- Codons 1119-1174 (168 nt)
 
 **Boundary overhangs:**
 
 | Position          | Sequence | Fidelity |
 | ----------------- | -------- | -------- |
 | oh1 (5' boundary) | ACTA     | 0.7946   |
-| oh2 (3' boundary) | GAAC     | 0.6079   |
+| oh2 (3' boundary) | TAAT     | 0.8165   |
 
-**Variants:** 9450 mutations, 9450 oligos
+**Variants:** 10500 mutations, 10500 oligos
 
 #### BsaI Level 1 Reaction (37C)
 
 **Components:**
 
-| #   | Component       | Part name             | Length  | 5' OH | 3' OH |
-| --- | --------------- | --------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10       | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile19_sub2  | 1626 nt | AACT  | ACTA  |
-| 3   | Oligo pool      | Tile 19 (9450 oligos) | 206 nt  | ACTA  | AGAA  |
-| 4   | Helper plasmid  | helper_plasmid_insert | --      | --    | --    |
-| 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart  | --      | --    | --    |
+| #   | Component       | Part name              | Length  | 5' OH | 3' OH |
+| --- | --------------- | ---------------------- | ------- | ----- | ----- |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile19_sub2   | 1612 nt | GAAA  | ACTA  |
+| 3   | Oligo pool      | Tile 19 (10500 oligos) | 224 nt  | ACTA  | AGAA  |
+| 4   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
+| 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[ACTA]----oligo+BC----[AGAA]
-   AAGA                   AACT                   ACTA                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[ACTA]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   ACTA                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -1138,16 +1342,16 @@ upstream_cassette = (none)
 | #   | Component         | Part name                 | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile19_sub1     | 360 nt  | GAAC  | TCAA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile19_sub2     | 34 nt   | TCAA  | ATTA  |
-| 4   | 3'WT block        | bsmbi_3wt_tile19_sub3     | 234 nt  | ATTA  | AGGT  |
+| 2   | 3'WT block        | bsmbi_3wt_tile19_sub1     | 342 nt  | TAAT  | TCAA  |
+| 3   | 3'WT block        | bsmbi_3wt_tile19_sub2     | 195 nt  | TCAA  | CTCA  |
+| 4   | 3'WT block        | bsmbi_3wt_tile19_sub3     | 72 nt   | CTCA  | AGGT  |
 | 5   | 3'WT block        | bsmbi_3wt_tile19_sub4     | 707 nt  | AGGT  | TCAA  |
 | 6   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub4 | 1587 nt | TCAA  | CACC  |
 | 7   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [GAAC]----3'WT sub1----[TCAA]----3'WT sub2----[ATTA]----3'WT sub3----[AGGT]----3'WT sub4----[TCAA]----3'WT+PolIII sub5----[CACC]
-   GAAC                   TCAA                   ATTA                   AGGT                   TCAA                          CACC 
+  [TAAT]----3'WT sub1----[TCAA]----3'WT sub2----[CTCA]----3'WT sub3----[AGGT]----3'WT sub4----[TCAA]----3'WT+PolIII sub5----[CACC]
+   TAAT                   TCAA                   CTCA                   AGGT                   TCAA                          CACC 
 ```
 
 **Set fidelity:** 1.0000 (5 overhangs)
@@ -1163,7 +1367,7 @@ upstream_cassette = (none)
 | oh1 (5' boundary) | CGGA     | 0.6609   |
 | oh2 (3' boundary) | GAAC     | 0.6079   |
 
-**Variants:** 15120 mutations, 15120 oligos
+**Variants:** 14700 mutations, 14700 oligos
 
 #### BsaI Level 1 Reaction (37C)
 
@@ -1171,15 +1375,15 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile20_sub2   | 1776 nt | AACT  | CGGA  |
-| 3   | Oligo pool      | Tile 20 (15120 oligos) | 284 nt  | CGGA  | AGAA  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile20_sub2   | 1762 nt | GAAA  | CGGA  |
+| 3   | Oligo pool      | Tile 20 (14700 oligos) | 284 nt  | CGGA  | AGAA  |
 | 4   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 5   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[CGGA]----oligo+BC----[AGAA]
-   AAGA                   AACT                   CGGA                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[CGGA]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   CGGA                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -1192,17 +1396,17 @@ upstream_cassette = (none)
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
 | 2   | 3'WT block        | bsmbi_3wt_tile20_sub1     | 297 nt  | GAAC  | CTCA  |
-| 3   | 3'WT block        | bsmbi_3wt_tile20_sub2     | 342 nt  | CTCA  | TAAT  |
-| 4   | 3'WT block        | bsmbi_3wt_tile20_sub3     | 437 nt  | TAAT  | TCAA  |
+| 3   | 3'WT block        | bsmbi_3wt_tile20_sub2     | 129 nt  | CTCA  | CCCT  |
+| 4   | 3'WT block        | bsmbi_3wt_tile20_sub3     | 650 nt  | CCCT  | TCAA  |
 | 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub4 | 1587 nt | TCAA  | CACC  |
 | 6   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [GAAC]----3'WT sub1----[CTCA]----3'WT sub2----[TAAT]----3'WT sub3----[TCAA]----3'WT+PolIII sub4----[CACC]
-   GAAC                   CTCA                   TAAT                   TCAA                          CACC 
+  [GAAC]----3'WT sub1----[CTCA]----3'WT sub2----[CCCT]----3'WT sub3----[TCAA]----3'WT+PolIII sub4----[CACC]
+   GAAC                   CTCA                   CCCT                   TCAA                          CACC 
 ```
 
-**Set fidelity:** 0.9985 (5 overhangs)
+**Set fidelity:** 1.0000 (5 overhangs)
 
 ---
 
@@ -1223,16 +1427,16 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile20_sub2   | 1776 nt | AACT  | CGGA  |
-| 3   | 5'WT gene block | bsai_5wt_tile21_sub3   | 240 nt  | CGGA  | TGCC  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile21_sub2   | 1776 nt | GAAA  | TAAT  |
+| 3   | 5'WT gene block | bsai_5wt_tile21_sub3   | 226 nt  | TAAT  | TGCC  |
 | 4   | Oligo pool      | Tile 21 (10710 oligos) | 227 nt  | TGCC  | AGAA  |
 | 5   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 6   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[CGGA]----5'WT sub3----[TGCC]----oligo+BC----[AGAA]
-   AAGA                   AACT                   CGGA                   TGCC                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[TAAT]----5'WT sub3----[TGCC]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   TAAT                   TGCC                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (5 overhangs)
@@ -1244,14 +1448,14 @@ upstream_cassette = (none)
 | #   | Component         | Part name                 | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile21_sub1     | 456 nt  | CATT  | TAAT  |
-| 3   | 3'WT block        | bsmbi_3wt_tile20_sub3     | 437 nt  | TAAT  | TCAA  |
+| 2   | 3'WT block        | bsmbi_3wt_tile21_sub1     | 303 nt  | CATT  | CCCT  |
+| 3   | 3'WT block        | bsmbi_3wt_tile21_sub2     | 590 nt  | CCCT  | TCAA  |
 | 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub4 | 1587 nt | TCAA  | CACC  |
 | 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [CATT]----3'WT sub1----[TAAT]----3'WT sub2----[TCAA]----3'WT+PolIII sub3----[CACC]
-   CATT                   TAAT                   TCAA                          CACC 
+  [CATT]----3'WT sub1----[CCCT]----3'WT sub2----[TCAA]----3'WT+PolIII sub3----[CACC]
+   CATT                   CCCT                   TCAA                          CACC 
 ```
 
 **Set fidelity:** 1.0000 (4 overhangs)
@@ -1275,16 +1479,16 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile20_sub2   | 1776 nt | AACT  | CGGA  |
-| 3   | 5'WT gene block | bsai_5wt_tile22_sub3   | 393 nt  | CGGA  | CATT  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile21_sub2   | 1776 nt | GAAA  | TAAT  |
+| 3   | 5'WT gene block | bsai_5wt_tile22_sub3   | 379 nt  | TAAT  | CATT  |
 | 4   | Oligo pool      | Tile 22 (11130 oligos) | 233 nt  | CATT  | AGAA  |
 | 5   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 6   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[CGGA]----5'WT sub3----[CATT]----oligo+BC----[AGAA]
-   AAGA                   AACT                   CGGA                   CATT                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[TAAT]----5'WT sub3----[CATT]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   TAAT                   CATT                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (5 overhangs)
@@ -1296,18 +1500,17 @@ upstream_cassette = (none)
 | #   | Component         | Part name                 | Length  | 5' OH | 3' OH |
 | --- | ----------------- | ------------------------- | ------- | ----- | ----- |
 | 1   | BsaI product      | (in helper plasmid)       | --      | --    | --    |
-| 2   | 3'WT block        | bsmbi_3wt_tile22_sub1     | 297 nt  | TCTG  | TAAT  |
-| 3   | 3'WT block        | bsmbi_3wt_tile22_sub2     | 34 nt   | TAAT  | CCCT  |
-| 4   | 3'WT block        | bsmbi_3wt_tile22_sub3     | 590 nt  | CCCT  | TCAA  |
-| 5   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub4 | 1587 nt | TCAA  | CACC  |
-| 6   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
+| 2   | 3'WT block        | bsmbi_3wt_tile22_sub1     | 342 nt  | TCTG  | ACGC  |
+| 3   | 3'WT block        | bsmbi_3wt_tile22_sub2     | 392 nt  | ACGC  | TCAA  |
+| 4   | 3'WT+PolIII block | bsmbi_cassette_tile1_sub4 | 1587 nt | TCAA  | CACC  |
+| 5   | Enzyme + buffer   | BsmBI-v2 + NEBuffer r3.1  | --      | --    | --    |
 
 ```
-  [TCTG]----3'WT sub1----[TAAT]----3'WT sub2----[CCCT]----3'WT sub3----[TCAA]----3'WT+PolIII sub4----[CACC]
-   TCTG                   TAAT                   CCCT                   TCAA                          CACC 
+  [TCTG]----3'WT sub1----[ACGC]----3'WT sub2----[TCAA]----3'WT+PolIII sub3----[CACC]
+   TCTG                   ACGC                   TCAA                          CACC 
 ```
 
-**Set fidelity:** 0.9985 (5 overhangs)
+**Set fidelity:** 0.9985 (4 overhangs)
 
 ---
 
@@ -1328,16 +1531,16 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile20_sub2   | 1776 nt | AACT  | CGGA  |
-| 3   | 5'WT gene block | bsai_5wt_tile23_sub3   | 552 nt  | CGGA  | CTTT  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile21_sub2   | 1776 nt | GAAA  | TAAT  |
+| 3   | 5'WT gene block | bsai_5wt_tile23_sub3   | 538 nt  | TAAT  | CTTT  |
 | 4   | Oligo pool      | Tile 23 (13440 oligos) | 266 nt  | CTTT  | AGAA  |
 | 5   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 6   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[CGGA]----5'WT sub3----[CTTT]----oligo+BC----[AGAA]
-   AAGA                   AACT                   CGGA                   CTTT                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[TAAT]----5'WT sub3----[CTTT]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   TAAT                   CTTT                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (5 overhangs)
@@ -1380,16 +1583,16 @@ upstream_cassette = (none)
 
 | #   | Component       | Part name              | Length  | 5' OH | 3' OH |
 | --- | --------------- | ---------------------- | ------- | ----- | ----- |
-| 1   | 5'WT gene block | bsai_5wt_tile10        | 1792 nt | AAGA  | AACT  |
-| 2   | 5'WT gene block | bsai_5wt_tile20_sub2   | 1776 nt | AACT  | CGGA  |
-| 3   | 5'WT gene block | bsai_5wt_tile24_sub3   | 744 nt  | CGGA  | TCAA  |
+| 1   | 5'WT gene block | bsai_5wt_tile11_sub1   | 1806 nt | AAGA  | GAAA  |
+| 2   | 5'WT gene block | bsai_5wt_tile21_sub2   | 1776 nt | GAAA  | TAAT  |
+| 3   | 5'WT gene block | bsai_5wt_tile24_sub3   | 730 nt  | TAAT  | TCAA  |
 | 4   | Oligo pool      | Tile 24 (11550 oligos) | 289 nt  | TCAA  | AGAA  |
 | 5   | Helper plasmid  | helper_plasmid_insert  | --      | --    | --    |
 | 6   | Enzyme + buffer | BsaI-HFv2 + CutSmart   | --      | --    | --    |
 
 ```
-  [AAGA]----5'WT sub1----[AACT]----5'WT sub2----[CGGA]----5'WT sub3----[TCAA]----oligo+BC----[AGAA]
-   AAGA                   AACT                   CGGA                   TCAA                  AGAA 
+  [AAGA]----5'WT sub1----[GAAA]----5'WT sub2----[TAAT]----5'WT sub3----[TCAA]----oligo+BC----[AGAA]
+   AAGA                   GAAA                   TAAT                   TCAA                  AGAA 
 ```
 
 **Set fidelity:** 1.0000 (5 overhangs)
@@ -1441,26 +1644,28 @@ into the destination backbone.
 Order these gene blocks as synthesized gene fragments (e.g., Twist gene fragments, IDT gBlocks).
 Gene blocks are synthesized once and reused across experiments.
 
-**Total blocks:** 58
+**Total blocks:** 59
 
 | Block name                 | Length (nt) | Enzyme type | Gene region                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | -------------------------- | ----------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| bsai_5wt_tile10            | 1792        | BsaI        | 5wt_tile10;5wt_tile11_sub1;5wt_tile12_sub1;5wt_tile13_sub1;5wt_tile14_sub1;5wt_tile15_sub1;5wt_tile16_sub1;5wt_tile17_sub1;5wt_tile18_sub1;5wt_tile19_sub1;5wt_tile20_sub1;5wt_tile21_sub1;5wt_tile22_sub1;5wt_tile23_sub1;5wt_tile24_sub1                                                                                                                                                                                                                                                                                             |
-| bsai_5wt_tile11_sub2       | 186         | BsaI        | 5wt_tile11_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile12_sub2       | 387         | BsaI        | 5wt_tile12_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile13_sub2       | 570         | BsaI        | 5wt_tile13_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile14_sub2       | 759         | BsaI        | 5wt_tile14_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile15_sub2       | 969         | BsaI        | 5wt_tile15_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile16_sub2       | 1101        | BsaI        | 5wt_tile16_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile17_sub2       | 1212        | BsaI        | 5wt_tile17_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile18_sub2       | 1416        | BsaI        | 5wt_tile18_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile19_sub2       | 1626        | BsaI        | 5wt_tile19_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile10            | 1792        | BsaI        | 5wt_tile10                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| bsai_5wt_tile11_sub1       | 1806        | BsaI        | 5wt_tile11_sub1;5wt_tile12_sub1;5wt_tile13_sub1;5wt_tile14_sub1;5wt_tile15_sub1;5wt_tile16_sub1;5wt_tile17_sub1;5wt_tile18_sub1;5wt_tile19_sub1;5wt_tile20_sub1;5wt_tile21_sub1;5wt_tile22_sub1;5wt_tile23_sub1;5wt_tile24_sub1                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile11_sub2       | 172         | BsaI        | 5wt_tile11_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile12_sub2       | 373         | BsaI        | 5wt_tile12_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile13_sub2       | 556         | BsaI        | 5wt_tile13_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile14_sub2       | 745         | BsaI        | 5wt_tile14_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile15_sub2       | 955         | BsaI        | 5wt_tile15_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile16_sub2       | 1087        | BsaI        | 5wt_tile16_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile17_sub2       | 1198        | BsaI        | 5wt_tile17_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile18_sub2       | 1402        | BsaI        | 5wt_tile18_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile19_sub2       | 1612        | BsaI        | 5wt_tile19_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | bsai_5wt_tile2             | 250         | BsaI        | 5wt_tile2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| bsai_5wt_tile20_sub2       | 1776        | BsaI        | 5wt_tile20_sub2;5wt_tile21_sub2;5wt_tile22_sub2;5wt_tile23_sub2;5wt_tile24_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile21_sub3       | 240         | BsaI        | 5wt_tile21_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile22_sub3       | 393         | BsaI        | 5wt_tile22_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile23_sub3       | 552         | BsaI        | 5wt_tile23_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsai_5wt_tile24_sub3       | 744         | BsaI        | 5wt_tile24_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile20_sub2       | 1762        | BsaI        | 5wt_tile20_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile21_sub2       | 1776        | BsaI        | 5wt_tile21_sub2;5wt_tile22_sub2;5wt_tile23_sub2;5wt_tile24_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile21_sub3       | 226         | BsaI        | 5wt_tile21_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile22_sub3       | 379         | BsaI        | 5wt_tile22_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile23_sub3       | 538         | BsaI        | 5wt_tile23_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsai_5wt_tile24_sub3       | 730         | BsaI        | 5wt_tile24_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | bsai_5wt_tile3             | 433         | BsaI        | 5wt_tile3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | bsai_5wt_tile4             | 637         | BsaI        | 5wt_tile4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | bsai_5wt_tile5             | 847         | BsaI        | 5wt_tile5                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -1469,7 +1674,7 @@ Gene blocks are synthesized once and reused across experiments.
 | bsai_5wt_tile8             | 1450        | BsaI        | 5wt_tile8                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | bsai_5wt_tile9             | 1657        | BsaI        | 5wt_tile9                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | bsmbi_3wt_tile1_sub1       | 1572        | BsmBI       | 3wt_tile1_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| bsmbi_3wt_tile1_sub2       | 1776        | BsmBI       | 3wt_tile1_sub2;3wt_tile2_sub2;3wt_tile3_sub2;3wt_tile4_sub2;3wt_tile5_sub2;3wt_tile6_sub2;3wt_tile7_sub2;3wt_tile8_sub2                                                                                                                                                                                                                                                                                                                                                                                                                |
+| bsmbi_3wt_tile1_sub2       | 1776        | BsmBI       | 3wt_tile1_sub2;3wt_tile2_sub2;3wt_tile3_sub2;3wt_tile4_sub2;3wt_tile5_sub2;3wt_tile6_sub2;3wt_tile7_sub2;3wt_tile8_sub2;3wt_tile9_sub1                                                                                                                                                                                                                                                                                                                                                                                                 |
 | bsmbi_3wt_tile1_sub3       | 1226        | BsmBI       | 3wt_tile1_sub3;3wt_tile2_sub3;3wt_tile3_sub3;3wt_tile4_sub3;3wt_tile5_sub3;3wt_tile6_sub3;3wt_tile7_sub3;3wt_tile8_sub3;3wt_tile9_sub2;3wt_tile10_sub2;3wt_tile11_sub2;3wt_tile12_sub2;3wt_tile13_sub2;3wt_tile14_sub2;3wt_tile15_sub2;3wt_tile16_sub2;3wt_tile17_sub2;3wt_tile18_sub2                                                                                                                                                                                                                                                 |
 | bsmbi_3wt_tile10_sub1      | 1620        | BsmBI       | 3wt_tile10_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | bsmbi_3wt_tile11_sub1      | 1419        | BsmBI       | 3wt_tile11_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -1480,18 +1685,18 @@ Gene blocks are synthesized once and reused across experiments.
 | bsmbi_3wt_tile16_sub1      | 594         | BsmBI       | 3wt_tile16_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | bsmbi_3wt_tile17_sub1      | 390         | BsmBI       | 3wt_tile17_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | bsmbi_3wt_tile18_sub1      | 180         | BsmBI       | 3wt_tile18_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsmbi_3wt_tile19_sub1      | 360         | BsmBI       | 3wt_tile19_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsmbi_3wt_tile19_sub2      | 34          | BsmBI       | 3wt_tile19_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsmbi_3wt_tile19_sub3      | 234         | BsmBI       | 3wt_tile19_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsmbi_3wt_tile19_sub1      | 342         | BsmBI       | 3wt_tile19_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsmbi_3wt_tile19_sub2      | 195         | BsmBI       | 3wt_tile19_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsmbi_3wt_tile19_sub3      | 72          | BsmBI       | 3wt_tile19_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | bsmbi_3wt_tile19_sub4      | 707         | BsmBI       | 3wt_tile19_sub4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | bsmbi_3wt_tile2_sub1       | 1389        | BsmBI       | 3wt_tile2_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | bsmbi_3wt_tile20_sub1      | 297         | BsmBI       | 3wt_tile20_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsmbi_3wt_tile20_sub2      | 342         | BsmBI       | 3wt_tile20_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsmbi_3wt_tile20_sub3      | 437         | BsmBI       | 3wt_tile20_sub3;3wt_tile21_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsmbi_3wt_tile21_sub1      | 456         | BsmBI       | 3wt_tile21_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsmbi_3wt_tile22_sub1      | 297         | BsmBI       | 3wt_tile22_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsmbi_3wt_tile22_sub2      | 34          | BsmBI       | 3wt_tile22_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| bsmbi_3wt_tile22_sub3      | 590         | BsmBI       | 3wt_tile22_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsmbi_3wt_tile20_sub2      | 129         | BsmBI       | 3wt_tile20_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsmbi_3wt_tile20_sub3      | 650         | BsmBI       | 3wt_tile20_sub3                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsmbi_3wt_tile21_sub1      | 303         | BsmBI       | 3wt_tile21_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsmbi_3wt_tile21_sub2      | 590         | BsmBI       | 3wt_tile21_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsmbi_3wt_tile22_sub1      | 342         | BsmBI       | 3wt_tile22_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| bsmbi_3wt_tile22_sub2      | 392         | BsmBI       | 3wt_tile22_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | bsmbi_3wt_tile23_sub1      | 129         | BsmBI       | 3wt_tile23_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | bsmbi_3wt_tile23_sub2      | 413         | BsmBI       | 3wt_tile23_sub2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | bsmbi_3wt_tile3_sub1       | 1185        | BsmBI       | 3wt_tile3_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -1500,7 +1705,6 @@ Gene blocks are synthesized once and reused across experiments.
 | bsmbi_3wt_tile6_sub1       | 573         | BsmBI       | 3wt_tile6_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | bsmbi_3wt_tile7_sub1       | 372         | BsmBI       | 3wt_tile7_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | bsmbi_3wt_tile8_sub1       | 165         | BsmBI       | 3wt_tile8_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| bsmbi_3wt_tile9_sub1       | 1794        | BsmBI       | 3wt_tile9_sub1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | bsmbi_cassette_tile1_sub4  | 1587        | BsmBI       | cassette_tile1_frag1;cassette_tile2_frag1;cassette_tile3_frag1;cassette_tile4_frag1;cassette_tile5_frag1;cassette_tile6_frag1;cassette_tile7_frag1;cassette_tile8_frag1;cassette_tile9_frag1;cassette_tile10_frag1;cassette_tile11_frag1;cassette_tile12_frag1;cassette_tile13_frag1;cassette_tile14_frag1;cassette_tile15_frag1;cassette_tile16_frag1;cassette_tile17_frag1;cassette_tile18_frag1;cassette_tile19_frag1;cassette_tile20_frag1;cassette_tile21_frag1;cassette_tile22_frag1;cassette_tile23_frag1;cassette_tile24_frag2 |
 | bsmbi_cassette_tile24_sub1 | 297         | BsmBI       | cassette_tile24_frag1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 

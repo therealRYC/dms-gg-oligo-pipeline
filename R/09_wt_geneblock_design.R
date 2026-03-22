@@ -1,5 +1,5 @@
 # Created: 2025-02-01
-# Last updated: 2026-03-19 — OOGGA compatibility check for sub-block junction overhangs
+# Last updated: 2026-03-20 — Add flag_borderline_overhangs() for near-miss detection
 # 09_wt_geneblock_design.R — Design WT gene blocks for 3-enzyme Golden Gate assembly
 # DMS Golden Gate Oligo Pipeline
 #
@@ -1340,6 +1340,83 @@ recompute_reaction_fidelity <- function(geneblock_result, assembly_plan) {
   }
 
   result <- do.call(rbind, reaction_fidelity)
+  rownames(result) <- NULL
+  result
+}
+
+
+#' Flag borderline overhang pairs within each reaction
+#'
+#' Scans all overhang pairs in each reaction for pairs with exactly
+#' max_identity positional matches (direct or RC). These pairs are
+#' technically allowed but represent the tightest margin before
+#' collision — useful for troubleshooting if a reaction underperforms.
+#'
+#' @param reaction_fidelity_df Data frame from recompute_reaction_fidelity(),
+#'   with columns: tile_id, reaction_type, overhangs (semicolon-separated)
+#' @param max_identity Integer, the OOGGA max_identity threshold used
+#'   during boundary selection. Pairs at exactly this level are flagged.
+#' @return Data frame with columns: tile_id, reaction_type, oh_a, oh_b,
+#'   identity, match_type ("direct" or "RC"). Empty if no borderline pairs.
+flag_borderline_overhangs <- function(reaction_fidelity_df, max_identity) {
+  if (is.null(reaction_fidelity_df) || nrow(reaction_fidelity_df) == 0) {
+    return(data.frame(
+      tile_id = integer(0), reaction_type = character(0),
+      oh_a = character(0), oh_b = character(0),
+      identity = integer(0), match_type = character(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  flagged <- list()
+
+  for (r in seq_len(nrow(reaction_fidelity_df))) {
+    row <- reaction_fidelity_df[r, ]
+    ohs <- strsplit(row$overhangs, ";")[[1]]
+    if (length(ohs) < 2L) next
+
+    # Check all unique pairs
+    for (i in seq_len(length(ohs) - 1L)) {
+      for (j in (i + 1L):length(ohs)) {
+        oh_a <- ohs[i]
+        oh_b <- ohs[j]
+
+        # Direct identity
+        direct_id <- count_positional_identity(oh_a, oh_b)
+        if (direct_id == max_identity) {
+          flagged[[length(flagged) + 1L]] <- data.frame(
+            tile_id = row$tile_id, reaction_type = row$reaction_type,
+            oh_a = oh_a, oh_b = oh_b,
+            identity = direct_id, match_type = "direct",
+            stringsAsFactors = FALSE
+          )
+        }
+
+        # RC identity: oh_a vs RC(oh_b)
+        rc_b <- reverse_complement(oh_b)
+        rc_id <- count_positional_identity(oh_a, rc_b)
+        if (rc_id == max_identity) {
+          flagged[[length(flagged) + 1L]] <- data.frame(
+            tile_id = row$tile_id, reaction_type = row$reaction_type,
+            oh_a = oh_a, oh_b = paste0(oh_b, " (RC: ", rc_b, ")"),
+            identity = rc_id, match_type = "RC",
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+    }
+  }
+
+  if (length(flagged) == 0L) {
+    return(data.frame(
+      tile_id = integer(0), reaction_type = character(0),
+      oh_a = character(0), oh_b = character(0),
+      identity = integer(0), match_type = character(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  result <- do.call(rbind, flagged)
   rownames(result) <- NULL
   result
 }

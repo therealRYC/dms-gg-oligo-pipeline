@@ -1,5 +1,5 @@
 <!-- Created: 2026-03-07 -->
-<!-- Last updated: 2026-03-18 — Entries 46-53: oh_L/upstream_cassette, barcode filters, flanking pads, strict GG verifier -->
+<!-- Last updated: 2026-03-21 — Entry 54: oh2 clamp fix + borderline overhang flagging -->
 
 # Lab Notebook — DMS GG Oligo Pipeline
 
@@ -56,6 +56,8 @@ R pipeline for designing oligonucleotide pools for Deep Mutational Scanning (DMS
 | 2026-03-08 | Drop tile MC from production pipeline | Benchmarking: tile MC = DP v2 on 2/3 genes, degraded TRIO; 500-900s wasted | Entry 24 |
 | 2026-03-08 | Document & shelve convergent U6T7 tornado design | Promising but needs wet-lab validation; current pipeline working; can add as config toggle later | Entry 25 |
 | 2026-03-08 | Re-evaluate DP vs MC tile boundaries with corrected metrics | Previous comparison invalidated by missing cassette OHs + blacklist filters | Entry 26 |
+| 2026-03-21 | Fix oh2 clamp: cap with n_codons_cds, not n_codons | Last-of-segment tiles extracted oh2 at wrong position; SB DP validated different 4-mer than tile DP used | Entry 54 |
+| 2026-03-21 | Borderline overhang flagging (informational) | Near-miss pairs at exactly max_identity give researchers troubleshooting visibility | Entry 54 |
 | 2026-03-08 | Keep DP (dp_v2) for tile boundaries, discard tile MC | MC never improved beyond dp_v2 initial solution, 1.8-2.8x slower, failed on TRIO | Entry 26 |
 | 2026-03-15 | User-specified oh_L (required), no default | oh_L depends on helper plasmid; CACC collides with oh3; user must choose | Entry 46 |
 | 2026-03-15 | Move oh_L upstream of ATG to free codon 2 | Previously oh1=CDS[1:4] locked codon 2's first nt inside the overhang | Entry 46 |
@@ -2089,3 +2091,52 @@ BsaI—oh_L—[upstream_cassette]—ATG—[codons 2+]—oh2—BsmBI—oh3—bc�
 **Next steps**:
 - Run full pipeline on GRIN2A/AKAP11/TRIO with a real oh_L value to verify end-to-end
 - Merge branch to main after verification
+
+---
+
+### 2026-03-21 22:29 — Fix oh2 clamp bug + borderline overhang flagging (Entry 54)
+
+**Type**: completion
+**Status**: completed
+**Tags**: [bugfix, oogga, overhang, tile-dp, superblock, qc]
+
+**Goal**: Fix a bug where last-of-segment tiles extracted oh2 at the segment boundary instead of the overlap-extended position, and add borderline overhang pair flagging for researcher visibility.
+
+**Approach**: The root cause was a single `pmin()` call in `search_tile_boundaries_oogga()` that capped the last tile's `end_codon` at `n_codons` (segment boundary) instead of `n_codons_cds` (extended CDS length). For non-last segments, the SB DP validated a 4-mer at `n_codons + overlap_codons`, but the tile DP extracted oh2 at `n_codons` — a different position. Fix: replace `pmin(..., n_codons)` with `pmin(..., n_codons_cds)`. Added a new `flag_borderline_overhangs()` function to scan reactions for overhang pairs at exactly `max_identity` threshold.
+
+**What was done**:
+- 1-line fix in `R/06b_oogga_dp.R:1067`: `pmin(c(boundaries + overlap_codons, n_codons + overlap_codons), n_codons_cds)`
+- Updated comments at all 3 oh2 extraction sites (lines ~1105, ~1385 in `06b_oogga_dp.R`)
+- New `flag_borderline_overhangs()` in `R/09_wt_geneblock_design.R`
+- Pipeline integration in `run_pipeline.R` (Step 9c, after reaction fidelity recomputation)
+- New `report_borderline_overhangs()` in `R/12_report.R` (Section 5c)
+- 4 regression tests in `tests/testthat/test-oogga-dp.R`
+- Regenerated all 4 Example Genes
+
+**What worked well**:
+- `n_codons_cds` already existed and encoded exactly the right cap for both segment types — no conditional logic needed
+- The borderline flagging was straightforward since `count_positional_identity()` and `reverse_complement()` were already available
+
+**Bugs & fixes**:
+| Bug | Root Cause | Final Solution |
+|-----|-----------|----------------|
+| TRIO tile 42 had CTCC (3/4 identity with oh3=CACC) — unvalidated collision | `pmin(..., n_codons)` capped last tile at segment boundary; SB DP validated CGAG at codon 2534, tile DP extracted CTCC at codon 2530 | Replace cap with `n_codons_cds`; CTCC eliminated from TRIO assembly |
+
+**Key decisions**:
+- Fix oh2 clamp with `n_codons_cds` cap (over conditional `if (is_last_segment)` logic): single expression handles both cases
+- Borderline flagging is informational only (over blocking): near-miss pairs are technically valid; flagging gives troubleshooting visibility without changing assembly
+
+**Artifacts**:
+- `R/06b_oogga_dp.R` — 1-line fix + comment updates
+- `R/09_wt_geneblock_design.R` — `flag_borderline_overhangs()`
+- `R/12_report.R` — `report_borderline_overhangs()` (Section 5c)
+- `run_pipeline.R` — Step 9c integration
+- `tests/testthat/test-oogga-dp.R` — 4 regression tests
+
+**Related commits**:
+- `e6ed022` — fix: Correct oh2 clamp for last-of-segment tiles in OOGGA tile DP
+- `a6f3b21` — feat: Add borderline overhang pair flagging
+- `d3a27bd` — test: Add regression tests for oh2 clamp fix and borderline flagging
+- `3b2843c` — examples: Regenerate all 4 Example Genes with oh2 clamp fix
+
+**Verification**: 4999/5000 tests pass (1 pre-existing oh_L config validation failure). All 4 Example Genes regenerated successfully. TRIO tile 42 CTCC collision eliminated. PR #48 opened.
