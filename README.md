@@ -72,7 +72,7 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `oh_L` | *(required)* | 4-nt BsaI overhang at the 5' gene junction (upstream of ATG). **Must match your helper plasmid.** |
+| `oh_L` | `"auto"` | 4-nt BsaI overhang at the 5' gene junction (upstream of ATG). Auto-selected by fidelity scoring if not specified. Set manually to match your helper plasmid. |
 | `upstream_cassette` | `""` | DNA sequence between oh_L and ATG (e.g., `"CC"` for partial Kozak). Leave empty if oh_L directly abuts ATG. |
 | `max_oligo_length` | 300 | Twist oligo pool maximum (nt) |
 | `max_geneblock_length` | 1800 | Gene fragment synthesis maximum (nt) |
@@ -90,24 +90,28 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 | `barcode_filter_polyg` | `false` | Reject barcodes with poly-G runs > 2 |
 | `barcode_filter_tm_uniformity` | `false` | Reject barcodes with Tm > 2°C from median |
 | `boundary_method` | `"oogga_two_pass"` | OOGGA collision-aware two-pass DP (only supported method) |
+| `oogga_max_identity` | 2 | Max positional identity (out of 4) between overhang pairs before collision rejection |
+| `oogga_beam_width` | 10 | Beam search width for SB boundary DP (higher = more exploration, slower) |
+| `overlap_codons` | 6 | Number of codons of overlap between adjacent tiles at boundaries (must be even, >= 2) |
+| `min_geneblock_length` | 300 | Minimum gene block length (nt) to avoid synthesis issues |
 | `multi_k_search` | `true` | Try multiple tile counts to find best overhang quality |
 | `dp_k_range` | 5 | Search K_ideal +/- this many tile counts |
-| `paqci_star2` | *(required)* | 4-nt PaqCI overhang at the 5' end of the insert (PaqCI\*\*). **Must match your destination vector.** |
-| `paqci_star1` | *(required)* | 4-nt PaqCI overhang at the 3' end of the insert (PaqCI\*). **Must match your destination vector.** |
+| `paqci_star2` | `"auto"` | 4-nt PaqCI overhang at the 5' end of the insert (PaqCI\*\*). Auto-selected by fidelity scoring if not specified. Set manually to match your destination vector. |
+| `paqci_star1` | `"auto"` | 4-nt PaqCI overhang at the 3' end of the insert (PaqCI\*). Auto-selected by fidelity scoring if not specified. Set manually to match your destination vector. |
 | `auto_domesticate` | `true` | Automatically apply silent mutations to remove enzyme sites |
 | `simulate_assembly` | `true` | Run in-silico GG assembly simulation after design. Uses targeted junctional sampling (boundary-vulnerable variants) + strict nucleotide-level verification. |
 | `simulation_samples_per_tile` | 1 | Additional random variants per tile beyond the targeted junctional samples (overlap_codons/2 variants from each boundary) |
 | `include_synonymous` | `false` | Boolean (`true`/`false`). When `true`, adds one synonymous variant per position using the highest-frequency alternative codon for the same amino acid. Met and Trp positions are skipped (only one codon each). |
 
-**oh_L overhang**: The `oh_L` parameter has no meaningful default — it is the BsaI overhang at the 5' gene junction, determined by your helper plasmid design. Placing oh_L upstream of the start codon (ATG) frees codon 2 for full mutagenesis. The pipeline will error if left as `"NNNN"`. Note: `CACC` (a natural Kozak choice) collides with oh3 derived from the U6 promoter ending `...CACCG` — choose oh_L based on your specific plasmid.
+**oh_L overhang**: The `oh_L` parameter defaults to `"auto"`, which auto-selects a high-fidelity BsaI overhang. Set it manually if your helper plasmid requires a specific overhang at the 5' gene junction. Placing oh_L upstream of the start codon (ATG) frees codon 2 for full mutagenesis. Note: `CACC` (a natural Kozak choice) collides with oh3 derived from the U6 promoter ending `...CACCG` — choose oh_L based on your specific plasmid.
 
 **oh3 auto-derivation**: The BsmBI overhang at the PolIII-barcode junction (oh3) is automatically derived from the last 4 nucleotides of the PolIII promoter (before the terminal base). For the default U6 promoter ending `...CACCG`, oh3 = `CACC`. If you provide a different PolIII promoter, oh3 adapts accordingly. If the derived oh3 is a homopolymer (e.g., `AAAA`) or palindromic, the pipeline falls back to score-based selection from the BsmBI fidelity data. You can also override oh3 manually via `manual_oh3` in the config.
 
-**PaqCI overhangs**: The `paqci_star2` and `paqci_star1` parameters have no meaningful default — they are determined by the PaqCI sites flanking the cloning site in your destination backbone. The pipeline will error if these are left as the placeholder `"NNNN"`. The values in the example configs (`AATG`/`GCTA`) are arbitrary and should be replaced with the overhangs from your specific vector.
+**PaqCI overhangs**: The `paqci_star2` and `paqci_star1` parameters default to `"auto"`, which auto-selects high-fidelity PaqCI overhangs. Set them manually if your destination backbone requires specific PaqCI overhangs at the cloning site.
 
 ## Outputs
 
-The pipeline writes up to 11 files to the output directory (all prefixed with the gene name):
+The pipeline writes up to 12 files to the output directory (all prefixed with the gene name):
 
 | File | Description |
 |------|-------------|
@@ -121,6 +125,7 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 | `<gene>_geneblock_order.fasta` | Gene blocks in FASTA format |
 | `<gene>_sequences.fasta` | Original CDS, domesticated CDS, and protein sequence |
 | `<gene>_skipped_variants.csv` | Gene-edge variants excluded due to partial overhang overlap (if any) |
+| `<gene>_pcr_primer_table.csv` | Per-tile PCR handle pairs with reverse primer to order (only when `pcr_handles` configured) |
 | `<gene>_assembly_report.md` | Wetlab-compatible Markdown report with per-tile assembly guides |
 
 ## Pipeline Steps
@@ -130,10 +135,13 @@ The pipeline writes up to 11 files to the output directory (all prefixed with th
 3. **Enzyme site scan** (`02_enzyme_site_scan.R`) -- Find endogenous BsaI/BsmBI/PaqCI sites, suggest silent mutations for domestication
 4. **Codon table** (`03_codon_table.R`) -- Human codon usage table, preferred codon lookup
 5. **Mutation design** (`04_mutation_design.R`) -- Generate 19 missense + 1 nonsense + 1 WT control per position (+ optional synonymous) using preferred human codons
-6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R`) -- Reaction-aware boundary optimization: SB boundaries placed first via simulated annealing MC (maximizing min set fidelity across all reactions), then tile boundaries within SB segments via max-min DP + joint refinement; oh3/oh4 auto-selection by score ranking; user-specified oh_L + upstream_cassette; oh_R cassette search extends last tile into downstream cassette for stop codon mutability
+5.5. **Auto-size barcode** (`07_barcode_design.R`, conditional) -- When `barcode_length = "auto"`, compute the minimum barcode length needed for the variant count and barcodes_per_variant before tiling (barcode length affects oligo budget)
+6. **Assembly planning** (`05_tiling.R` + `06_overhang_selection.R` + `06b_oogga_dp.R`) -- Reaction-aware boundary optimization: SB boundaries placed first via collision-aware beam search DP (maximizing min set fidelity across all reactions), then tile boundaries within SB segments via per-segment Bellman DP with enzyme-aware alien sets (BsaI and BsmBI pots separated); oh3/oh4 auto-selection by score ranking; user-specified or auto-selected oh_L + upstream_cassette; oh_R cassette search extends last tile into downstream cassette for stop codon mutability
 7. **Barcode design** (`07_barcode_design.R`) -- Unified hierarchical prefix-suffix barcodes with Hamming distance guarantee on prefixes; optional enhanced filters (GGC motif, hairpin, dinucleotide repeats, poly-G, Tm uniformity)
 8. **Oligo assembly** (`08_oligo_assembly.R`) -- Build complete oligo sequences (universal structure for all tiles; last tile includes invariant cassette prefix from oh_R extension; optional per-tile PCR handles for pooled amplification)
 9. **Gene block design** (`09_wt_geneblock_design.R`) -- WT gene blocks with flanking pads for efficient Type IIs cleavage; superblock splitting for fragments >1800 bp
+9b. **Recompute reaction fidelity** (`09_wt_geneblock_design.R`) -- Recalculate set fidelity from actual block overhangs (removes phantom overhangs from filtered split points)
+9c. **Borderline overhang flagging** (`09_wt_geneblock_design.R`) -- Flag overhang pairs at exactly max_identity threshold for researcher visibility
 10. **QC** (`10_qc_checks.R`) -- Validates oligo lengths, enzyme site absence, barcode uniqueness, tile coverage, gene block sizes, PCR handle integrity, enhanced barcode filter compliance
 10b. **In-silico GG simulation** (`13_gg_simulator.R`, optional) -- Simulates BsaI + BsmBI digestion and ligation with targeted junctional sampling; strict nucleotide-level verification of assembled products
 11. **Output** (`11_output.R`) -- Write CSV and FASTA files (including skipped gene-edge variants)
@@ -194,9 +202,14 @@ dms-gg-oligo-pipeline/
 │   ├── AKAP11_NM_016248_CDS.fasta
 │   ├── TRIO_NM_007118_CDS.fasta
 │   └── SLC6A1_NM_003042_CDS.fasta
-├── tests/testthat/             # Unit + integration tests (~5300 tests)
+├── tests/testthat/             # Unit + integration tests (~4999 tests)
+├── data-raw/                   # Scripts to generate bundled data files (e.g., generate_data.R)
+├── Example Genes/              # Pre-generated pipeline outputs for validated genes (GRIN2A, AKAP11, TRIO, etc.)
+├── scripts/                    # Utility and benchmarking scripts (bench_k_handling.R, oogga_golden_reference.py)
+├── Brainstorm/                 # Research session write-ups
+├── Plans/                      # Feature plans and design documents
 ├── archive/                    # Superseded plans, old configs, helper scripts
-├── NOTEBOOK.md                 # Lab notebook (46 entries, Jan 29 - Mar 15)
+├── NOTEBOOK.md                 # Lab notebook (54 entries, Jan 29 - Mar 21)
 ├── BUGS.md                     # Known bugs and status tracking
 ├── DESCRIPTION                 # R package metadata
 ├── CLAUDE.md                   # Detailed project context and design rationale
@@ -228,7 +241,7 @@ The pipeline has been validated on three genes of increasing size plus a cassett
 | TRIO | NM_007118 | 3,098 | `configs/trio.yaml` | Large gene, stress-tests superblock splitting |
 | GRIN2A + P2A-EGFP | NM_000833 | 1,465 | `configs/grin2a_long_cassette.yaml` | Cassette splitting test (1881 nt cassette) |
 
-Pre-built configs are in `configs/`. Each config requires the user to set `oh_L` to their helper plasmid's BsaI overhang (default `TGAA` for testing) and `paqci_star2`/`paqci_star1` to their destination vector's PaqCI overhangs.
+Pre-built configs are in `configs/`. All three overhangs (`oh_L`, `paqci_star2`, `paqci_star1`) default to `"auto"` for auto-selection. Set them manually if your plasmids require specific overhangs.
 
 The GRIN2A + P2A-EGFP test case (`configs/grin2a_long_cassette.yaml`) validates cassette splitting: the downstream cassette (P2A-EGFP + WPRE + spacer + bGH polyA = 1881 nt) exceeds the 1778 nt cassette block synthesis limit and is automatically split into 2 BsmBI-connected fragments.
 
@@ -261,7 +274,7 @@ The `data/neb_overhang_fidelity/` directory contains enzyme-specific ligation fi
 | `bsmbi_overhangs.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | Individual fidelity for all 256 4-nt overhangs |
 | `bsmbi_pairwise.rds` | Pryor et al. 2020 | BsmBI, 42°C/16°C cycling | 256x256 pairwise ligation matrix |
 
-The pipeline uses enzyme-specific cycling data (not T4 ligase static data) because it matches the actual Golden Gate assembly conditions. The Potapov 2018 Table 1 Set 3 (25 SA-optimized overhangs, 95.8% set fidelity) is hard-coded in `R/06_overhang_selection.R` as `POTAPOV_TABLE1_SET3_25` for informational overlap checking — no RDS file needed.
+The pipeline uses enzyme-specific cycling data (not T4 ligase static data) because it matches the actual Golden Gate assembly conditions.
 
 **Overhang scoring formula**: `Score = P_fid(oh) * P_eff(oh)`, where both metrics come from the BsmBI cycling matrix (Pryor et al. 2020). P_fid measures ligation accuracy (fraction of correct pairings) and P_eff measures relative ligation yield (correct count vs. best overhang).
 
