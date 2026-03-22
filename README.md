@@ -72,40 +72,63 @@ See `config_template.yaml` for all parameters with annotations. Key settings:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| **Gene Input** | | |
+| `gene_fasta` | *(required)* | Path to FASTA file with coding sequence. Provide this OR `gene_cds` (not both). |
+| `gene_cds` | *(required)* | CDS as a raw DNA string (ACGT only, divisible by 3). Provide this OR `gene_fasta` (not both). |
+| `gene_name` | *(auto)* | Short name for output file prefixes. If omitted, auto-extracted from the FASTA header first token. |
+| `polIII_promoter` | *(required)* | PolIII promoter sequence (e.g., U6 with internal T7) placed between gene and barcode. |
+| `intergene_elements` | *(none)* | List of `{name, sequence}` elements placed between gene 3' end and PolIII promoter (e.g., WPRE, bGH polyA). Omit for PolIII directly after gene. |
+| `codon_table_path` | *(built-in)* | Path to custom codon usage table (.csv or .rds). Default uses CoCoPUTs human table (Alexaki et al. 2019). |
+| **Overhangs** | | |
 | `oh_L` | `"auto"` | 4-nt BsaI overhang at the 5' gene junction (upstream of ATG). Auto-selected by fidelity scoring if not specified. Set manually to match your helper plasmid. |
 | `upstream_cassette` | `""` | DNA sequence between oh_L and ATG (e.g., `"CC"` for partial Kozak). Leave empty if oh_L directly abuts ATG. |
+| `oh3` | *(auto-derived)* | 4-nt BsmBI overhang at PolIII-barcode junction. Auto-derived from PolIII promoter 3' end. Override to force a specific overhang. |
+| `oh4` | `"auto"` | 4-nt BsaI overhang at barcode-helper plasmid junction. Auto-selected as a pair with oh_L for BsaI set fidelity. |
+| `paqci_star2` | `"auto"` | 4-nt PaqCI overhang at the 5' end of the insert (PaqCI\*\*). Auto-selected by fidelity scoring if not specified. Set manually to match your destination vector. |
+| `paqci_star1` | `"auto"` | 4-nt PaqCI overhang at the 3' end of the insert (PaqCI\*). Auto-selected by fidelity scoring if not specified. Set manually to match your destination vector. |
+| **Synthesis Limits** | | |
 | `max_oligo_length` | 300 | Twist oligo pool maximum (nt) |
 | `max_geneblock_length` | 1800 | Gene fragment synthesis maximum (nt) |
+| `min_geneblock_length` | 300 | Minimum gene block length (nt) to avoid synthesis issues |
 | `geneblock_flanking_pad` | `"TGCATG"` | Flanking bases beyond enzyme sites on gene blocks for efficient Type IIs cleavage. Set to `""` to disable. |
-| `pcr_handles` | *(none)* | Path to CSV file with per-tile PCR handle pairs (`fwd,rev` columns, both written 5'→3'). The `rev` handle is appended directly to the oligo 3' end as-is (not reverse-complemented). To order the reverse primer, take the RC of the `rev` column. Omit for single-pool-per-tile ordering. |
+| `pcr_handles` | *(none)* | Path to CSV file with per-tile PCR handle pairs (`fwd,rev` columns, both written 5'->3'). The `rev` handle is appended directly to the oligo 3' end as-is (not reverse-complemented). To order the reverse primer, take the RC of the `rev` column. Omit for single-pool-per-tile ordering. |
+| **Barcode Design** | | |
 | `barcode_length` | 20 | Total barcode length (nt); set to `"auto"` for auto-sizing |
 | `barcode_prefix_length` | 12 | Prefix length for Hamming-constrained region (nt) |
 | `min_hamming_distance` | 3 | Minimum Hamming distance between variant prefixes |
 | `barcodes_per_variant` | 10 | Number of unique barcodes per variant |
 | `barcode_gc_range` | [0.35, 0.65] | Acceptable GC content range for barcodes |
 | `barcode_max_homopolymer` | 4 | Maximum homopolymer run length in barcodes |
-| `barcode_filter_hairpin` | `true` | Reject barcodes with hairpin stems > 3 bp |
-| `barcode_filter_dinuc_repeats` | `true` | Reject barcodes with dinucleotide repeats > 4 units |
+| `barcode_filter_hairpin` | `true` | Reject barcodes with hairpin stems exceeding `barcode_max_hairpin_stem` |
+| `barcode_max_hairpin_stem` | 3 | Max hairpin stem length (bp) before rejection (stems > this are filtered) |
+| `barcode_filter_dinuc_repeats` | `true` | Reject barcodes with dinucleotide repeats exceeding `barcode_max_dinuc_repeat_units` |
+| `barcode_max_dinuc_repeat_units` | 4 | Max dinucleotide repeat units allowed (e.g., 4 = ACACACAC OK, 5 = rejected) |
 | `barcode_filter_ggc` | `false` | Reject barcodes containing GGC (Illumina error hotspot) |
-| `barcode_filter_polyg` | `false` | Reject barcodes with poly-G runs > 2 |
-| `barcode_filter_tm_uniformity` | `false` | Reject barcodes with Tm > 2°C from median |
+| `barcode_filter_polyg` | `false` | Reject barcodes with poly-G runs exceeding `barcode_max_polyg` |
+| `barcode_max_polyg` | 2 | Max consecutive G's when poly-G filter is enabled (2 = GGG rejected, GG OK) |
+| `barcode_filter_tm_uniformity` | `false` | Reject barcodes with Tm outside `barcode_tm_tolerance` of set median |
+| `barcode_tm_tolerance` | 2.0 | Tm tolerance in degrees C (barcodes outside median +/- this are replaced) |
+| **Tile Boundary Optimization** | | |
 | `boundary_method` | `"oogga_two_pass"` | OOGGA collision-aware two-pass DP (only supported method) |
-| `oogga_max_identity` | 2 | Max positional identity (out of 4) between overhang pairs before collision rejection |
-| `oogga_beam_width` | 10 | Beam search width for SB boundary DP (higher = more exploration, slower) |
 | `overlap_codons` | 6 | Number of codons of overlap between adjacent tiles at boundaries (must be even, >= 2) |
-| `min_geneblock_length` | 300 | Minimum gene block length (nt) to avoid synthesis issues |
 | `multi_k_search` | `true` | Try multiple tile counts to find best overhang quality |
 | `dp_k_range` | 5 | Search K_ideal +/- this many tile counts |
-| `paqci_star2` | `"auto"` | 4-nt PaqCI overhang at the 5' end of the insert (PaqCI\*\*). Auto-selected by fidelity scoring if not specified. Set manually to match your destination vector. |
-| `paqci_star1` | `"auto"` | 4-nt PaqCI overhang at the 3' end of the insert (PaqCI\*). Auto-selected by fidelity scoring if not specified. Set manually to match your destination vector. |
+| `search_window_K` | 15 | Codon search window around ideal tile boundaries for overhang quality optimization |
+| `oogga_max_identity` | 2 | Max positional identity (out of 4) between overhang pairs before collision rejection |
+| `oogga_beam_width` | 10 | Beam search width for SB boundary DP (higher = more exploration, slower) |
+| **Variant Controls** | | |
+| `include_synonymous` | `false` | When `true`, adds one synonymous variant per position using the highest-frequency alternative codon. Met and Trp positions are skipped. |
 | `auto_domesticate` | `true` | Automatically apply silent mutations to remove enzyme sites |
+| **Assembly Simulation** | | |
 | `simulate_assembly` | `true` | Run in-silico GG assembly simulation after design. Uses targeted junctional sampling (boundary-vulnerable variants) + strict nucleotide-level verification. |
 | `simulation_samples_per_tile` | 1 | Additional random variants per tile beyond the targeted junctional samples (overlap_codons/2 variants from each boundary) |
-| `include_synonymous` | `false` | Boolean (`true`/`false`). When `true`, adds one synonymous variant per position using the highest-frequency alternative codon for the same amino acid. Met and Trp positions are skipped (only one codon each). |
+| **Output / Debug** | | |
+| `output_dir` | `"output"` | Directory for output files |
+| `verbose_timing` | `false` | Print per-step timing information to console (useful for profiling large genes) |
 
 **oh_L overhang**: The `oh_L` parameter defaults to `"auto"`, which auto-selects a high-fidelity BsaI overhang. Set it manually if your helper plasmid requires a specific overhang at the 5' gene junction. Placing oh_L upstream of the start codon (ATG) frees codon 2 for full mutagenesis. Note: `CACC` (a natural Kozak choice) collides with oh3 derived from the U6 promoter ending `...CACCG` — choose oh_L based on your specific plasmid.
 
-**oh3 auto-derivation**: The BsmBI overhang at the PolIII-barcode junction (oh3) is automatically derived from the last 4 nucleotides of the PolIII promoter (before the terminal base). For the default U6 promoter ending `...CACCG`, oh3 = `CACC`. If you provide a different PolIII promoter, oh3 adapts accordingly. If the derived oh3 is a homopolymer (e.g., `AAAA`) or palindromic, the pipeline falls back to score-based selection from the BsmBI fidelity data. You can also override oh3 manually via `manual_oh3` in the config.
+**oh3 auto-derivation**: The BsmBI overhang at the PolIII-barcode junction (oh3) is automatically derived from the last 4 nucleotides of the PolIII promoter (before the terminal base). For the default U6 promoter ending `...CACCG`, oh3 = `CACC`. If you provide a different PolIII promoter, oh3 adapts accordingly. If the derived oh3 is a homopolymer (e.g., `AAAA`) or palindromic, the pipeline falls back to score-based selection from the BsmBI fidelity data. You can also override oh3 manually via `oh3` in the config.
 
 **PaqCI overhangs**: The `paqci_star2` and `paqci_star1` parameters default to `"auto"`, which auto-selects high-fidelity PaqCI overhangs. Set them manually if your destination backbone requires specific PaqCI overhangs at the cloning site.
 
